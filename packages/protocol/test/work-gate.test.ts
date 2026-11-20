@@ -2,7 +2,8 @@
 // 1x and 4x Nexus's own size (synthetic.ts). It measures the reads two ways: straight from the files (as the CLI, and
 // the server's readers not moved yet, read: recorded for comparison) and through the server's model of the files
 // (model.ts, docs/design/model.md), where its rules hold: one appended line reads that line (and the 64 bytes before
-// it); a request makes no whole read; the start reads the project once; the counts are the same at 1x and 4x.
+// it), and so do every decision's reads after it; a request makes no whole read; the start reads the project once; the
+// counts are the same at 1x and 4x.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -43,6 +44,20 @@ interface Model {
   eventLine: Line;
   /** A streaming agent's runtime record rewritten (its context tokens), then the state. */
   runtime: Line;
+  /** One event appended, then what every decision on the change reads (decisions below). */
+  decisions: Line;
+}
+
+/**
+ * What the server's decisions on a change read through its store (SM4): the state, once per decision that reads it (the
+ * routing, the merger, the deploy plan, the orchestrator, its review helpers, the engine, the coordinator's holders,
+ * the scheduler), each queue's own files, every session's files and logs, the ideas' hand-offs.
+ */
+function decisions(st: ProjectStore): void {
+  for (let i = 0; i < 8; i++) loadProjectState(st);
+  for (const q of st.queueIds()) { st.readRun(q); st.readGit(q); st.readChecks(q); st.readPlan(q); st.readStart(q); }
+  for (const s of st.sessionIds()) { st.readSession(s); st.readRuntime(s); st.readEvents(s); st.readApplied(s); st.readInbox(s); st.readDelivered(s); st.readRefusals(s); }
+  st.readIdeaHandoffs();
 }
 
 function conversationList(st: ProjectStore): void {
@@ -89,7 +104,12 @@ function measureAt(scale: number): { size: SyntheticSize; files: Files; model: M
       resetWork(); // the write's own read of the record before it is the writer's, not the model's
       model.current();
     });
-    return { size, files, model: { start, request, conversations, activityLine, eventLine, runtime } };
+    decisions(model.store); // what the decisions read is open: after this only a change is read
+    const decided = grew(join(dir, "events.jsonl"), () => {
+      st.appendEvent({ v: 1, id: newId(), at: "2026-11-20T10:00:02.000Z", session, type: "log", level: "info", text: "a line" } as Event);
+      decisions(model.store);
+    });
+    return { size, files, model: { start, request, conversations, activityLine, eventLine, runtime, decisions: decided } };
   } finally { model.close(); }
 }
 
@@ -109,6 +129,7 @@ test("the work of the reads at 1x and 4x: straight from the files, and through t
   t.diagnostic(row(`model: one activity line (${x1.model.activityLine.line} bytes)`, x1.model.activityLine, x4.model.activityLine));
   t.diagnostic(row(`model: one event line (${x1.model.eventLine.line} bytes)`, x1.model.eventLine, x4.model.eventLine));
   t.diagnostic(row("model: a runtime record rewritten", x1.model.runtime, x4.model.runtime));
+  t.diagnostic(row("model: an event, then every decision's reads", x1.model.decisions, x4.model.decisions));
   // Straight from the files, every change reads the whole project again, and the start once per queue.
   assert.equal(x1.files.start.rebuilds, x1.size.queues + 1);
   assert.equal(x4.files.start.rebuilds, x4.size.queues + 1);
@@ -128,10 +149,17 @@ test("rule: one appended event reads that line (and the 64 bytes before it), and
     assert.ok(m.eventLine.bytes <= m.eventLine.line + 64, `${m.eventLine.bytes} bytes read for a line of ${m.eventLine.line}`);
   }
 });
-test("rule: a rewritten runtime record is read alone, once", () => {
+test("rule: a rewritten runtime record is read once, and its session's events on from their position (SM4)", () => {
   for (const { model: m } of [x1, x4]) {
-    assert.equal(m.runtime.files, 1);
-    assert.ok(m.runtime.bytes <= m.runtime.line + 400, `${m.runtime.bytes} bytes read`);
+    // The record, and the 64 bytes before its session's events' position: an agent's last lines come before its end.
+    assert.equal(m.runtime.files, 2);
+    assert.ok(m.runtime.bytes <= m.runtime.line + 400 + 64, `${m.runtime.bytes} bytes read`);
+  }
+});
+test("rule: an event and every decision's reads after it read that line (and 64 bytes), and derive the state once (SM4)", () => {
+  for (const { model: m } of [x1, x4]) {
+    assert.equal(m.decisions.rebuilds, 1);
+    assert.ok(m.decisions.bytes <= m.decisions.line + 64, `${m.decisions.bytes} bytes read for a line of ${m.decisions.line}`);
   }
 });
 test("rule: the start reads the project once and derives its state once, at 1x and at 4x", () => {
@@ -145,9 +173,9 @@ test("rule: a request makes no read; the counts are the same at 1x and 4x", () =
     assert.deepEqual(m.request, { files: 0, bytes: 0, probes: 0, listings: 0, rebuilds: 0 });
     assert.deepEqual(m.conversations, { files: 0, bytes: 0, probes: 0, listings: 0, rebuilds: 0 });
   }
-  const same = (k: "activityLine" | "eventLine" | "runtime") => ({ ...x1.model[k], line: 0, bytes: x1.model[k].bytes - x1.model[k].line });
-  const at4 = (k: "activityLine" | "eventLine" | "runtime") => ({ ...x4.model[k], line: 0, bytes: x4.model[k].bytes - x4.model[k].line });
-  for (const k of ["activityLine", "eventLine", "runtime"] as const) assert.deepEqual(at4(k), same(k), k);
+  const same = (k: "activityLine" | "eventLine" | "runtime" | "decisions") => ({ ...x1.model[k], line: 0, bytes: x1.model[k].bytes - x1.model[k].line });
+  const at4 = (k: "activityLine" | "eventLine" | "runtime" | "decisions") => ({ ...x4.model[k], line: 0, bytes: x4.model[k].bytes - x4.model[k].line });
+  for (const k of ["activityLine", "eventLine", "runtime", "decisions"] as const) assert.deepEqual(at4(k), same(k), k);
 });
 
 /** Every file of a tree, by its path from the root, and a hash of its contents. */

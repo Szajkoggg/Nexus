@@ -1,8 +1,11 @@
 // The tests of a change while working on it (decided 2026-11-14, queue TS): only the files given, one after another,
 // stopping at the first failing test. The whole suite (npm test) runs at the step's end, as the queue's check.
 //
-//   npm run test:files -- <test file>... [--pattern TEXT]
-//   node scripts/test-files.mjs <test file>... [--pattern TEXT]
+//   npm run test:files -- <test file>... [--pattern TEXT] [--import MODULE]
+//   node scripts/test-files.mjs <test file>... [--pattern TEXT] [--import MODULE]
+//
+// --import loads a module before each file (node --import): ./apps/server/test/model-reads.ts runs the files' stores
+// through the server's model of the files (docs/design/model.md).
 //
 // Each file runs as `node --test <file>` with the spec reporter. At the first failing test the run is stopped (its
 // own process and what it started), the failure is shown and the exit code is 1; when all pass, 0. The environment
@@ -10,7 +13,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { parseArgs } from "node:util";
 
-const { values: o, positionals: files } = parseArgs({ allowPositionals: true, options: { pattern: { type: "string" } } });
+const { values: o, positionals: files } = parseArgs({ allowPositionals: true, options: { pattern: { type: "string" }, import: { type: "string" } } });
 if (!files.length) { console.error("usage: npm run test:files -- <test file>... [--pattern TEXT]"); process.exit(2); }
 const env = { ...process.env };
 delete env.NEXUS_HANDOVER; delete env.NEXUS_DIR; delete env.NEXUS_SESSION;
@@ -24,7 +27,7 @@ function stop(child) {
 
 /** Runs one file; resolves with the first failing test's name, or undefined when all passed. */
 const run = (file) => new Promise((resolve) => {
-  const args = ["--test", "--test-reporter=spec", ...(o.pattern ? [`--test-name-pattern=${o.pattern}`] : []), file];
+  const args = [...(o.import ? ["--import", o.import] : []), "--test", "--test-reporter=spec", ...(o.pattern ? [`--test-name-pattern=${o.pattern}`] : []), file];
   const child = spawn(process.execPath, args, { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: process.platform !== "win32" });
   let failed, buffer = "", code;
   const read = (d) => {

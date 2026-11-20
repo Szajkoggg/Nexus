@@ -6,7 +6,8 @@ import { dirname, resolve } from "node:path";
 import type { z } from "zod";
 import { clockMark, observe } from "./clock.ts";
 import { ProjectStore, countWork, nexusHome, onWrite, parseJsonlLines, type JsonlRead, type Reader } from "./store.ts";
-import { loadProjectState, type ProjectState } from "./state.ts";
+import { deriveProjectState, type ProjectState } from "./state.ts";
+import { templatesStamp } from "./templates.ts";
 
 /** A path as the model keys it: absolute, forward slashes, lower case on Windows (its file names ignore case). */
 function fileKey(p: string): string {
@@ -61,10 +62,21 @@ export class FileCache implements Reader {
   private readonly unhook: () => void;
 
   private readonly logOnly: (key: string) => boolean;
+  /** The state derived from these files, when a model owns the cache (Reader.state). */
+  state?: () => ProjectState;
+  /**
+   * Logs another process appends to now (a running agent's events): each read of one first looks whether it grew,
+   * not waiting for the watcher, as a read of the file would see it.
+   */
+  live?: (key: string) => boolean;
 
-  constructor(dir: string, logOnly: (key: string) => boolean = () => false) {
+  /** A file whose change means another may have changed unreported too (`linked`: that one's key), read on when asked. */
+  private readonly linked: (key: string) => string | undefined;
+
+  constructor(dir: string, logOnly: (key: string) => boolean = () => false, linked: (key: string) => string | undefined = () => undefined) {
     this.root = fileKey(dir);
     this.logOnly = logOnly;
+    this.linked = linked;
     this.unhook = onWrite((f) => this.touched(f));
   }
 
@@ -80,9 +92,14 @@ export class FileCache implements Reader {
     this.present.delete(k);
     const log = this.logs.get(k);
     if (log) log.dirty = true;
-    // A folder made or gone: its listing and those of the folders above it.
+    const other = this.linked(k);
+    const otherLog = other && this.logs.get(other);
+    if (otherLog) otherLog.dirty = true;
+    // A folder made or gone: its listing and those of the folders above it, and whether each exists (a write may make
+    // the folders it lies in).
     for (let d = k; d.length >= this.root.length; d = dirname(d)) {
       this.listings.delete(d);
+      this.present.delete(d);
       if (d === this.root) break;
     }
     // A folder gone: everything kept under it.
@@ -132,6 +149,7 @@ export class FileCache implements Reader {
     const k = fileKey(file);
     let log = this.logs.get(k);
     if (log && log.schema !== schema) log = undefined;
+    if (log && !log.dirty && this.live?.(k) && this.grew(log)) { log.dirty = true; if (!this.logOnly(k)) this.version++; }
     if (!log) {
       log = { file, schema, read: { entries: [], lines: [], errors: [] }, pos: 0, lines: 0, seen: 0, guard: Buffer.alloc(0), ino: 0n, ahead: [], dirty: true };
       this.logs.set(k, log);
@@ -252,6 +270,11 @@ function taken(ahead: string[]): string[] {
 /** A session's logs that only show what an agent did: no state is derived from them (docs/design/model.md). */
 const LOG_ONLY = /\/sessions\/[^/]+\/(activity\.jsonl|chat\.jsonl|refusals\.jsonl|pins\.json)$/;
 export const isLogOnly = (path: string): boolean => LOG_ONLY.test(fileKey(path));
+/**
+ * A session's runtime record changed (its agent started, reported, ended): its events are read on at the next read.
+ * An agent's last lines are written before its end is recorded, and the watcher may not have reported them yet.
+ */
+const eventsOfRuntime = (key: string): string | undefined => /\/sessions\/[^/]+\/runtime\.json$/.test(key) ? `${key.slice(0, -"runtime.json".length)}events.jsonl` : undefined;
 
 /**
  * A project's model: its store reading from memory, and its state derived once per version. Before the state is read,
@@ -261,40 +284,66 @@ export const isLogOnly = (path: string): boolean => LOG_ONLY.test(fileKey(path))
 export class ProjectModel {
   readonly cache: FileCache;
   readonly store: ProjectStore;
-  private state?: { version: number; value: ProjectState };
-  private live?: { version: number; files: string[] };
+  /** The state, the version it was derived at, and the templates it read (while the project has recurring queues). */
+  private state?: { version: number; value: ProjectState; templates?: string };
+  private live?: { version: number; files: string[]; keys: Set<string> };
   private readonly volatile?: () => readonly string[];
   private readonly unhook: () => void;
 
   constructor(nexusDir: string, o: { volatile?: () => readonly string[] } = {}) {
-    this.cache = new FileCache(nexusDir, isLogOnly);
+    this.cache = new FileCache(nexusDir, isLogOnly, eventsOfRuntime);
     this.store = new ProjectStore(nexusDir, this.cache);
     this.volatile = o.volatile;
+    this.cache.state = () => this.current();
+    this.cache.live = (k) => this.liveLogs().keys.has(k);
     // The global settings and the away mode are part of every project's state.
     const home = new Set(["settings.yaml", "away.yaml"].map((f) => fileKey(`${nexusHome()}/${f}`)));
     this.unhook = onWrite((f) => { if (home.has(fileKey(f))) this.changed(); });
   }
 
-  /** The logs read on before each read of the state. */
-  private liveLogs(): string[] {
-    if (this.volatile) return this.volatile().map((s) => `${this.store.sessionDir(s)}/events.jsonl`);
+  /** The logs read on before each read of the state, and looked at before each read of one of them. */
+  private liveLogs(): { files: string[]; keys: Set<string> } {
+    const eventsOf = (s: string) => `${this.store.sessionDir(s)}/events.jsonl`;
+    if (this.volatile) {
+      const files = this.volatile().map(eventsOf);
+      return { files, keys: new Set(files.map(fileKey)) };
+    }
     if (this.live?.version !== this.cache.version) {
       const files = this.store.sessionIds().filter((s) => this.store.readRuntime(s)?.state !== "exited" && this.store.reader.has(`${this.store.sessionDir(s)}/runtime.json`))
-        .map((s) => `${this.store.sessionDir(s)}/events.jsonl`);
-      this.live = { version: this.cache.version, files };
+        .map(eventsOf);
+      const keys = new Set(files.map(fileKey));
+      this.live = { version: this.cache.version, files, keys };
     }
-    return this.live.files;
+    return this.live;
   }
 
   /** Whether the next read of the state derives it again. */
-  stale(): boolean { return this.state?.version !== this.cache.version; }
+  stale(): boolean { return this.state?.version !== this.cache.version || this.awayEnded() || this.templatesChanged(); }
+
+  /**
+   * The recurring queues' views read the templates, which lie outside the project's folder (no watcher reports them):
+   * while there are recurring queues, whether a template was added, removed or edited since the derivation.
+   */
+  private templatesChanged(): boolean {
+    const s = this.state;
+    return s?.templates !== undefined && templatesStamp(s.value.project.root) !== s.templates;
+  }
+
+  /** The away mode the state shows is that of its derivation's time: whether its period has ended since. */
+  private awayEnded(): boolean {
+    const away = this.state?.value.away;
+    return !!away?.on && !!away.until && Date.parse(away.until) <= Date.now();
+  }
 
   /** The project's state now: derived again only when a file of it changed (or `changed` was called) since. */
   current(): ProjectState {
-    this.cache.sync(this.liveLogs());
+    this.cache.sync(this.liveLogs().files);
+    if (this.awayEnded() || this.templatesChanged()) this.changed();
     if (this.state?.version !== this.cache.version) {
       const version = this.cache.version;
-      this.state = { version, value: loadProjectState(this.store) };
+      // Shared by every reader of the state until the next change: frozen, so that none changes it for the others.
+      const templates = this.store.recurringIds().length ? templatesStamp(this.store.readProject().root) : undefined;
+      this.state = { version, value: freeze(deriveProjectState(this.store)), templates };
     }
     return this.state.value;
   }

@@ -1,7 +1,7 @@
 # The derived model (queue SM)
 
 Status: planned in SM1 (2026-11-20); the model and its first readers built in SM3 ("Built in SM3", below), the rest
-in SM4. It follows the user's decision of 2026-11-18 on the
+moved onto it in SM4 ("Built in SM4"). It follows the user's decision of 2026-11-18 on the
 server's responsiveness (the user's notes, "Server responsiveness: one read layer over the files"): no change of tech
 stack; one read layer; every appended line read once; nothing long on the event loop; the model can be thrown away and
 built again from the files, which stay the one source of truth (the model lives in memory only). It builds on what the
@@ -136,9 +136,8 @@ what the CLI derives. The derivation is memoized per version: asked twice at one
 same object is returned; `generated_at` then moves only when the state did (the dashboard keys a step's and a queue's
 reads on it).
 
-- **Read-only**: readers share one state object. A reader that changes it would change it for every other; in the
-  tests the derived state is frozen deeply, so such a reader fails there (today `stateOf`'s snapshot is shared the same
-  way, the engine's own reads are not).
+- **Read-only**: readers share one state object. A reader that changes it would change it for every other; the
+  derived state is frozen deeply (SM4), so such a reader fails at once (in the tests: none did).
 - **Time**: what the derivation computes from the clock (the away mode's `awayNow`, the recurring queues' due times in
   `recurringOf`, the "at 14:00" texts of planned starts and skips) is as old as the derivation. Today the snapshot of
   `stateOf` is as old as the last change, and timers (`armAway`, the coordinator's wake, the engine's schedules) call
@@ -337,6 +336,57 @@ did: they asked about 2.7 times as much as before and were still answered five t
 on a change of the state, a third as often; each costs more on average because the cheap ones (an activity line's)
 are gone. The remaining blocks are the dashboards' queue git reads (several git processes per read, SV2's item left)
 and the decisions' own state rebuilds (SM4).
+
+## Built in SM4
+
+Every reader in the server reads through the model. `main.ts` makes the project's store from its model (`Entry.store`
+is `model.store`; only the migrations at the start, before the model, use a store over the files): the user's actions
+(`act`, the protocol's actions with it), the routing of answers and send-backs, the engine (its own reads, the
+scheduler, the recurring queues, the check runs, `accepted.ts`, `stopwork.ts`, `rulesfix.ts`), the coordinator's
+`holders()` (it reads each member engine's store), the orchestrator and its review helpers, the merger, merge back,
+the deploy plan's boundary (the state it is given), the conversations, the ideas and the search. The `reads` option of
+the orchestrator and the conversations and the engine's `state` option are gone: their stores are the model's.
+
+- **One derivation per change, for all of them**: `loadProjectState(store)` over a store reading through a model
+  answers with the model's state (`Reader.state`; `deriveProjectState` is the derivation itself), so the ~80 calls
+  that each rebuilt the whole state share one derivation from memory per change. The CLI's store reads the files and
+  derives as before (the same rules: one piece of code). The shared state is frozen deeply.
+- **As current as a read of the files** (above): the files another process writes that a decision reads are an agent's
+  own `events.jsonl` (its `nexus`; the review files and reports are read from their files, not through the store).
+  Each read of a live session's events (its runtime record not `exited`) first looks whether the file grew (a stat),
+  as a read of the file would see a line the watcher has not reported yet; and a change of a session's runtime record
+  (its agent started, reported, ended) marks its events to be read on at the next read, so an agent's last lines,
+  written before its end is recorded, are read before anything decides on that end. `Engine.writeRun`'s read of the
+  log before stamping a run's end is this read. A person's CLI by hand (an import, a note) is seen at its watcher event,
+  a few milliseconds later than a read of the file, and that event runs the decisions again (`changed()`), as it ran
+  them before.
+- **Time**: the state's away mode (`state.away`, read by the orchestrator's away rule, its notices and the review
+  level) is as old as the derivation. The away timer (`armAway`) writes the mode's end at its time (+50 ms), which
+  moves every model's version; the model also derives again by itself once the away period of the state it holds has
+  ended, so no decision reads a passed away mode. The recurring queues' `next_at` is shown only (their decisions compute
+  their own times).
+- **The search** reads the events from the model (they are in memory for the state anyway); the chats, which the model
+  keeps only once opened, and the reports are read from their files on the request, as before.
+
+Readers left on their own reads, and why: the hand-over check (`handover.ts`, before the model exists); the CLI
+(another process); the deploy plan's and the crash record's own files in `NEXUS_HOME` (one small file each, not the
+history); the ideas' notes folder (outside `.nexus`; reconciled on a change and on its request, as before); the
+templates (`recurringOf`, uncounted, as before); the review files, reports and check logs (read by their routes when
+asked).
+
+**The evidence that the decisions read the same** (the queue's stop condition): `apps/server/test/model-reads.ts`, a
+preload (`npm run test:files -- --import ./apps/server/test/model-reads.ts <files>`) that makes every store of a test
+process read through a model of its folder, fed by the process's writes and by a watcher as `main.ts`'s, with
+`loadProjectState` over it the model's frozen state. The fake runtimes' tests of the engine (`engine*.test.ts`), the
+merger, merge back, the coordinator, the orchestrator (`orchestrator*.test.ts`, context care, the review helpers), the
+conversations, reviews, questions, the plan, the schedules and the recurring queues pass both ways, over the files and
+through the model. The tests that run a server process (the API tests) run through the model anyway: `main.ts` always
+does.
+
+The gate holds the decisions too: an event appended, then what every decision on a change reads (the state once per
+decision, each queue's files, every session's files and logs, the ideas' hand-offs) reads that line and the 64 bytes
+before it and derives the state once, the same at 1x and 4x. A runtime record rewritten now reads that record and its
+session's events from their position (64 bytes).
 
 ## Beyond the decision (proposals, not decided)
 

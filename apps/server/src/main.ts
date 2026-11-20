@@ -107,9 +107,9 @@ let standingBy = !!HANDOVER;
 // ---------------------------------------------------------------- projects
 
 /**
- * A project loaded in this server. `model`: its files kept in memory (docs/design/model.md): the state the requests and
- * the decisions on a change read, and the logs the dashboard shows. `store` reads the files themselves: the engine's,
- * the orchestrator's and the actions' own reads go there until queue SM's next step moves them.
+ * A project loaded in this server. `model`: its files kept in memory (docs/design/model.md). `store` is the model's:
+ * every reader in this server (the requests, the user's actions, the engine, the orchestrator, the merger and the rest)
+ * reads through it, and the state it derives (loadProjectState over it) is the model's, once per change.
  */
 interface Entry { id: string; root: string; store: ProjectStore; model: ProjectModel; engine: Engine; orchestrator: Orchestrator; conversations: Conversations; merger: Merger; error?: string }
 const projects = new Map<string, Entry>();
@@ -132,26 +132,28 @@ function refreshRegistry(): void {
   const reg = readRegistry();
   for (const p of reg.projects) {
     if (projects.has(p.id)) continue;
-    const store = ProjectStore.forRoot(p.root);
-    try { if (store.migrateProject()) console.log(`settings of project ${p.id}: migrated to follow the global settings where equal`); }
+    const files = ProjectStore.forRoot(p.root);
+    try { if (files.migrateProject()) console.log(`settings of project ${p.id}: migrated to follow the global settings where equal`); }
     catch (err) { console.error(`settings of project ${p.id}: not migrated: ${(err as Error).message}`); }
     // Steps done before review levels keep the meaning they had (docs/protocol/review.md, "Before review levels").
-    try { if (store.markReviewLevels()) console.log(`project ${p.id}: steps done from now on are reviewed by level`); }
+    try { if (files.markReviewLevels()) console.log(`project ${p.id}: steps done from now on are reviewed by level`); }
     catch (err) { console.error(`project ${p.id}: review levels not marked: ${(err as Error).message}`); }
     // A deploy planned after a step or queue of this project holds the run at that step's end (src/deploy-plan.ts); so
     // does Nexus merging a worktree queue back into the run's checkout (src/merger.ts), until its fast-forward.
     let merger: Merger | undefined;
-    // The project's files read once, here, and kept (docs/design/model.md): the engine's recovery reads its state.
-    const model = new ProjectModel(store.dir);
+    // The project's files read once, here, and kept (docs/design/model.md): the engine's recovery reads its state, and
+    // everything after reads through its store.
+    const model = new ProjectModel(files.dir);
+    const store = model.store;
     // Measured: making the engine recovers the project's runs after a restart (queue SV1 found it reading the whole
     // state once per queue).
-    const engine = perf.measure(`engine start ${p.id}`, () => new Engine(store, () => changed(p.id), { coordinator, capacity, state: () => model.current(), boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) || (merger?.atBoundary(q, step, state) ?? false) }));
+    const engine = perf.measure(`engine start ${p.id}`, () => new Engine(store, () => changed(p.id), { coordinator, capacity, boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) || (merger?.atBoundary(q, step, state) ?? false) }));
     merger = new Merger(store, { start: (q) => void engine.start(q), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining || lifecycle.busy, poke: () => changed(p.id) });
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).
     // Its routine reviews go to short-lived review helpers (src/review-helper.ts) while review_helper.enabled is on.
-    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), plan: () => planner.notices(), changes: readDeployChanges, crash: readCrash, push: ({ kind, ...n }) => void push(n, { kind }) }, { helpers: {}, reads: model.store });
-    projects.set(p.id, { id: p.id, root: p.root, store, model, engine, orchestrator, merger, conversations: new Conversations(store, orchestrator, () => changed(p.id), { reads: model.store }) });
+    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), plan: () => planner.notices(), changes: readDeployChanges, crash: readCrash, push: ({ kind, ...n }) => void push(n, { kind }) }, { helpers: {} });
+    projects.set(p.id, { id: p.id, root: p.root, store, model, engine, orchestrator, merger, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }
   // A project taken off the registry (by the server's removal, or by hand): its agents and timers stop, its watcher
@@ -746,11 +748,11 @@ app.get("/api/projects/:id/sessions/:session/chat", (c) => {
   const e = c.get("entry");
   const from = Number(c.req.query("from") ?? 0), to = Number(c.req.query("to") ?? Number.MAX_SAFE_INTEGER);
   if (!Number.isInteger(from) || !Number.isInteger(to)) return c.json({ error: "from and to: whole numbers (lines)" }, 400);
-  try { return c.json({ chat: chatRange(e.model.store, c.req.param("session"), from, to) }); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
+  try { return c.json({ chat: chatRange(e.store, c.req.param("session"), from, to) }); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
 });
 app.get("/api/projects/:id/sessions/:session/chat/search", (c) => {
   const e = c.get("entry");
-  try { return c.json({ lines: searchLines(e.model.store, c.req.param("session"), c.req.query("q") ?? "", c.req.query("tools") === "1") }); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
+  try { return c.json({ lines: searchLines(e.store, c.req.param("session"), c.req.query("q") ?? "", c.req.query("tools") === "1") }); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
 });
 app.post("/api/projects/:id/sessions/:session/pins", act((st, b, p) => ({ pins: pin(st, p("session"), b.line, b.pinned) })));
 
@@ -769,7 +771,7 @@ app.get("/api/projects/:id/search", (c) => {
 app.get("/api/projects/:id/sessions/:session/activity", (c) => {
   const e = c.get("entry");
   const queue = c.req.query("queue"), step = c.req.query("step");
-  const items = e.model.store.readActivity(c.req.param("session")).entries.filter((a) => (!queue || a.queue === queue) && (!step || a.step === step));
+  const items = e.store.readActivity(c.req.param("session")).entries.filter((a) => (!queue || a.queue === queue) && (!step || a.step === step));
   return c.json(items.slice(-Number(c.req.query("limit") ?? 300)));
 });
 
@@ -779,7 +781,7 @@ app.get("/api/projects/:id/queues/:queue/steps/:step/commits", async (c) => {
   const e = c.get("entry");
   const q = stateOf(e)?.queues.find((x) => x.id === c.req.param("queue"));
   if (!q) return c.json({ error: "unknown queue" }, 404);
-  return c.json((await stepCommits(e.model.store, q, c.req.param("step"))) ?? null);
+  return c.json((await stepCommits(e.store, q, c.req.param("step"))) ?? null);
 });
 // What a stopped queue's stopped step left (its own commits, the checkout's uncommitted changes) and whether a Discard
 // is recorded for this stop; null when the queue is not stopped at a step.
@@ -787,7 +789,7 @@ app.get("/api/projects/:id/queues/:queue/left", async (c) => {
   const e = c.get("entry");
   const q = stateOf(e)?.queues.find((x) => x.id === c.req.param("queue"));
   if (!q) return c.json({ error: "unknown queue" }, 404);
-  const left = await leftBehind(e.model.store, q);
+  const left = await leftBehind(e.store, q);
   const view: LeftView | null = left ? { ...left, discarded: discardRecorded(q) ?? null } : null;
   return c.json(view);
 });
@@ -795,14 +797,14 @@ app.get("/api/projects/:id/queues/:queue/git", async (c) => {
   const e = c.get("entry");
   const q = stateOf(e)?.queues.find((x) => x.id === c.req.param("queue"));
   if (!q) return c.json({ error: "unknown queue" }, 404);
-  return c.json((await branchState(e.model.store, q)) ?? null);
+  return c.json((await branchState(e.store, q)) ?? null);
 });
 
 // Refused actions of every session of the project, oldest first; with ?queue= (and &step=) only those of a step.
 app.get("/api/projects/:id/refusals", (c) => {
   const e = c.get("entry");
   const queue = c.req.query("queue"), step = c.req.query("step");
-  const all = e.model.store.sessionIds().flatMap((s) => e.model.store.readRefusals(s).entries)
+  const all = e.store.sessionIds().flatMap((s) => e.store.readRefusals(s).entries)
     .filter((r) => (!queue || r.queue === queue) && (!step || r.step === step));
   return c.json(all.sort((a, b) => a.at.localeCompare(b.at)));
 });
@@ -848,7 +850,7 @@ app.get("/api/digest", (c) => {
     const state = stateOf(e);
     if (!state) continue;
     for (const q of state.queues) if (q.run) runs.push({ session: q.run.session, state: q.run.state, updated_at: q.run.updated_at });
-    const st = e.model.store;
+    const st = e.store;
     const ids = st.sessionIds();
     const recent = <T extends { at: string }>(xs: T[]) => xs.filter((x) => x.at > since);
     events.push(...projectDigest({

@@ -68,8 +68,6 @@ type Live = Hosted<Extra>;
 
 export class Conversations {
   private readonly store: ProjectStore;
-  /** Where the list and the views read (the server's model of the files, main.ts); what decides reads `store`. */
-  private readonly reads: ProjectStore;
   private readonly orchestrator: Orchestrator;
   private readonly changed: () => void;
   private readonly host: AgentHost<Extra>;
@@ -78,9 +76,8 @@ export class Conversations {
   private stopped = false;
 
   /** `host`: how the partners' processes are made (tests give a stand-in). */
-  constructor(store: ProjectStore, orchestrator: Orchestrator, changed: () => void, host: AgentHostOptions & { reads?: ProjectStore } = {}) {
+  constructor(store: ProjectStore, orchestrator: Orchestrator, changed: () => void, host: AgentHostOptions = {}) {
     this.store = store;
-    this.reads = host.reads ?? store;
     this.orchestrator = orchestrator;
     this.changed = changed;
     this.host = new AgentHost(store, ROLE_RECORDS.conversation, host);
@@ -88,11 +85,11 @@ export class Conversations {
   }
 
   list() {
-    return this.reads.sessionIds()
-      .map((id) => { try { return this.reads.readSession(id); } catch { return undefined; } })
+    return this.store.sessionIds()
+      .map((id) => { try { return this.store.readSession(id); } catch { return undefined; } })
       .filter((s): s is SessionFile => s?.role === "conversation")
       .map((s) => {
-        const chat = this.reads.readChat(s.id).entries;
+        const chat = this.store.readChat(s.id).entries;
         return { ...s, state: this.host.get(s.id)?.proc.state ?? "exited", last_at: chat.at(-1)?.at ?? s.created_at, messages: chat.filter((c) => c.kind === "message").length };
       })
       .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || b.last_at.localeCompare(a.last_at));
@@ -101,8 +98,8 @@ export class Conversations {
   view(id: string) {
     const s = this.session(id);
     return {
-      session: s, state: this.host.get(id)?.proc.state ?? "exited", runtime: this.reads.readRuntime(id) ?? null, ...chatView(this.reads, id, 400),
-      model: s.model ?? null, effort: s.effort ?? null, notes_dir: this.reads.readProject().conversations.notes_dir ?? null,
+      session: s, state: this.host.get(id)?.proc.state ?? "exited", runtime: this.store.readRuntime(id) ?? null, ...chatView(this.store, id, 400),
+      model: s.model ?? null, effort: s.effort ?? null, notes_dir: this.store.readProject().conversations.notes_dir ?? null,
       // Whether its runtime compacts on request: the dashboard offers Compact only then.
       compact: this.canCompact(s),
       idea_context_error: this.ideaContextError(s),

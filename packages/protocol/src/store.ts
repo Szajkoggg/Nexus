@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { monotonicFactory } from "ulid";
 import YAML from "yaml";
 import type { z } from "zod";
+import type { ProjectState } from "./state.ts";
 import {
   Activity, Applied, AwayFile, CapacityFile, ChecksFile, IdeaMatchesFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StaticAnalysisNote, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
   type Note,
@@ -83,7 +84,8 @@ function list(dir: string): string[] { work.listings++; return readdirSync(dir);
  * of them kept in memory (model.ts, the server's). `parsed`: the file's text through `parse`, throwing as `parse`
  * throws; the value may be shared, and must not be changed (a model freezes it). `jsonl`: a log's complete lines;
  * `observe`: their times taken up by this process's clock. `dirs`: a folder's subfolders, sorted (none when it is
- * missing); `names`: its entries.
+ * missing); `names`: its entries. `state`: the project's state as the model derived it (model.ts): `loadProjectState`
+ * over a store reading through a model answers with it, so every reader of the state shares one derivation per change.
  */
 export interface Reader {
   has(file: string): boolean;
@@ -91,6 +93,7 @@ export interface Reader {
   jsonl<S extends z.ZodType>(file: string, schema: S, observe: boolean): JsonlRead<z.infer<S>>;
   dirs(dir: string): string[];
   names(dir: string): string[];
+  state?(): ProjectState;
 }
 const fileReader: Reader = {
   has: (file) => exists(file),
@@ -102,6 +105,13 @@ const fileReader: Reader = {
 /** How NEXUS_HOME's settings, away mode and turns are read (the server sets a model of them: model.ts). */
 let home: Reader = fileReader;
 export function useHomeReader(r: Reader): void { home = r; }
+/**
+ * How a store made without a reader reads its folder: the files, unless set. Only the tests set it, to run the server's
+ * decisions over models as the server does (apps/server/test/model-reads.ts); the server gives each project's store
+ * its model explicitly.
+ */
+let readerFor: ((nexusDir: string) => Reader | undefined) | undefined;
+export function useProjectReaders(f: ((nexusDir: string) => Reader | undefined) | undefined): void { readerFor = f; }
 
 /** How long a rename is tried again while Windows refuses it (see renameRetrying). */
 const RENAME_RETRY_MS = 2_000;
@@ -231,7 +241,7 @@ export class ProjectStore {
   readonly dir: string;
   /** How it reads: the files themselves (fileReader), or a model of them (model.ts). */
   readonly reader: Reader;
-  constructor(nexusDir: string, reader: Reader = fileReader) { this.dir = normPath(nexusDir); this.reader = reader; }
+  constructor(nexusDir: string, reader?: Reader) { this.dir = normPath(nexusDir); this.reader = reader ?? readerFor?.(this.dir) ?? fileReader; }
   private yaml<S extends z.ZodType>(file: string, schema: S): z.infer<S> { return schema.parse(this.reader.parsed(file, YAML.parse)); }
 
   static forRoot(root: string): ProjectStore { return new ProjectStore(join(root, NEXUS_DIRNAME)); }

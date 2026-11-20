@@ -1,7 +1,7 @@
 // Queue templates (docs/protocol/planning.md, "Queue templates"): a queue's YAML with a `template:` header and `params:`, its texts
 // carrying {{name}} placeholders. Three layers, strongest last: shipped with Nexus, the user's global ones, the
 // project's. Parsing, merging the layers and filling are pure; reading the three folders is the last section.
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
@@ -220,6 +220,18 @@ export function readTemplateDir(dir: string, layer: TemplateLayer): (Template | 
       return { layer, path, problem: (e as Error).message };
     }
   });
+}
+
+/**
+ * What readTemplates would read for a project, as a stamp: each template file's name, size and modification time. It
+ * changes when a template is added, removed or edited (the server's model derives the state again then: model.ts).
+ */
+export function templatesStamp(projectRoot: string): string {
+  return [shippedTemplatesDir(), globalTemplatesDir(), projectTemplatesDir(projectRoot)].map((dir) => {
+    try {
+      return readdirSync(dir).filter((f) => /\.ya?ml$/i.test(f)).sort().map((f) => { const st = statSync(join(dir, f)); return `${f}:${st.size}:${st.mtimeMs}`; }).join(",");
+    } catch { return ""; }
+  }).join("|");
 }
 
 /** The templates in effect for a project (its root), or without one only Nexus's and the user's. */

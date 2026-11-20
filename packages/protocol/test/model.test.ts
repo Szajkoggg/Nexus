@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectModel, ProjectStore, addNote, deleteNote, loadProjectState, resetWork, workCounts, type Event, type ProjectState } from "../src/index.ts";
+import { ProjectModel, ProjectStore, addNote, deleteNote, loadProjectState, resetWork, workCounts, writeAway, type Event, type ProjectState } from "../src/index.ts";
 import { generateNexus } from "./synthetic.ts";
 
 process.env.NEXUS_HOME = mkdtempSync(join(tmpdir(), "nexus-model-home-"));
@@ -130,4 +130,52 @@ test("the logs other processes append to now are read on before the state, unrep
     assert.equal(model.current().sessions.find((s) => s.id === worker)!.event_count, before + 1);
     assert.ok(workCounts().bytes < 400, `only the line read (${workCounts().bytes} bytes)`);
   } finally { model.close(); }
+});
+
+test("loadProjectState over the model's store is the model's state, shared and frozen; over the files derived anew (SM4)", () => {
+  const p = project();
+  const s = loadProjectState(p.model.store);
+  assert.equal(s, p.model.current());
+  assert.equal(loadProjectState(p.model.store), s, "asked again: the same object");
+  assert.ok(Object.isFrozen(s) && Object.isFrozen(s.queues) && Object.isFrozen(s.queues[0]), "frozen deeply");
+  assert.notEqual(loadProjectState(p.files), loadProjectState(p.files), "the files' store derives at each call");
+  assert.deepEqual(plain(loadProjectState(p.files)), plain(s));
+});
+
+test("a running agent's events are read as the file is, and its last lines before its end is recorded (SM4)", () => {
+  const p = project();
+  const worker = p.files.sessionIds().find((s) => s.startsWith("w-"))!;
+  const log = join(p.files.sessionDir(worker), "events.jsonl");
+  const line = (text: string) => `${JSON.stringify(event(worker, { type: "log", level: "info", text }))}\n`;
+  p.model.store.writeRuntime(worker, { state: "working", turns: 1, updated_at: new Date().toISOString() });
+  const before = p.model.store.readEvents(worker).entries.length;
+  // Another process's line, not reported by the watcher: a read of a live session's events sees it, as the file's.
+  appendFileSync(log, line("step done"));
+  assert.equal(p.model.store.readEvents(worker).entries.length, before + 1);
+  // Its last line, then its end recorded by this server: read on before anything reads the end.
+  appendFileSync(log, line("last words"));
+  p.model.store.writeRuntime(worker, { state: "exited", turns: 1, updated_at: new Date().toISOString() });
+  assert.equal(p.model.current().sessions.find((s) => s.id === worker)!.event_count, p.files.readEvents(worker).entries.length);
+  assert.deepEqual(p.model.store.readEvents(worker), p.files.readEvents(worker));
+});
+
+test("the state's away mode is derived again once its period has ended (SM4)", () => {
+  const p = project();
+  const now = Date.now();
+  writeAway({ protocol: 1, current: { since: new Date(now - 60_000).toISOString(), until: new Date(now + 1500).toISOString() }, past: [] });
+  assert.equal(p.model.current().away.on, true);
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, now + 1600 - Date.now()));
+  assert.equal(p.model.stale(), true);
+  assert.equal(p.model.current().away.on, false);
+  writeAway({ protocol: 1, past: [] });
+});
+
+test("a write that makes a folder is seen at once: the folder's existence is asked again (SM4)", () => {
+  const p = project();
+  const dir = join(p.files.dir, "recurring");
+  rmSync(dir, { recursive: true, force: true });
+  p.model.touched(dir);
+  assert.deepEqual(p.model.store.recurringIds(), []);
+  p.model.store.writeRecurring({ protocol: 1, id: "R", template: "tiny", params: {}, every: "daily 08:00", set_by: "user", created_at: "2026-11-20T10:00:00.000Z", updated_at: "2026-11-20T10:00:00.000Z" });
+  assert.deepEqual(p.model.store.recurringIds(), ["R"]);
 });

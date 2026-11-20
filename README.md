@@ -659,6 +659,8 @@ npm run dev      # development, apart from the live instance: API on :4318 with 
                  # dashboard with hot reload on http://localhost:5173
 npm test         # protocol, importer, engine and orchestrator tests (the last two run a fake `claude`)
 npm run test:files -- apps/server/test/engine.test.ts   # while working: only these files, stops at the first failure
+npm run test:files -- --import ./apps/server/test/model-reads.ts apps/server/test/engine.test.ts   # the same, every store
+                 # reading through the server's model of the files (docs/design/model.md), as the server reads
 npm run test:times   # the whole suite, then how long each file took, slowest first
 npm run typecheck
 npm run lint     # ESLint (correctness rules, with types) and dependency-cruiser (module boundaries); about 15 s

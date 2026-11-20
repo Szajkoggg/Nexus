@@ -282,7 +282,16 @@ export function stepClosed(q: Pick<QueueView, "rejection">, st: { id: string; st
   return st.status === "done" || st.status === "skipped" || (st.status === "rejected" && q.rejection?.step !== st.id);
 }
 
+/**
+ * The project's state. Over a store reading through a model (the server's: model.ts) it is the model's, derived once
+ * per change and shared by every reader, and must not be changed (it is frozen); over the files it is derived now.
+ */
 export function loadProjectState(store: ProjectStore): ProjectState {
+  return store.reader.state?.() ?? deriveProjectState(store);
+}
+
+/** The project's state derived from what the store reads (the model's derivation; loadProjectState otherwise). */
+export function deriveProjectState(store: ProjectStore): ProjectState {
   countRebuild();
   const warnings: string[] = [];
   const project = store.readProject();
