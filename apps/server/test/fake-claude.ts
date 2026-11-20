@@ -40,7 +40,7 @@ let totalCost = 0;
 /** The running totals of every model call in the process, sub-agents' included, as result.modelUsage reports them. */
 const totals = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 };
 const queue: string[] = [];
-/** Late turns still to start (FAKE_LATE_NEXT_MS): the CLI runs them before it exits, its input closed or not. */
+/** Late turns still to start (FAKE_LATE_GATE): the CLI runs them before it exits, its input closed or not. */
 let lateTurns = 0;
 
 async function turn(text: string): Promise<void> {
@@ -61,12 +61,14 @@ async function turn(text: string): Promise<void> {
   // message that reached it as its turn ended): Nexus sent it into a turn whose result it had not read yet (queue OF).
   if (process.env.FAKE_LATE_NEXT && turns === 0) {
     for (const t = Date.now(); !unread.length && Date.now() - t < 300_000;) await new Promise((r) => setTimeout(r, 20));
-    // FAKE_LATE_NEXT_MS: that turn starts this long after the result (a busy machine), still within Nexus's settling.
-    const lateMs = Number(process.env.FAKE_LATE_NEXT_MS ?? 0);
-    if (lateMs) {
+    // FAKE_LATE_GATE: that turn starts only once the file it names exists (a busy machine: after Nexus looked at the
+    // turn's end), polled every 10 ms.
+    const gate = process.env.FAKE_LATE_GATE;
+    if (gate) {
       const late = unread;
       lateTurns++;
-      setTimeout(() => { lateTurns--; queue.unshift(...late); void pump(); }, lateMs);
+      const start = () => { if (!existsSync(gate)) return void setTimeout(start, 10); lateTurns--; queue.unshift(...late); void pump(); };
+      start();
     } else queue.unshift(...unread);
     unread = [];
   }

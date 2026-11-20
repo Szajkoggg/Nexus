@@ -5,7 +5,7 @@
 // for over an hour (its prompt cache gone) at a step boundary goes on in a fresh one too, if its summary is fresh (queue FI).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -181,18 +181,23 @@ for (const runtime of ["claude", "codex"] as const) {
 
 test("claude: a message sent into the step's last turn that the runtime runs as a late turn of its own: the switch waits for that moment, the old session works no turn beside the fresh one, and the message goes to the fresh session (queue LF, F3)", async () => {
   process.env.FAKE_LATE_NEXT = "1";
-  process.env.FAKE_LATE_NEXT_MS = "800"; // the late turn starts after the engine looked at the turn's end
   const { store, engine, queue, received, until, done, accept } = setup(["summary", "done"], { fill: 0.8 });
+  // The late turn starts once this file exists: after the engine looked at the turn's end and the switch waits.
+  const gate = join(dirname(process.env.FAKE_LOG!), "late-gate");
+  process.env.FAKE_LATE_GATE = gate;
   try {
     engine.start("Q", { runtime: "claude" });
     // The step's turn has reported its done and summary, and holds its result for the message.
     await until("Q1 in review in its turn", () => queue().steps[0]!.status === "review" && loadProjectState(store).sessions.find((s) => s.id === queue().run!.session)?.live?.state === "working", LONGER.step);
     accept();
-    delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_NEXT_MS; // for the fresh session's process
+    delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_GATE; // for the fresh session's process
     const old = queue().run!.session;
     sendMessage(store, old, "Use the grassland settings.", { queue: "Q", step: "Q1" });
     engine.onChange(loadProjectState(store)); // delivered into the running turn (next)
     await until("the message sent into the turn", () => received().some((m) => m.session === old && m.text.includes("grassland") && m.priority === "next"));
+    await until("the switch to wait", () => store.readActivity(old).entries.some((e) => /^Nexus waits a moment before step Q2/.test(e.text)), LONGER.step);
+    assert.equal(queue().run!.switches, undefined, "not switched while the runtime may still start a turn");
+    writeFileSync(gate, "");
     await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     const q = queue();
     const fresh = q.steps[1]!.session!;
@@ -203,7 +208,7 @@ test("claude: a message sent into the step's last turn that the runtime runs as 
     const freshStart = store.readActivity(fresh).entries.find((e) => e.kind === "turn_start")!.at;
     const beside = store.readActivity(old).entries.filter((e) => e.at >= freshStart && ["turn_start", "text", "tool", "turn_end"].includes(e.kind) && !/^Nexus /.test(e.text));
     assert.deepEqual(beside.map((e) => `${e.kind}: ${e.text}`), [], "the old session worked no turn beside the fresh one");
-  } finally { done(); delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_NEXT_MS; }
+  } finally { done(); delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_GATE; }
 });
 
 const HOUR = 60 * 60_000;

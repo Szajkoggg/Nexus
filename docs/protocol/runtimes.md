@@ -38,7 +38,8 @@ the run waits (`usage_wait`) in the middle of the step, its session kept, and co
 turn as before, and the gate looks only when the session is idle. A turn that failed on the usage limit (a `usage`
 failure with its reset time) goes the same way: its runtime counts as full until that reset, and the step goes on on
 the next entry of its chain instead of waiting (`fallbacks[].reason`: "the usage limit was reached (…)"). The engine
-keeps that reset in memory (usage.json records no rejection), so the next step's route counts the runtime full too. A
+keeps that reset in memory (usage.json records no rejection), so the next step's route counts the runtime full too,
+until a usage wait goes on (at its reset, or resumed by the user): a turn that meets the limit again records it again. A
 turn after the step's outcome (the context summary asked for at its boundary, see ["Context care"](#context-care)) is no
 turn of the step: the step is not continued on its fallback; the next step opens where its route says now, on the
 fallback in a fresh session or after a wait (queue LF, F2).
@@ -155,7 +156,8 @@ the queue, `switchLines` in `packages/protocol/src/overview.ts`) show every swit
 
 0. It waits while the old process is settling (queue LF, F3): a message sent into the step's last turn (`next`) that
    reached the runtime as the turn ended runs as a turn of its own (Claude Code), so neither the summary request nor
-   the switch comes before that moment is over (`settled`). If such a turn starts meanwhile, Nexus ends it at its start
+   the switch comes before that moment is over (`settled`); the old session's activity says it waits ("Nexus waits a
+   moment before step …"). If such a turn starts meanwhile, Nexus ends it at its start
    (the old process ends as at a restart, its activity says why), so the old session works no turn beside the new one,
    and the entries sent into that last turn go to the new session's first turn with the unread ones (`carried`).
 1. It looks for a fresh summary: a `context.summary` from that session at or after its latest `step.started` of the

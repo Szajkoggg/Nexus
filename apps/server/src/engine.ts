@@ -459,6 +459,9 @@ export class Engine implements Member {
     const session = this.sessionFile(state, run.session);
     this.ensureProcess(session);
     this.clearTimer(queueId);
+    // A usage wait resumed (by the user, or by itself at the reset): the limits turns met are not held against the next
+    // choices; a turn that meets one again records it again (limitsMet).
+    if (run.state === "usage_wait") for (const k of Object.keys(this.limitsMet)) delete this.limitsMet[k];
     this.writeRun(queueId, toResumed(run, q.revision));
     // A step left unfinished (stopped, failed, interrupted) is continued rather than skipped; one waiting for an
     // answer just waits on (the answer arrives through the inbox). A rejected step is never run again.
@@ -1067,7 +1070,12 @@ export class Engine implements Member {
     if (!old || old.runtime === "external") return false;
     // A switch (or the summary asked before it) waits while the runtime may still run a message sent into the step's
     // last turn as a turn of its own; it comes when that moment is over (settled), or that turn ends here (lateTurn).
-    const settling = () => { if (!live.proc.settling) return false; this.switchWaits.add(old.id); return true; };
+    const settling = () => {
+      if (!live.proc.settling) return false;
+      if (!this.switchWaits.has(old.id)) this.store.appendActivity(old.id, { at: now(), kind: "turn_end", text: `Nexus waits a moment before step ${next.id}: a message sent into the last turn may still run as a turn of its own`, queue: queueId, step: done?.id ?? next.id });
+      this.switchWaits.add(old.id);
+      return true;
+    };
     const tokens = old.live?.context_tokens, window = old.live?.context_window;
     const context = tokens && window ? { tokens, fill: tokens / window } : undefined;
     // The closing refactoring step reads the queue's work with fresh eyes: a session that has worked already (on the
