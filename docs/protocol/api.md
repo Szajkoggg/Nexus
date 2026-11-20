@@ -17,7 +17,9 @@ Reads: `GET /api/projects` (with each project's "waiting for you" list; a questi
 see "Files and commits" below), `GET /api/projects/:id/commits/:hash` (one commit; see there too),
 `GET /api/projects/:id/rules` (the rules files' check: `{ state, agents, claude, unseen_by?, fix?: { changes: [{ file,
 action, before?, after }], imports }, version, root }`; see ["A project's rules files"](files.md#a-projects-rules-files)).
-Live: a WebSocket at `/ws` sends `{"type":"changed","project":id}` and `{"type":"projects"}`.
+Live: a WebSocket at `/ws` sends `{"type":"changed","project":id}` (a file of the project's state changed, or the server
+changed it), `{"type":"log","project":id,"session":id}` (a line of a session's activity, chat or refusals, or its pins:
+no state changed; at most one per session every 150 ms; queue SM), `{"type":"projects"}` and `{"type":"server"}`.
 
 Writes (JSON bodies only; a request with a foreign `Origin` is refused). Every write is a user action and is taken
 only from the dashboard's own page: the request must carry this server's `Origin` and, if it sends one,

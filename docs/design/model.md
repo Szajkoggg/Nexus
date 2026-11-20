@@ -1,6 +1,7 @@
 # The derived model (queue SM)
 
-Status: **the plan** (SM1, 2026-11-20), built in SM3 and SM4. It follows the user's decision of 2026-11-18 on the
+Status: planned in SM1 (2026-11-20); the model and its first readers built in SM3 ("Built in SM3", below), the rest
+in SM4. It follows the user's decision of 2026-11-18 on the
 server's responsiveness (the user's notes, "Server responsiveness: one read layer over the files"): no change of tech
 stack; one read layer; every appended line read once; nothing long on the event loop; the model can be thrown away and
 built again from the files, which stay the one source of truth (the model lives in memory only). It builds on what the
@@ -261,13 +262,81 @@ events (4.3 MB), 37,000 activity lines (9.3 MB), 6,400 chat lines; it takes abou
 | One event line (138 bytes) and its change | a whole rebuild | a whole rebuild |
 | The conversation list (`Conversations.list`'s reads) | 271 files, 0.77 MB | 1,078 files, 3.1 MB |
 
-It holds these as they are now (the start rebuilds once per queue and once more; a line makes a whole read; a rebuild
-reads about four times as much at 4×). The gate's rules are written beside them as skipped tests, which SM3 turns on
-for the readers it moves: one appended line reads that line and the 64 bytes before it, and rebuilds nothing; the
-start reads the project once; a request makes no whole read; the counts are the same at 1× and 4×. The start's figure
-is one queue's `releaseOrphanedSteps` measured and counted for every queue (each is the same whole read; running all of
-them takes minutes at 4×). The generator does not rewrite `runtime.json` as a streaming agent does yet (above): that
-belongs with the scenario of a streaming agent in SM3's gate.
+The start's figure is one queue's `releaseOrphanedSteps` measured and counted for every queue (each is the same whole
+read; running all of them takes minutes at 4×). The same reads through the model (SM3), and the rules the gate holds
+on them:
+
+| Through the model | 1× | 4× | Rule |
+|---|---|---|---|
+| The start (one state for every queue) | 1,442 files, 5.7 MB, 1 derivation | 5,762 files, 23.3 MB, 1 derivation | one read of the project, one derivation |
+| A request, nothing changed; the conversation list | nothing read | nothing read | nothing read, at any size |
+| One activity line (93 bytes), the state, the session's activity | 157 bytes, no derivation | the same | the line and 64 bytes, nothing derived |
+| One event line (138 bytes), the state | 202 bytes, 1 derivation | the same | the line and 64 bytes |
+| A runtime record rewritten (context tokens), the state | that file, 1 derivation | the same | that file alone |
+
+## Built in SM3
+
+`packages/protocol/src/model.ts`: `FileCache` (a `Reader` over a folder's files, from memory) and `ProjectModel` (a
+project's store reading through it, and its state derived once per version). `ProjectStore` takes a `Reader`
+(`store.ts`): the files themselves by default (the CLI, the engine's own store), the cache in the model. The store's
+writes report their paths (`onWrite`) as they are made; `countWrite` takes the path of a write made outside it.
+Everything the cache hands out is frozen.
+
+Moved onto it: `stateOf` in `main.ts` (every route that read the state, and the snapshot the decisions in `changed()`
+get; `changed()` moves the model's version as it cleared the snapshot before), the engine's recovery at the start
+(`EngineOptions.state`; `releaseOrphanedSteps` takes the state as an option), the routes of the logs (activity, a chat's
+range and search, refusals, the digest, the queue's git, a step's commits, what a stopped step left), the
+conversations' list and views and the orchestrator's chat view (their `reads` store), and NEXUS_HOME's
+`settings.yaml`, `away.yaml` and `turns.jsonl` (`useHomeReader`, watched for a change by hand; a write of the settings
+or the away mode moves every project's version). The watcher passes each path to the model; an activity, chat or
+refusals line, or a pin, is a log only: a `log` message (docs/protocol/api.md), which the dashboard counts apart
+(`logsVersion` in `apps/web/src/query.ts`): the activity, refusals, chats and conversations are read at it, the state
+and what spans projects are not.
+
+What differs from the plan above, and why:
+
+- **A log once opened is kept whole**, not as an index with its last entries: the activity's queue and step filter and
+  the digest's retries need every entry, and a ranged read of the file would be a second way of reading it. A log no
+  reader asked for is not read at all (most of a closed queue's); the memory of the opened ones (the digest opens every
+  activity log) is the next thing to bound, with the archiving.
+- **The volatile logs** are the events of the sessions whose runtime record is not `exited` (the model reads them
+  itself; the agent hosts are not asked), read on at each read of the state.
+- **Still from the files**: the orchestrator view's switch records (its earlier sessions' applied and events, read by
+  helpers its decisions share), the search, the ideas, the actions and every decision's own reads (SM4). Templates
+  (`recurringOf`) are read at each derivation, uncounted, as before.
+- **The equivalence** the stop condition asks for: the decisions read nothing new in SM3 (their own reads stay on the
+  files); the snapshot they get is derived from what the files held when this process last wrote or the watcher last
+  reported, as `stateOf`'s was, plus the live sessions' events read on. The recovery's one state is the state each
+  queue's own rebuild saw (between two queues only a release writes, and the state is derived again after one). The
+  fake runtimes' engine, orchestrator and conversation tests pass unchanged.
+
+`packages/protocol/test/model.test.ts`: the model fed line by line and by write-through (an event, an activity line,
+a queue rewritten, a note added and withdrawn, a new session, a run archived, another process's line) gives what
+`loadProjectState` over the files gives and what a model built afresh gives, and the same logs; a line being written
+waits for its newline, line numbers count blank and broken lines; a log rewritten under its position is read again
+whole and counted; what it hands out cannot be changed; an activity line derives nothing; a live session's line is
+read before the watcher reports it.
+
+**SV1's measurement before and after** (`node scripts/perf-load.ts --minutes 3` on the user's machine, the same load
+as SV1's quiet run; before: the code at SM2's commit, after: SM3's):
+
+| | Before | After |
+|---|---|---|
+| Start until the first answer | 36.6 s | 1.1 s |
+| Event loop delay p50 / p99 / max | 36 ms / 3.2 s / 3.7 s | 15 ms / 0.56 s / 3.5 s |
+| A derivation of the state (`state big`, count, mean) | 186, 271 ms | 90, 42 ms |
+| The decisions on a change (`engine (big)`, count, mean) | 160, 135 ms | 52, 213 ms |
+| Notifications the dashboards got (each made them read 12 endpoints) | 316 | 854 (`log` messages too) |
+| What a dashboard waited for `state` (mean / p95) | 327 ms / 1.6 s | 63 ms / 98 ms |
+| … for `server` | 2.3 / 5.3 s | 0.42 / 1.7 s |
+| … for the queue's git (mean / p95) | 3.7 / 8.2 s | 0.75 / 2.9 s |
+| Steps done in 3 minutes | 9 | 11 |
+
+The measuring script's dashboards read their 12 endpoints on every message, `log` ones included, as the old dashboard
+did: they asked about 2.7 times as much as before and were still answered five times sooner. The decisions now run only
+on a change of the state, a third as often; each costs more on average because the cheap ones (an activity line's)
+are gone. The remaining blocks are the dashboards' queue git reads (several git processes per read, SV2's item left)
+and the decisions' own state rebuilds (SM4).
 
 ## Beyond the decision (proposals, not decided)
 
