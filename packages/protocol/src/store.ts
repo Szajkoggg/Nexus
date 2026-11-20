@@ -36,24 +36,18 @@ function readYaml<S extends z.ZodType>(file: string, schema: S): z.infer<S> {
 }
 
 /**
- * The writes this process has made through this module (and a note's withdrawal, actions.ts): a project state built
- * since the last one is still current as far as this process is concerned, so the server passes one snapshot on until
- * it writes (apps/server/src/main.ts, stateOf). Another process's writes (an agent's `nexus`) reach the server through
- * its file watcher instead.
- */
-let writes = 0;
-export const writeCount = (): number => writes;
-/** Counts a write made outside this module's helpers, of `file` (its path, so a model of the files sees it). */
-export const countWrite = (file: string): void => { writes++; wrote(file); };
-
-/**
- * Who hears of this process's writes, by path, as they are made (queue SM: a model of the files kept in memory,
- * model.ts, takes them up before the write returns: write-through). A write of another process reaches it through the
- * server's file watcher instead.
+ * Who hears of this process's writes through this module, by path, as they are made (queue SM: a model of the files
+ * kept in memory, model.ts, takes them up before the write returns: write-through). A write of another process (an
+ * agent's `nexus`) reaches it through the server's file watcher instead.
  */
 const writeListeners = new Set<(file: string) => void>();
 export function onWrite(fn: (file: string) => void): () => void { writeListeners.add(fn); return () => { writeListeners.delete(fn); }; }
-function wrote(file: string): void { for (const fn of writeListeners) fn(file); }
+/** Tells the listeners of a write of `file`; for a write made outside this module's helpers too (a note's withdrawal). */
+export function wrote(file: string): void { for (const fn of writeListeners) fn(file); }
+/** Removes a file if it is there, and tells of it. */
+function removeFile(file: string): void {
+  if (existsSync(file)) { unlinkSync(file); wrote(file); }
+}
 
 /**
  * The work this process's reads have done through this module, counted rather than timed so a test can hold it on a
@@ -127,7 +121,7 @@ const RENAME_RETRY_MS = 2_000;
 export function renameRetrying(from: string, to: string): void {
   const start = Date.now();
   for (let wait = 5; ; wait = Math.min(wait * 2, 200)) {
-    try { renameSync(from, to); writes++; wrote(from); wrote(to); return; }
+    try { renameSync(from, to); wrote(from); wrote(to); return; }
     catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       if ((code !== "EPERM" && code !== "EACCES" && code !== "EBUSY") || Date.now() - start >= RENAME_RETRY_MS) throw e;
@@ -182,7 +176,6 @@ export function parseJsonlLines<S extends z.ZodType>(file: string, complete: str
 function appendJsonl(file: string, entry: unknown): void {
   mkdirSync(dirname(file), { recursive: true });
   appendFileSync(file, JSON.stringify(entry) + "\n", "utf8");
-  writes++;
   wrote(file);
 }
 
@@ -256,7 +249,7 @@ export class ProjectStore {
     mkdirSync(join(store.dir, "queues"), { recursive: true });
     mkdirSync(join(store.dir, "sessions"), { recursive: true });
     writeFileSync(join(store.dir, ".gitignore"), "*\n", "utf8");
-    writes++;
+    wrote(join(store.dir, ".gitignore"));
     if (!existsSync(store.projectFile)) store.writeStoredProject(StoredProject.parse({ protocol: 1, follows_global: true, ...project }));
     return store;
   }
@@ -348,7 +341,6 @@ export class ProjectStore {
     const file = join(this.queueDir(queueId), "notes", meta.step, `${meta.id}.md`);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, `---\n${YAML.stringify(NoteMeta.parse(meta)).trimEnd()}\n---\n${body.trimEnd()}\n`, "utf8");
-    writes++;
     wrote(file);
     return file;
   }
@@ -392,8 +384,7 @@ export class ProjectStore {
   }
   writeStart(queueId: string, s: StartFile): void { writeYaml(join(this.queueDir(queueId), "start.yaml"), StartFile.parse(s)); }
   clearStart(queueId: string): void {
-    const f = join(this.queueDir(queueId), "start.yaml");
-    if (existsSync(f)) { unlinkSync(f); writes++; wrote(f); }
+    removeFile(join(this.queueDir(queueId), "start.yaml"));
   }
   readPlan(queueId: string): PlanFile | undefined {
     const f = join(this.queueDir(queueId), "plan.yaml");
@@ -401,8 +392,7 @@ export class ProjectStore {
   }
   writePlan(queueId: string, p: PlanFile): void { writeYaml(join(this.queueDir(queueId), "plan.yaml"), PlanFile.parse(p)); }
   clearPlan(queueId: string): void {
-    const f = join(this.queueDir(queueId), "plan.yaml");
-    if (existsSync(f)) { unlinkSync(f); writes++; wrote(f); }
+    removeFile(join(this.queueDir(queueId), "plan.yaml"));
   }
   /**
    * Moves the chains of before the plan into it: a start.yaml with `after` (one queue it waited for) becomes a
@@ -466,8 +456,7 @@ export class ProjectStore {
     writeYaml(join(this.dir, "recurring", `${r.id}.yaml`), RecurringFile.parse(r));
   }
   clearRecurring(id: string): void {
-    const f = join(this.dir, "recurring", `${id}.yaml`);
-    if (existsSync(f)) { unlinkSync(f); writes++; wrote(f); }
+    removeFile(join(this.dir, "recurring", `${id}.yaml`));
   }
   /** The server's note on the static analysis reminder (.nexus/static-analysis.yaml); empty while there is none. */
   readStaticAnalysisNote(): StaticAnalysisNote {
@@ -500,8 +489,7 @@ export class ProjectStore {
     return name;
   }
   clearRun(queueId: string): void {
-    const f = join(this.queueDir(queueId), "run.yaml");
-    if (existsSync(f)) { unlinkSync(f); writes++; wrote(f); }
+    removeFile(join(this.queueDir(queueId), "run.yaml"));
   }
 
   readDelivered(sessionId: string): JsonlRead<Delivery> { return this.reader.jsonl(join(this.sessionDir(sessionId), "delivered.jsonl"), Delivery, false); }

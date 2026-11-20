@@ -62,8 +62,8 @@ with the events and the indexes, not with the logs' text.
 The project's watcher (chokidar on `.nexus`, as today) passes each event's path and kind to the model instead of only
 calling `changed()`. The server's own writes reach it at once, before the write returns: the store's write helpers
 (`writeYaml`, `appendJsonl`, `renameRetrying`, the unlinks) report the path they wrote to the model of that store
-(**write-through**), so a decision that writes and the next one that reads see the write, as they do today through
-`writeCount`. The watcher's event for the same write comes later and finds nothing new (a stat).
+(**write-through**), so a decision that writes and the next one that reads see the write, as they did through
+`writeCount` before the model (the count is gone since: the write-through took its place). The watcher's event for the same write comes later and finds nothing new (a stat).
 
 - **A JSONL log**: the model keeps the byte position of the end of the last complete line it read. On a change it
   reads from that position to the end of the file in one read, takes the complete lines (a final line without a
@@ -279,7 +279,7 @@ on them:
 `packages/protocol/src/model.ts`: `FileCache` (a `Reader` over a folder's files, from memory) and `ProjectModel` (a
 project's store reading through it, and its state derived once per version). `ProjectStore` takes a `Reader`
 (`store.ts`): the files themselves by default (the CLI, the engine's own store), the cache in the model. The store's
-writes report their paths (`onWrite`) as they are made; `countWrite` takes the path of a write made outside it.
+writes report their paths (`onWrite`) as they are made; `wrote` takes the path of a write made outside it.
 Everything the cache hands out is frozen.
 
 Moved onto it: `stateOf` in `main.ts` (every route that read the state, and the snapshot the decisions in `changed()`

@@ -16,7 +16,7 @@ import { orchestratorOverview } from "@nexus/protocol";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { INTEGRATION_CONDITION, NEXUS_SESSION, ProjectStore, approveQueue, countWrite, loadProjectState, readCapacity, routeAnswers, setStepLevel, updateSettings, type StepDef } from "@nexus/protocol";
+import { INTEGRATION_CONDITION, NEXUS_SESSION, ProjectStore, approveQueue, wrote, loadProjectState, readCapacity, routeAnswers, setStepLevel, updateSettings, type StepDef } from "@nexus/protocol";
 import { Capacity } from "../src/capacity.ts";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
@@ -112,7 +112,7 @@ function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean; jobs?
     const at = lines.findIndex((l) => l.includes('"type":"step.done"') && l.includes('"step":"Q.integrate"'));
     assert.ok(at >= 0, "the step.done is there to take away");
     writeFileSync(file, lines.slice(0, at).map((l) => `${l}\n`).join(""));
-    countWrite(file); // a write outside the store, told to whoever keeps the files in memory (a model: model-reads.ts)
+    wrote(file); // a write outside the store, told to whoever keeps the files in memory (a model: model-reads.ts)
     const g = store.readGit("Q")!;
     const round = g.steps["Q.integrate"]!.at(-1)!;
     round.end = undefined; round.ended_at = undefined;

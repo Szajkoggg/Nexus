@@ -182,7 +182,8 @@ the engine and the attention watch, whether or not the decision before it had wr
 rebuilding per change notification, the decisions' own work not counted (a replay of its sequence on the copy, without
 the server, which would have touched the worktrees the copy's queues name). Now the store counts the writes this process
 makes (`writeCount`), and the server passes one snapshot on until the count moves; `changed()` forces only the first
-rebuild (the change came from outside). With no decision writing, one rebuild per change: about 125 ms. A decision that
+rebuild (the change came from outside). (Since queue SM the model's write-through does this instead, and the count
+is gone: model.md.) With no decision writing, one rebuild per change: about 125 ms. A decision that
 writes still gets the state its predecessors left. A write by another process between two decisions is seen at the next
 change notification, which the watcher sends for it anyway. The rest of a rebuild is reading: a profile puts 17% in
 `existsSync`, 15% in reading files and a quarter in parsing YAML; a cache of parsed files by modification time would be

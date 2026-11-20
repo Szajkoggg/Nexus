@@ -3,7 +3,7 @@
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { NEXUS_SESSION, ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type Effort, type StatusChange, type InboxEntry, ReviewLevel, type RunFile, type SessionFile } from "./schemas.ts";
-import { ProjectStore, countWrite, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
+import { ProjectStore, wrote, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
 import { OVERRIDABLE, changedGlobal, settingKey } from "./settings.ts";
 import { reviewedByOrchestrator, runGoing } from "./status-rules.ts";
 import { commentTarget, isApproved, loadProjectState, pendingProvisional, type ProjectState, type QueueView } from "./state.ts";
@@ -82,7 +82,7 @@ export function deleteNote(store: ProjectStore, queue: string, step: string, id:
   if (!note) throw new ActionError("no such note", 404);
   if (note.read_at) throw new ActionError("the note was already delivered", 409);
   const file = join(store.queueDir(queue), "notes", step, `${id}.md`);
-  if (existsSync(file)) { unlinkSync(file); countWrite(file); }
+  if (existsSync(file)) { unlinkSync(file); wrote(file); }
 }
 
 export function sendMessage(store: ProjectStore, session: string, text: unknown, about?: { queue?: string; step?: string }): string {
