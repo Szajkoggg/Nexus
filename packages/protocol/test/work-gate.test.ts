@@ -1,15 +1,15 @@
 // The work gate (queue SM, the decision of 2026-11-18): the reads' work counted, not timed, on a synthetic .nexus at
-// 1x and 4x Nexus's own size (synthetic.ts). Until the model (docs/design/model.md) it records today's numbers and
-// holds what they are now (a change or an appended line rebuilds everything; the start rebuilds once per queue); its
-// rules are written as skipped tests that SM3 turns on: one appended line reads only that line, a request makes no whole
-// read, the counts are the same at 1x and 4x.
+// 1x and 4x Nexus's own size (synthetic.ts). It measures the reads two ways: straight from the files (as the CLI, and
+// the server's readers not moved yet, read: recorded for comparison) and through the server's model of the files
+// (model.ts, docs/design/model.md), where its rules hold: one appended line reads that line (and the 64 bytes before
+// it); a request makes no whole read; the start reads the project once; the counts are the same at 1x and 4x.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { ProjectStore, loadProjectState, newId, releaseOrphanedSteps, resetWork, workCounts, type Event, type WorkCounts } from "../src/index.ts";
+import { ProjectModel, ProjectStore, loadProjectState, newId, releaseOrphanedSteps, resetWork, workCounts, type Event, type WorkCounts } from "../src/index.ts";
 import { NEXUS_SIZE, generateNexus, type SyntheticSize } from "./synthetic.ts";
 
 process.env.NEXUS_HOME = mkdtempSync(join(tmpdir(), "nexus-gate-home-"));
@@ -22,93 +22,132 @@ function counted(fn: () => unknown): WorkCounts {
   fn();
   return workCounts();
 }
+type Line = WorkCounts & { line: number };
 
-interface Measured {
-  size: SyntheticSize;
-  /** One whole derivation: what the server's first request, or any request after a change, costs today. */
+interface Files {
+  /** One whole derivation: what a request after a change cost before the model. */
   rebuild: WorkCounts;
-  /** The engine's recovery at the start: releaseOrphanedSteps for every queue, then one more state. */
+  /** The engine's recovery at the start before the model: releaseOrphanedSteps for every queue, then one more state. */
   start: WorkCounts;
-  /** One activity line appended (a streaming agent's), then the state the server reads for the change. */
-  activityLine: WorkCounts & { line: number };
-  /** One event appended (an agent's nexus), then the state for the change. */
-  eventLine: WorkCounts & { line: number };
-  /** The conversation list's reads (apps/server/src/conversations.ts, Conversations.list): every session file, every conversation's chat. */
+}
+interface Model {
+  /** The engine's recovery through the model: one state for every queue. */
+  start: WorkCounts;
+  /** A request's state when nothing changed. */
+  request: WorkCounts;
+  /** The conversation list's reads (Conversations.list): every session file, every conversation's chat. */
   conversations: WorkCounts;
+  /** One activity line appended (a streaming agent's), the state read, and the session's activity read (its view). */
+  activityLine: Line;
+  /** One event appended (an agent's nexus), reported by the watcher, then the state. */
+  eventLine: Line;
+  /** A streaming agent's runtime record rewritten (its context tokens), then the state. */
+  runtime: Line;
 }
 
-function measureAt(scale: number): Measured {
+function conversationList(st: ProjectStore): void {
+  for (const id of st.sessionIds()) if (st.readSession(id).role === "conversation") st.readChat(id);
+}
+
+function measureAt(scale: number): { size: SyntheticSize; files: Files; model: Model } {
   const root = join(temp, `x${scale}`);
   const size = generateNexus(root, { scale });
   const st = ProjectStore.forRoot(root);
+  // ---- straight from the files
   loadProjectState(st); // warm: the first read pays for the module's and the disk's caches
   const rebuild = counted(() => loadProjectState(st));
   const queues = st.queueIds();
-  // Today's recovery (engine.ts, recoverAfterRestart): one releaseOrphanedSteps per queue, each a whole state, then a
-  // state of its own. Measured on one queue and counted for all: the same work each, a whole run takes minutes at 4x.
+  // Measured on one queue and counted for all: the same whole read each, a whole run takes minutes at 4x.
   const one = counted(() => releaseOrphanedSteps(st, queues[0]!));
-  const times = (w: WorkCounts, n: number): WorkCounts => Object.fromEntries(Object.entries(w).map(([k, v]) => [k, v * n])) as unknown as WorkCounts;
-  const add = (a: WorkCounts, b: WorkCounts): WorkCounts => Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v + b[k as keyof WorkCounts]])) as unknown as WorkCounts;
-  const start = add(times(one, queues.length), rebuild);
-  const session = st.sessionIds().find((s) => s.startsWith("w-"))!;
-  const activityFile = join(st.sessionDir(session), "activity.jsonl");
-  const before1 = statSync(activityFile).size;
-  const activityLine = { ...counted(() => { st.appendActivity(session, { at: new Date().toISOString(), kind: "tool", text: "Read packages/protocol/src/state.ts" }); loadProjectState(st); }), line: statSync(activityFile).size - before1 };
-  const eventsFile = join(st.sessionDir(session), "events.jsonl");
-  const before2 = statSync(eventsFile).size;
-  const eventLine = { ...counted(() => { st.appendEvent({ v: 1, id: newId(), at: new Date().toISOString(), session, type: "log", level: "info", text: "a line" } as Event); loadProjectState(st); }), line: statSync(eventsFile).size - before2 };
-  const conversations = counted(() => {
-    for (const id of st.sessionIds()) {
-      const s = st.readSession(id);
-      if (s.role === "conversation") st.readChat(id);
-    }
-  });
-  return { size, rebuild, start, activityLine, eventLine, conversations };
+  const files: Files = { rebuild, start: Object.fromEntries(Object.entries(one).map(([k, v]) => [k, v * queues.length + rebuild[k as keyof WorkCounts]])) as unknown as WorkCounts };
+
+  // ---- through the model
+  const model = new ProjectModel(st.dir);
+  try {
+    const start = counted(() => {
+      let state = model.current();
+      for (const q of queues) if (releaseOrphanedSteps(st, q, { state }).length) state = model.current();
+    });
+    const request = counted(() => model.current());
+    conversationList(model.store);
+    const conversations = counted(() => conversationList(model.store));
+    const session = st.sessionIds().find((s) => s.startsWith("w-"))!;
+    const dir = st.sessionDir(session);
+    const grew = (file: string, fn: () => void): Line => { const size0 = statSync(file).size; const w = counted(fn); return { ...w, line: statSync(file).size - size0 }; };
+    model.store.readActivity(session); // its view is open
+    const activityLine = grew(join(dir, "activity.jsonl"), () => {
+      st.appendActivity(session, { at: "2026-11-20T10:00:00.000Z", kind: "tool", text: "Read packages/protocol/src/state.ts" });
+      model.current();
+      model.store.readActivity(session);
+    });
+    const eventLine = grew(join(dir, "events.jsonl"), () => {
+      st.appendEvent({ v: 1, id: newId(), at: "2026-11-20T10:00:01.000Z", session, type: "log", level: "info", text: "a line" } as Event);
+      model.current();
+    });
+    const runtime = grew(join(dir, "runtime.json"), () => {
+      st.writeRuntime(session, { ...st.readRuntime(session)!, context_tokens: 123_456 });
+      resetWork(); // the write's own read of the record before it is the writer's, not the model's
+      model.current();
+    });
+    return { size, files, model: { start, request, conversations, activityLine, eventLine, runtime } };
+  } finally { model.close(); }
 }
 
-let x1: Measured, x4: Measured;
+let x1: ReturnType<typeof measureAt>, x4: ReturnType<typeof measureAt>;
 before(() => { x1 = measureAt(1); x4 = measureAt(4); });
 
 const row = (what: string, a: WorkCounts, b: WorkCounts) =>
-  `${what.padEnd(34)} 1x: ${a.files} files, ${(a.bytes / 1e6).toFixed(2)} MB, ${a.probes} probes, ${a.rebuilds} rebuilds | 4x: ${b.files} files, ${(b.bytes / 1e6).toFixed(2)} MB, ${b.probes} probes, ${b.rebuilds} rebuilds`;
+  `${what.padEnd(44)} 1x: ${a.files} files, ${a.bytes} bytes, ${a.probes} probes, ${a.rebuilds} rebuilds | 4x: ${b.files} files, ${b.bytes} bytes, ${b.probes} probes, ${b.rebuilds} rebuilds`;
 
-test("the work of today's reads at 1x and 4x, recorded", (t) => {
+test("the work of the reads at 1x and 4x: straight from the files, and through the model", (t) => {
   t.diagnostic(`synthetic 1x: ${x1.size.queues} queues, ${x1.size.sessions} sessions, ${x1.size.lines.events} events, ${x1.size.lines.activity} activity lines; 4x: ${x4.size.queues} queues, ${x4.size.sessions} sessions`);
-  t.diagnostic(row("a whole rebuild (a request after a change)", x1.rebuild, x4.rebuild));
-  t.diagnostic(row("the start (recovery, every queue)", x1.start, x4.start));
-  t.diagnostic(row(`one activity line (${x1.activityLine.line} bytes) and its change`, x1.activityLine, x4.activityLine));
-  t.diagnostic(row(`one event line (${x1.eventLine.line} bytes) and its change`, x1.eventLine, x4.eventLine));
-  t.diagnostic(row("the conversation list", x1.conversations, x4.conversations));
-  // Today: every change reads the whole project again, and the start once per queue; all of it grows with the history.
-  assert.equal(x1.rebuild.rebuilds, 1);
-  assert.equal(x1.start.rebuilds, x1.size.queues + 1, "the start: a state per queue, and one more");
-  assert.equal(x4.start.rebuilds, x4.size.queues + 1);
-  for (const m of [x1, x4]) {
-    assert.equal(m.activityLine.rebuilds, 1, "an activity line: a whole rebuild");
-    assert.ok(m.activityLine.bytes >= m.rebuild.bytes, "an activity line: the whole project read again");
-    assert.ok(m.eventLine.bytes >= m.rebuild.bytes, "an event line: the whole project read again");
-  }
-  const ratio = x4.rebuild.bytes / x1.rebuild.bytes;
-  assert.ok(ratio > 3 && ratio < 5, `a rebuild reads about 4 times as much at 4x (${ratio.toFixed(2)})`);
+  t.diagnostic(row("files: a whole rebuild (a request after a change)", x1.files.rebuild, x4.files.rebuild));
+  t.diagnostic(row("files: the start (a state per queue)", x1.files.start, x4.files.start));
+  t.diagnostic(row("model: the start (one state for every queue)", x1.model.start, x4.model.start));
+  t.diagnostic(row("model: a request, nothing changed", x1.model.request, x4.model.request));
+  t.diagnostic(row("model: the conversation list", x1.model.conversations, x4.model.conversations));
+  t.diagnostic(row(`model: one activity line (${x1.model.activityLine.line} bytes)`, x1.model.activityLine, x4.model.activityLine));
+  t.diagnostic(row(`model: one event line (${x1.model.eventLine.line} bytes)`, x1.model.eventLine, x4.model.eventLine));
+  t.diagnostic(row("model: a runtime record rewritten", x1.model.runtime, x4.model.runtime));
+  // Straight from the files, every change reads the whole project again, and the start once per queue.
+  assert.equal(x1.files.start.rebuilds, x1.size.queues + 1);
+  assert.equal(x4.files.start.rebuilds, x4.size.queues + 1);
+  const ratio = x4.files.rebuild.bytes / x1.files.rebuild.bytes;
+  assert.ok(ratio > 3 && ratio < 5, `a rebuild from the files reads about 4 times as much at 4x (${ratio.toFixed(2)})`);
 });
 
-// The gate's rules, on from SM3 (the model): each fails today (run them without the skip to see by how much).
-test("rule: one appended activity line reads that line (and the 64 bytes before it), and rebuilds nothing", { skip: "on with SM3 (the model)" }, () => {
-  for (const m of [x1, x4]) {
+test("rule: one appended activity line reads that line (and the 64 bytes before it), and derives nothing", () => {
+  for (const { model: m } of [x1, x4]) {
     assert.equal(m.activityLine.rebuilds, 0);
     assert.ok(m.activityLine.bytes <= m.activityLine.line + 64, `${m.activityLine.bytes} bytes read for a line of ${m.activityLine.line}`);
   }
 });
-test("rule: one appended event reads that line (and the 64 bytes before it)", { skip: "on with SM3 (the model)" }, () => {
-  for (const m of [x1, x4]) assert.ok(m.eventLine.bytes <= m.eventLine.line + 64, `${m.eventLine.bytes} bytes read for a line of ${m.eventLine.line}`);
+test("rule: one appended event reads that line (and the 64 bytes before it), and derives the state once", () => {
+  for (const { model: m } of [x1, x4]) {
+    assert.equal(m.eventLine.rebuilds, 1);
+    assert.ok(m.eventLine.bytes <= m.eventLine.line + 64, `${m.eventLine.bytes} bytes read for a line of ${m.eventLine.line}`);
+  }
 });
-test("rule: the start reads the project once, the same at 1x and 4x in rebuilds", { skip: "on with SM3 (the model)" }, () => {
-  assert.equal(x1.start.rebuilds, 1);
-  assert.equal(x4.start.rebuilds, 1);
+test("rule: a rewritten runtime record is read alone, once", () => {
+  for (const { model: m } of [x1, x4]) {
+    assert.equal(m.runtime.files, 1);
+    assert.ok(m.runtime.bytes <= m.runtime.line + 400, `${m.runtime.bytes} bytes read`);
+  }
 });
-test("rule: a request makes no whole read; the counts are the same at 1x and 4x", { skip: "on with SM3 (the model)" }, () => {
-  assert.deepEqual(x4.conversations, x1.conversations);
-  assert.deepEqual({ ...x4.activityLine, line: 0 }, { ...x1.activityLine, line: 0 });
+test("rule: the start reads the project once and derives its state once, at 1x and at 4x", () => {
+  for (const { model: m, files } of [x1, x4]) {
+    assert.equal(m.start.rebuilds, 1);
+    assert.ok(m.start.bytes <= files.rebuild.bytes * 1.05, `${m.start.bytes} bytes against a whole read's ${files.rebuild.bytes}`);
+  }
+});
+test("rule: a request makes no read; the counts are the same at 1x and 4x", () => {
+  for (const { model: m } of [x1, x4]) {
+    assert.deepEqual(m.request, { files: 0, bytes: 0, probes: 0, listings: 0, rebuilds: 0 });
+    assert.deepEqual(m.conversations, { files: 0, bytes: 0, probes: 0, listings: 0, rebuilds: 0 });
+  }
+  const same = (k: "activityLine" | "eventLine" | "runtime") => ({ ...x1.model[k], line: 0, bytes: x1.model[k].bytes - x1.model[k].line });
+  const at4 = (k: "activityLine" | "eventLine" | "runtime") => ({ ...x4.model[k], line: 0, bytes: x4.model[k].bytes - x4.model[k].line });
+  for (const k of ["activityLine", "eventLine", "runtime"] as const) assert.deepEqual(at4(k), same(k), k);
 });
 
 /** Every file of a tree, by its path from the root, and a hash of its contents. */

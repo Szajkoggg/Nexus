@@ -55,8 +55,8 @@ function Delivery({ project, record, retryable = true }: { project: string; reco
 }
 
 export function IdeaActivity({ project, file }: { project: string; file: string }) {
-  const { version } = usePage();
-  const chats = useQuery<SessionFile[]>(projectUrl(project, "/conversations"), version);
+  const { version, logs } = usePage();
+  const chats = useQuery<SessionFile[]>(projectUrl(project, "/conversations"), logs);
   const handoffs = useQuery<IdeaHandoff[]>(projectUrl(project, "/ideas/handoffs"), version);
   return <details data-idea-activity className="space-y-3 text-xs [overflow-wrap:anywhere]"><summary>{t("ideas.onwardHistory")}</summary>
     {(chats.error || handoffs.error) && <ReadError error={chats.error ?? handoffs.error!} />}

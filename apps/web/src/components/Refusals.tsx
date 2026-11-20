@@ -18,7 +18,7 @@ const BY: Record<Refusal["by"], Key> = {
 /** The refusals of one step. */
 export function StepRefusals({ project, queue, step }: { project: ProjectState; queue: string; step: string }) {
   const id = project.project.id;
-  const { data: list, error } = useQuery<Refusal[]>(projectUrl(id, `/refusals?queue=${enc(queue)}&step=${enc(step)}`), usePage().version);
+  const { data: list, error } = useQuery<Refusal[]>(projectUrl(id, `/refusals?queue=${enc(queue)}&step=${enc(step)}`), usePage().logs);
   const [open, setOpen] = useState<string>();
   if (!list && error) return <Section title={t("refusals.title")}><ReadError error={error} /></Section>;
   if (!list?.length) return null;

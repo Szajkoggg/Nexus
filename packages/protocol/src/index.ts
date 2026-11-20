@@ -1,6 +1,7 @@
 export * from "./schemas.ts";
 export * from "./store.ts";
 export * from "./state.ts";
+export * from "./model.ts";
 export * from "./actions.ts";
 export * from "./times.ts";
 export * from "./status-rules.ts";

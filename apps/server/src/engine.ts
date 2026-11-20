@@ -135,6 +135,11 @@ export interface EngineOptions {
    */
   boundary?: (queueId: string, step: string, state: ProjectState) => boolean | { hold: string };
   /**
+   * The project's state from the server's model of its files (main.ts; docs/design/model.md): the recovery at the start
+   * reads it once for every queue instead of a state per queue. Without it, the files are read.
+   */
+  state?: () => ProjectState;
+  /**
    * The workstation's capacity coordinator (src/capacity.ts). With it, Nexus runs each step's checks after the worker's
    * `nexus step done` (src/check-runs.ts); without it (an engine of an older kind of test), the worker reports them.
    */
@@ -229,6 +234,7 @@ export class Engine implements Member {
   private readonly startupMs: number;
   private readonly backgroundLimitMs: number;
   private readonly boundary?: EngineOptions["boundary"];
+  private readonly stateNow?: () => ProjectState;
   /**
    * A run whose step's turn ended while background work ran, by queue: since when Nexus waits (on the clock), and
    * whether the wait is over (`expired`: the usual rule applies until the work ends or the step opens again).
@@ -260,6 +266,7 @@ export class Engine implements Member {
     this.startupMs = options.startupMs ?? STARTUP_MS;
     this.backgroundLimitMs = options.backgroundLimitMs ?? BACKGROUND_LIMIT_MS;
     this.boundary = options.boundary;
+    this.stateNow = options.state;
     this.clock = options.clock ?? REAL_CLOCK;
     this.clockTimers = new ClockTimers(this.clock, () => this.stopped);
     this.coordinator = options.coordinator ?? new Coordinator();
@@ -759,12 +766,6 @@ export class Engine implements Member {
     if (live) this.deliverInbox(loadProjectState(this.store), live);
     this.changed();
     return true;
-  }
-
-  /** Activity of a session, optionally only what was tagged with a step. */
-  activity(session: string, queue?: string, step?: string, limit = 300) {
-    const items = this.store.readActivity(session).entries.filter((a) => (!queue || a.queue === queue) && (!step || a.step === step));
-    return items.slice(-limit);
   }
 
   shutdown(): void {
@@ -1857,9 +1858,11 @@ export class Engine implements Member {
   // ---------------------------------------------------------------- helpers
 
   private recoverAfterRestart(): void {
-    // A step an earlier run left open while a newer revision went on (no live run of it) goes back to pending.
-    for (const q of this.store.queueIds()) releaseOrphanedSteps(this.store, q);
-    const state = loadProjectState(this.store);
+    // A step an earlier run left open while a newer revision went on (no live run of it) goes back to pending. One
+    // state for every queue (queue SM): between two queues it changes only by such a release, read again after one.
+    const stateNow = () => this.stateNow?.() ?? loadProjectState(this.store);
+    let state = stateNow();
+    for (const q of this.store.queueIds()) if (releaseOrphanedSteps(this.store, q, { state }).length) state = stateNow();
     for (const q of this.store.queueIds()) {
       const run = this.store.readRun(q);
       const view = state.queues.find((x) => x.id === q);

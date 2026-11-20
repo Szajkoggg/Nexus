@@ -82,7 +82,7 @@ export function deleteNote(store: ProjectStore, queue: string, step: string, id:
   if (!note) throw new ActionError("no such note", 404);
   if (note.read_at) throw new ActionError("the note was already delivered", 409);
   const file = join(store.queueDir(queue), "notes", step, `${id}.md`);
-  if (existsSync(file)) { unlinkSync(file); countWrite(); }
+  if (existsSync(file)) { unlinkSync(file); countWrite(file); }
 }
 
 export function sendMessage(store: ProjectStore, session: string, text: unknown, about?: { queue?: string; step?: string }): string {
@@ -654,8 +654,9 @@ function heldByLiveRun(run: RunFile | undefined, step: string): boolean {
  * start, which cleans a step an earlier server left so (a run record replaced, or a revision change before runs went
  * on across revisions). Returns the steps released.
  */
-export function releaseOrphanedSteps(store: ProjectStore, queueId: string, o: { replacing?: boolean } = {}): string[] {
-  const view = loadProjectState(store).queues.find((x) => x.id === queueId);
+export function releaseOrphanedSteps(store: ProjectStore, queueId: string, o: { replacing?: boolean; state?: ProjectState } = {}): string[] {
+  // `state`: the project's state as it stands, when the caller has it (the engine's recovery: one state for every queue).
+  const view = (o.state ?? loadProjectState(store)).queues.find((x) => x.id === queueId);
   if (!view || view.status === "done" || view.status === "cancelled") return [];
   // The run record holds the step it has open, whatever its revision: a revision changes no started step, so the run
   // finishes that step (or resumes it) and takes the new revision at the step's end.

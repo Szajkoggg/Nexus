@@ -6,6 +6,8 @@ import type { Version } from "./query.ts";
 export interface Page {
   /** The current project's version: its own reads are asked again when it moves (a change in that project). */
   version: Version;
+  /** The current project's version with its logs' (an agent's activity, a chat, a refusal): the views of those read at it. */
+  logs: Version;
   /** Moves with every live message: what spans projects (the digest, the usage, the server's state) reads at it. */
   all: Version;
   /** After the user's own write: the project's reads and what spans projects are asked again. */
@@ -20,6 +22,6 @@ export interface Page {
   reader?: string;
 }
 
-const PageContext = createContext<Page>({ version: undefined, all: undefined, reload: () => {}, reloaded: () => Promise.resolve() });
+const PageContext = createContext<Page>({ version: undefined, logs: undefined, all: undefined, reload: () => {}, reloaded: () => Promise.resolve() });
 export const PageProvider = PageContext.Provider;
 export const usePage = (): Page => useContext(PageContext);

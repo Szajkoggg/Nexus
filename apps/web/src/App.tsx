@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectState, QueueStatus } from "@nexus/protocol";
 import { projectUrl, reloads, useLive, useQuery, type AttentionItem, type ProjectSummary, type QueueView } from "./api.ts";
-import { bump, noVersions, projectVersion } from "./query.ts";
+import { bump, logsVersion, noVersions, projectVersion } from "./query.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
 import { NewFromTemplate, RecurringList } from "./components/Recurring.tsx";
 import { QueueDetail } from "./components/details/QueueDetail.tsx";
@@ -74,6 +74,7 @@ export function App() {
   const { data: projects, error: projectsError } = useQuery<ProjectSummary[]>("/api/projects", versions.list);
   const projectId = route.project ?? projects?.[0]?.id;
   const version = projectVersion(versions, projectId);
+  const logs = logsVersion(versions, projectId);
   const { data: state, error } = useQuery<ProjectState>(projectId ? projectUrl(projectId, "/state") : undefined, version);
   /**
    * After the user's own write: the project's reads and what spans projects are asked again (the live notification
@@ -89,8 +90,8 @@ export function App() {
   const notify = useNotifications(projects);
   // App provides the page (below): what it reads itself takes the versions directly.
   const reader = state?.project.languages.reader;
-  const page = useMemo<Page>(() => ({ version, all: versions.all, reload, reloaded, reader }), [version, versions.all, reload, reloaded, reader]);
-  const { data: orchestrator, error: orchestratorError } = useOrchestrator(projectId, version);
+  const page = useMemo<Page>(() => ({ version, logs, all: versions.all, reload, reloaded, reader }), [version, logs, versions.all, reload, reloaded, reader]);
+  const { data: orchestrator, error: orchestratorError } = useOrchestrator(projectId, logs);
   const server = useServer(versions.all);
   // Each panel is a layer in the browser history: opening pushes an entry, closing (or Back) pops it.
   const settingsOpen = isOpen(route.nav, "settings");
@@ -165,7 +166,7 @@ export function App() {
   const [form, setForm] = useApprovalForm(projectId, queue?.id, queue?.revision);
   const fullApproval = !!(queue && !step && needsApproval(queue) && (form ?? (phone ? "panel" : "full")) === "full");
   // "Ideas · N" in a desktop's switch: the conversations that are not archived.
-  const ideas = useQuery<{ id: string; archived?: boolean; last_at?: string }[]>(projectId ? projectUrl(projectId, "/conversations") : undefined, version).data;
+  const ideas = useQuery<{ id: string; archived?: boolean; last_at?: string }[]>(projectId ? projectUrl(projectId, "/conversations") : undefined, logs).data;
   // Unread markers on the chat switch and the phone's tabs, from each chat's place (chatPlace.ts).
   usePlaces();
   const unread: Unread = {

@@ -277,8 +277,8 @@ const KIND_ICON: Record<string, string> = { tool: "›", text: "¶", tool_error:
 
 /** What the agent did during a step, from the runtime's stream. */
 export function Activity({ project, session, queue, step }: { project: string; session: string; queue: string; step: string }) {
-  const { version } = usePage();
-  const { data: items, error } = useQuery<ActivityEntry[]>(projectUrl(project, `/sessions/${enc(session)}/activity?queue=${enc(queue)}&step=${enc(step)}`), version);
+  const { logs } = usePage();
+  const { data: items, error } = useQuery<ActivityEntry[]>(projectUrl(project, `/sessions/${enc(session)}/activity?queue=${enc(queue)}&step=${enc(step)}`), logs);
   const [all, setAll] = useState(false);
   if (!items && error) return <Section title={t("run.activity")}><ReadError error={error} /></Section>;
   if (!items?.length) return null;

@@ -108,6 +108,8 @@ interface News {
 export class Orchestrator {
   private readonly host: AgentHost;
   private readonly store: ProjectStore;
+  /** Where the dashboard's view of the chat reads (the server's model of the files, main.ts); the decisions read `store`. */
+  private readonly reads: ProjectStore;
   private readonly engine: Engine;
   private readonly changed: () => void;
   /** Wakes the notices held while the orchestrator's runtime is beyond the usage threshold (runtimeFull). */
@@ -130,8 +132,9 @@ export class Orchestrator {
   private readonly helpers?: ReviewHelpers;
 
   /** `host`: how its process is made (tests give a stand-in); `helpers`: the review helpers' options, when they run. */
-  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: News = {}, host: AgentHostOptions & { nowMs?: () => number; helpers?: HelperOptions } = {}) {
+  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: News = {}, host: AgentHostOptions & { nowMs?: () => number; helpers?: HelperOptions; reads?: ProjectStore } = {}) {
     this.store = store;
+    this.reads = host.reads ?? store;
     this.engine = engine;
     this.changed = changed;
     this.news = { update: news.update ?? (() => undefined), plan: news.plan ?? (() => []), changes: news.changes ?? (() => []), crash: news.crash ?? (() => undefined), push: news.push };
@@ -159,13 +162,13 @@ export class Orchestrator {
     const s = this.session();
     const o = this.store.readProject().orchestrator;
     // The newest 300 entries with their lines, and the session's pins (chats.ts); a fresh session has none.
-    const own = s ? chatView(this.store, s.id, VIEW_ENTRIES) : { chat: [], pins: [] };
+    const own = s ? chatView(this.reads, s.id, VIEW_ENTRIES) : { chat: [], pins: [] };
     return {
       session: s ?? null,
       model: s ? s.model ?? null : o?.model ?? null,
       effort: s ? s.effort ?? null : o?.effort ?? null,
       state: this.proc?.state ?? "exited",
-      runtime: s ? this.store.readRuntime(s.id) ?? null : null,
+      runtime: s ? this.reads.readRuntime(s.id) ?? null : null,
       ...own,
       earlier: s ? this.earlier(s, own.chat.length) : [],
     };
@@ -180,7 +183,7 @@ export class Orchestrator {
     let room = Math.max(EARLIER_MIN, VIEW_ENTRIES - shown);
     const out: EarlierSession[] = [];
     for (const x of this.lineage(s).slice(1)) {
-      const chat = room > 0 ? chatView(this.store, x.id, room).chat : [];
+      const chat = room > 0 ? chatView(this.reads, x.id, room).chat : [];
       room -= chat.length;
       out.unshift({ session: x.id, created_at: x.created_at, chat, switch: this.switchOf(x) });
     }

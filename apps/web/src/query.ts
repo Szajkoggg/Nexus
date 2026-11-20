@@ -120,22 +120,24 @@ export class Query<T> {
 }
 
 /** A message of the page's WebSocket (`reconnected` is the page's own, sent when the socket opens again). */
-export interface LiveMessage { type: string; project?: string }
+export interface LiveMessage { type: string; project?: string; session?: string }
 
 /**
- * What the live notifications have changed so far. `all` counts every message: what spans projects (the digest, the
- * usage, the server's state) is read at it. `list` counts what changes the project list and its counts. `project`
- * counts each project's own changes; a reconnect may have missed any, so it bumps `epoch`, part of every project's
- * version.
+ * What the live notifications have changed so far. `all` counts every message but a log's: what spans projects (the
+ * digest, the usage, the server's state) is read at it. `list` counts what changes the project list and its counts.
+ * `project` counts each project's own changes; a reconnect may have missed any, so it bumps `epoch`, part of every
+ * project's version. `logs` counts each project's `log` messages: a line of an agent's activity, a chat or a refusal,
+ * which changes no state (docs/design/model.md); only the views of those logs read at it.
  */
-export interface Versions { all: number; list: number; epoch: number; project: Readonly<Record<string, number>> }
+export interface Versions { all: number; list: number; epoch: number; project: Readonly<Record<string, number>>; logs: Readonly<Record<string, number>> }
 
-export const noVersions: Versions = { all: 0, list: 0, epoch: 0, project: {} };
+export const noVersions: Versions = { all: 0, list: 0, epoch: 0, project: {}, logs: {} };
 
 export function bump(v: Versions, m: LiveMessage): Versions {
   const all = v.all + 1;
-  if (m.type === "reconnected") return { all, list: v.list + 1, epoch: v.epoch + 1, project: v.project };
+  if (m.type === "reconnected") return { all, list: v.list + 1, epoch: v.epoch + 1, project: v.project, logs: v.logs };
   if (m.type === "projects") return { ...v, all, list: v.list + 1 };
+  if (m.type === "log" && m.project) return { ...v, logs: { ...v.logs, [m.project]: (v.logs[m.project] ?? 0) + 1 } };
   if (m.type === "changed" && m.project) {
     return { ...v, all, list: v.list + 1, project: { ...v.project, [m.project]: (v.project[m.project] ?? 0) + 1 } };
   }
@@ -144,3 +146,5 @@ export function bump(v: Versions, m: LiveMessage): Versions {
 
 /** The version a project's own reads are asked at: it moves only with that project's changes (and a reconnect). */
 export const projectVersion = (v: Versions, id: string | undefined): string => `${v.epoch}.${id ? v.project[id] ?? 0 : 0}`;
+/** The version a project's logs (activity, chats, refusals) are asked at: its own version, and its log messages'. */
+export const logsVersion = (v: Versions, id: string | undefined): string => `${projectVersion(v, id)}.${id ? v.logs[id] ?? 0 : 0}`;

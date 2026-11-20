@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Action, type ActionState } from "../src/action.ts";
-import { Query, Reloads, Requests, bump, noVersions, projectVersion, type Versions } from "../src/query.ts";
+import { Query, Reloads, Requests, bump, logsVersion, noVersions, projectVersion, type Versions } from "../src/query.ts";
 
 /** A fetcher whose answers the test hands out by hand, in any order. */
 function manual() {
@@ -157,11 +157,11 @@ test("a change in another project leaves this project's version alone, so its re
 test("what each message bumps", () => {
   const v0 = noVersions;
   const changed = bump(v0, { type: "changed", project: "A" });
-  assert.deepEqual(changed, { all: 1, list: 1, epoch: 0, project: { A: 1 } });
-  assert.deepEqual(bump(changed, { type: "projects" }), { all: 2, list: 2, epoch: 0, project: { A: 1 } });
-  assert.deepEqual(bump(changed, { type: "server" }), { all: 2, list: 1, epoch: 0, project: { A: 1 } });
+  assert.deepEqual(changed, { all: 1, list: 1, epoch: 0, project: { A: 1 }, logs: {} });
+  assert.deepEqual(bump(changed, { type: "projects" }), { all: 2, list: 2, epoch: 0, project: { A: 1 }, logs: {} });
+  assert.deepEqual(bump(changed, { type: "server" }), { all: 2, list: 1, epoch: 0, project: { A: 1 }, logs: {} });
   const again = bump(changed, { type: "reconnected" });
-  assert.deepEqual(again, { all: 2, list: 2, epoch: 1, project: { A: 1 } });
+  assert.deepEqual(again, { all: 2, list: 2, epoch: 1, project: { A: 1 }, logs: {} });
   // A reconnect may have missed any project's change: every project's version moves.
   assert.notEqual(projectVersion(again, "B"), projectVersion(changed, "B"));
   assert.notEqual(projectVersion(again, "A"), projectVersion(changed, "A"));
@@ -299,4 +299,15 @@ test("a control waits only for the reads it shows, not for a slow read of someth
   await settled();
   assert.equal(landed, true);
   assert.equal(state.view("/state").data, "level 3");
+});
+
+test("a log line moves only its project's logs: the state and what spans projects are not asked again", () => {
+  const changed = bump(noVersions, { type: "changed", project: "A" });
+  const logged = bump(changed, { type: "log", project: "A", session: "s1" });
+  assert.deepEqual(logged, { all: 1, list: 1, epoch: 0, project: { A: 1 }, logs: { A: 1 } });
+  assert.equal(projectVersion(logged, "A"), projectVersion(changed, "A"));
+  assert.notEqual(logsVersion(logged, "A"), logsVersion(changed, "A"));
+  assert.equal(logsVersion(logged, "B"), logsVersion(changed, "B"));
+  // A change of the project moves its logs' version too (a chat's view shows the state's parts as well).
+  assert.notEqual(logsVersion(bump(logged, { type: "changed", project: "A" }), "A"), logsVersion(logged, "A"));
 });

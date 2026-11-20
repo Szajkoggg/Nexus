@@ -655,8 +655,8 @@ function AboutStep({ project, c, className = "" }: { project: string; c: Session
  * conversations, each a link into it.
  */
 export function StepChat({ project, queue, step }: { project: string; queue: string; step: string }) {
-  const { version } = usePage();
-  const list = useQuery<ConversationItem[]>(projectUrl(project, "/conversations"), version).data;
+  const { logs } = usePage();
+  const list = useQuery<ConversationItem[]>(projectUrl(project, "/conversations"), logs).data;
   const { busy, error, run } = useAction();
   const mine = (list ?? []).filter((c) => !c.archived && c.about?.queue === queue && c.about.step === step);
   const go = (fresh: boolean) => run(async () => {
@@ -740,15 +740,15 @@ function Conversations({ project, name, defaultRuntime, inline, desk, switcher }
   /** The Ideas panel's switch (to the overview), in the column's header on a desktop, atop the list on the phone. */
   switcher: (wide: boolean) => ReactNode;
 }) {
-  const { reload: onChanged, version } = usePage();
-  const { data: list, error: listError } = useQuery<ConversationItem[]>(projectUrl(project, "/conversations"), version);
+  const { reload: onChanged, logs } = usePage();
+  const { data: list, error: listError } = useQuery<ConversationItem[]>(projectUrl(project, "/conversations"), logs);
   usePlaces(); // the list's unread dots follow each conversation's place
   // The open conversation (or the new-conversation form) is a layer above the panel: Back returns to the list.
   const layer = layerValue(useNav(), "conversation");
   const creating = layer === "new";
   const open = creating ? undefined : layer;
   const [showArchived, setShowArchived] = useState(false);
-  const { data: view, error: viewError } = useQuery<ConversationView>(open ? projectUrl(project, `/conversations/${enc(open)}`) : undefined, version);
+  const { data: view, error: viewError } = useQuery<ConversationView>(open ? projectUrl(project, `/conversations/${enc(open)}`) : undefined, logs);
   // On the phone's tab the list or one conversation at a time; on a desktop both, side by side.
   const side = !desk;
   const current = list?.find((c) => c.id === open);
