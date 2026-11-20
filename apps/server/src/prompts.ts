@@ -1062,6 +1062,14 @@ export function staticAnalysisNotice(): Notice {
   };
 }
 
+/** The Nexus server ended on an uncaught exception and was started again since (src/crash.ts). */
+export function serverCrashNotice(c: { at: string; error: string }): Notice {
+  return {
+    fact: `The Nexus server stopped at ${c.at} on an uncaught exception: ${c.error}. It has been started again since; running queues came back as a restart leaves them.`,
+    todo: "Check nexus status for work the stop interrupted, and tell the user in a sentence if anything needs them; the stack is in the server's log and in <NEXUS_HOME>/crash.json.",
+  };
+}
+
 /** What the orchestrator needs to review a step: its acceptance, the checks and material of this round, its commits. */
 function reviewBrief(q: QueueView, st: StepView, away: AwayNow = { on: false }): string {
   const since = st.segments.at(-1)?.start ?? "";

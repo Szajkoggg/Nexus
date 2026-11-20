@@ -16,10 +16,11 @@ import { orchestratorAgentsFile } from "./helpers.ts";
 import { RESTARTED, STOPPED, chatView } from "./chats.ts";
 import type { UpdateNotice } from "./lifecycle.ts";
 import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
+import type { CrashRecord } from "./crash.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
   acceptedNoteNotice, approvalNotice, checkAcceptedNotice, checkDecisionNotice, checkNotCommandNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, tokenText, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
+  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, tokenText, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, serverCrashNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
 import { ReviewHelpers, audited, type HelperOptions } from "./review-helper.ts";
@@ -108,10 +109,11 @@ export class Orchestrator {
   private applying = false;
   /**
    * News about Nexus itself: the outcome of an update, for the session that asked for it (src/lifecycle.ts), and the
-   * changes for agents of each deploy, for every session older than it (src/deploy.ts).
+   * changes for agents of each deploy, for every session older than it (src/deploy.ts), and the server's last crash
+   * (src/crash.ts), for every session older than it too.
    */
   private stopped = false;
-  private readonly news: { update: () => UpdateNotice | undefined; plan: () => PlanNotice[]; changes: () => DeployChanges[]; push?: (n: UserNotice) => void };
+  private readonly news: { update: () => UpdateNotice | undefined; plan: () => PlanNotice[]; changes: () => DeployChanges[]; crash: () => CrashRecord | undefined; push?: (n: UserNotice) => void };
   /**
    * The review helpers (queue RH, src/review-helper.ts), which take its routine reviews; they run before its notices.
    * Without them (`host.helpers` not given, as in most tests) the orchestrator reviews every step itself.
@@ -119,11 +121,11 @@ export class Orchestrator {
   private readonly helpers?: ReviewHelpers;
 
   /** `host`: how its process is made (tests give a stand-in); `helpers`: the review helpers' options, when they run. */
-  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: { update?: () => UpdateNotice | undefined; plan?: () => PlanNotice[]; changes?: () => DeployChanges[]; push?: (n: UserNotice) => void } = {}, host: AgentHostOptions & { nowMs?: () => number; helpers?: HelperOptions } = {}) {
+  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: { update?: () => UpdateNotice | undefined; plan?: () => PlanNotice[]; changes?: () => DeployChanges[]; crash?: () => CrashRecord | undefined; push?: (n: UserNotice) => void } = {}, host: AgentHostOptions & { nowMs?: () => number; helpers?: HelperOptions } = {}) {
     this.store = store;
     this.engine = engine;
     this.changed = changed;
-    this.news = { update: news.update ?? (() => undefined), plan: news.plan ?? (() => []), changes: news.changes ?? (() => []), push: news.push };
+    this.news = { update: news.update ?? (() => undefined), plan: news.plan ?? (() => []), changes: news.changes ?? (() => []), crash: news.crash ?? (() => undefined), push: news.push };
     this.host = new AgentHost(store, ROLE_RECORDS.orchestrator, host);
     this.nowMs = host.nowMs ?? Date.now;
     if (host.helpers) this.helpers = new ReviewHelpers(store, changed, () => engine.draining, host.helpers);
@@ -889,6 +891,9 @@ ${n.text}` });
         items.push({ key: `notify:static-analysis:${note.reminded_at}`, ...staticAnalysisNotice() });
       }
     }
+    // The server's last crash (src/crash.ts): told once to a session that ran before it, whatever the dashboard shows.
+    const crash = updateOnly ? undefined : this.news.crash();
+    if (crash && crash.at >= since) items.push({ key: `notify:crash:${crash.at}`, ...serverCrashNotice(crash) });
     for (const x of updateOnly ? [] : state.questions) {
       const asker = state.sessions.find((y) => y.id === x.session);
       if (x.state !== "open" || asker?.role !== "worker" || x.asked_at < since) continue;

@@ -1190,6 +1190,12 @@ export const en = {
   "settings.server.updateHint": "Update Nexus lets every running step finish (new steps wait), moves this instance to the newest commit on main, builds it and restarts. The queues it held go on by themselves; paused or stopped ones stay as they are. Once the new version is up, it pushes that commit of main to its upstream, fast-forward only; a failed push leaves the update in place and says why here.",
   "settings.server.noPlan": "No deploy planned. Ask the orchestrator for one after a step, after a queue or at a time (nexus server update --after or --at).",
 
+  // ---------------------------------------------------------------- the server's last crash (Crash.tsx)
+  "crash.title": "The server stopped",
+  "crash.text": "The server stopped: {error}, {time}",
+  "crash.hint": "An uncaught exception ended it; it was started again since. The stack is in the server's log and in crash.json under NEXUS_HOME.",
+  "crash.dismiss": "Close",
+
   // ---------------------------------------------------------------- the planned deploy (DeployPlan.tsx)
   "deploy.title": "Deploy planned",
   "deploy.startedTitle": "Planned deploy under way",

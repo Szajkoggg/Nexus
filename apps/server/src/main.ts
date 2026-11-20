@@ -1,6 +1,6 @@
 // The Nexus server: reads every registered project's .nexus/ directory, serves the dashboard and its API,
 // and tells connected dashboards when a project's files change. It writes nothing in phase 1.
-import { createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";
+import { appendFileSync, createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
@@ -31,6 +31,7 @@ import { Orchestrator } from "./orchestrator.ts";
 import { Conversations } from "./conversations.ts";
 import { listModels } from "./models.ts";
 import { readDeployChanges, readDeploySettings, writeDeploySettings } from "./deploy.ts";
+import { crashNotice, dismissCrash, readCrash, recordCrash } from "./crash.ts";
 import { Standby, refuseHandoverDir, smokeCheck, takeHandoverEnv } from "./handover.ts";
 import { Lifecycle, ROOT, projectPart, version } from "./lifecycle.ts";
 import { DeployPlanner, PlanError, planTime } from "./deploy-plan.ts";
@@ -52,8 +53,10 @@ const HANDOVER = takeHandoverEnv();
 // NEXUS_LOG: the server writes its own log (1: <NEXUS_HOME>/server.log, or a path). Node opens it shared, so a
 // successor after an update can append while its predecessor still holds it (a shell's `>>` would lock it).
 let log: WriteStream | undefined;
+let logFile: string | undefined;
 if (process.env.NEXUS_LOG) {
   const file = process.env.NEXUS_LOG === "1" ? join(nexusHome(), "server.log") : process.env.NEXUS_LOG;
+  logFile = file;
   mkdirSync(dirname(file), { recursive: true });
   log = createWriteStream(file, { flags: "a" });
   const logTo = log;
@@ -61,9 +64,18 @@ if (process.env.NEXUS_LOG) {
     const write = stream.write.bind(stream) as (chunk: unknown, ...rest: unknown[]) => boolean;
     stream.write = ((chunk: unknown, ...rest: unknown[]) => { logTo.write(chunk as string); return write(chunk, ...rest); }) as typeof stream.write;
   }
-  process.on("uncaughtException", (err) => { logTo.write(`${new Date().toISOString()} uncaught: ${err.stack ?? err}\n`); process.exit(1); });
   console.log(`---- ${new Date().toISOString()} pid ${process.pid}`);
 }
+// An uncaught exception ends the server, as it always did: its stack goes to the log (or to stderr without one) and the
+// process exits with 1. It is also recorded in <NEXUS_HOME>/crash.json (src/crash.ts), which the next server shows on
+// the dashboard and tells every project's orchestrator. An unhandled rejection comes here too (Node's default, throw).
+process.on("uncaughtException", (err) => {
+  const line = `${new Date().toISOString()} uncaught: ${err.stack ?? err}\n`;
+  // Written at once: the stream's write would still be pending when the process exits.
+  try { if (logFile) appendFileSync(logFile, line); else process.stderr.write(line); } catch { /* the record below still tells */ }
+  recordCrash(err);
+  process.exit(1);
+});
 
 // A backstop: a hand-over folder that is not this NEXUS_HOME's is not ours. Refuse it before anything is written or
 // started, and exit non-zero: a real predecessor then sees a failure and rolls back.
@@ -119,7 +131,7 @@ function refreshRegistry(): void {
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).
     // Its routine reviews go to short-lived review helpers (src/review-helper.ts) while review_helper.enabled is on.
-    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), plan: () => planner.notices(), changes: readDeployChanges, push: ({ kind, ...n }) => void push(n, { kind }) }, { helpers: {} });
+    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), plan: () => planner.notices(), changes: readDeployChanges, crash: readCrash, push: ({ kind, ...n }) => void push(n, { kind }) }, { helpers: {} });
     projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator, merger, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }
@@ -808,7 +820,7 @@ app.get("/api/capacity", (c) => c.json(readCapacity() ?? null));
 // Nexus itself: its version, and updating it without cutting off running work (src/lifecycle.ts).
 // `local`: whether this request comes straight from this machine (src/remote.ts isLocal), so the dashboard shows what
 // only makes sense on the server machine ("Open in editor": a path on another device points nowhere).
-app.get("/api/server", async (c) => c.json({ ...(await version()), local: isLocal(c.env.incoming), update: lifecycle.status, plan: planner.view(), push_on_deploy: readDeploySettings().push_on_deploy, max_running: readGlobalSettings().defaults.max_running, running: runningSteps(), away: awayNow(readAway()) }));
+app.get("/api/server", async (c) => c.json({ ...(await version()), local: isLocal(c.env.incoming), update: lifecycle.status, plan: planner.view(), push_on_deploy: readDeploySettings().push_on_deploy, max_running: readGlobalSettings().defaults.max_running, running: runningSteps(), away: awayNow(readAway()), crash: crashNotice() }));
 
 // ---------------------------------------------------------------- away mode (docs/protocol/review.md, "Away mode")
 
@@ -912,6 +924,14 @@ app.post("/api/server/cancel-plan", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as { by?: { project?: unknown; session?: unknown } };
   try { return c.json({ text: planner.cancel(askerOf(b.by)), update: lifecycle.status }); }
   catch (e) { return c.json({ error: (e as Error).message }, e instanceof PlanError ? 409 : 500); }
+});
+// The user closed the notice of the server's last crash (src/crash.ts): it is not shown again, in any dashboard.
+app.post("/api/server/crash/dismiss", async (c) => {
+  const b = (await c.req.json().catch(() => ({}))) as { at?: unknown };
+  if (typeof b.at !== "string") return c.json({ error: "at: the crash's time is missing" }, 400);
+  if (!dismissCrash(b.at)) return c.json({ error: "no such crash: a later one replaced it" }, 409);
+  broadcast({ type: "server" });
+  return c.json({ crash: crashNotice() });
 });
 app.post("/api/server/cancel", (c) => {
   try { lifecycle.cancel(); return c.json(lifecycle.status); } catch (e) { return c.json({ error: (e as Error).message }, 409); }

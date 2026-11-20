@@ -14,6 +14,7 @@ import { AttentionPanel, attentionTarget, WaitingList } from "./components/Atten
 import { NotifyToggle, useNotifications } from "./components/Notify.tsx";
 import { AwaySign, AwaySwitch } from "./components/Levels.tsx";
 import { PlannedDeployCard } from "./components/DeployPlan.tsx";
+import { CrashNotice } from "./components/Crash.tsx";
 import { ContextBar, UsageMeter } from "./components/Run.tsx";
 import { ChatPanel, ConversationsPanel, DeskHead, useOrchestrator, type Desk, type Unread } from "./components/Chat.tsx";
 import { NotePanel } from "./components/Ideas.tsx";
@@ -173,6 +174,7 @@ export function App() {
   };
 
   const banners = <>
+    {server?.crash && <CrashNotice crash={server.crash} />}
     {projectsError && <Banner>{t("shell.serverUnreachable", { error: projectsError })}</Banner>}
     {projects?.length === 0 && (
       <Banner>{rich("shell.noProjects", { command: <code key="command">nexus project add &lt;path&gt;</code> })}</Banner>
@@ -358,7 +360,7 @@ export function App() {
   };
   const railProps = { projects: projects ?? [], state, queuesShown: view === "queues", onOpenWaiting: openWaiting, digest, plan: server?.plan, onChanged: reload };
   const besideShown = !wide && ((itemShown && !fullApproval) || waitingOpen || !!note);
-  const alerts = (projectsError || projects?.length === 0 || error) && <div className="px-6 pt-4">{banners}</div>;
+  const alerts = (server?.crash || projectsError || projects?.length === 0 || error) && <div className="px-6 pt-4">{banners}</div>;
   return (
     <PageProvider value={page}><RefsProvider project={projectId} queues={state?.queues}>
     <div className="flex h-dvh">

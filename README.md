@@ -614,6 +614,11 @@ the live worktree back, rebuilds and takes the port again. The settings panel th
 reason and "rolled back to <commit>", and your devices get a notification. There is nothing to undo by hand: fix the
 commit and update again. After a restart the server writes its log to `%APPDATA%\Nexus\server.log`.
 
+If the server stops on an error it did not expect (an uncaught exception), it still stops as before, with the stack in
+its log, but it also leaves a record behind. Once it runs again, the dashboard says "The server stopped: <error>,
+<time>" at the top of the page until you close it, and every project's orchestrator is told once, so it can check
+what the stop interrupted. The record is `crash.json` in `NEXUS_HOME`, with the full stack.
+
 While an update waits, you can go on talking with the orchestrator and the thinking partners. An answer still being
 written when Nexus restarts is cut off; after the restart the chat says "Nexus restarted while answering; it goes on",
 and the same conversation answers your message again.

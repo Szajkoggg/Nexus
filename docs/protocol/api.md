@@ -254,6 +254,13 @@ from 1 to 20, written as the global `defaults.max_running`; at least one of them
 user's only: like withdrawing an approval, it is refused without the dashboard page's own `Origin`. A server waiting
 to take over answers every `/api/projects…` request, and every write under `/api/server/`, with 503.
 
+**Server crash.** An uncaught exception still ends the server (it logs the stack and exits with 1); it also writes
+`<NEXUS_HOME>/crash.json` first (docs/protocol/files.md). `GET /api/server` gives `crash`: the latest crash as `at`
+and `error` (its first line), until the user closes its notice; null otherwise. `POST /api/server/crash/dismiss`
+(`at`: the crash's time) closes it in every dashboard, answering `crash` (null); 400 without `at`, 409 when that is no
+longer the latest crash. Every project's orchestrator session that ran before the crash is told it once
+(`notify:crash:<at>` in its `applied.jsonl`), whether or not the user closed the notice.
+
 **Planned deploys.** Instead of at once, a deploy can wait for a step or a queue of a project, or for a time (decided
 by the user on 2026-11-14, docs/ideas/deploy-timing.md). `nexus server update --after <queue>[/<step>]` plans it for a
 queue of the project the CLI runs in (an orchestrator's own); `--at <time> [--deadline <time>]` for a time. Like

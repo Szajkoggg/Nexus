@@ -703,7 +703,12 @@ export interface ServerInfo {
   away?: { on: boolean; since?: string; until?: string };
   /** The planned deploy, if any (docs/protocol/api.md, "Planned deploys"). */
   plan?: PlannedDeploy | null;
+  /** The server's last crash, until the user closes its notice (docs/protocol/api.md, "Server crash"). */
+  crash?: ServerCrash | null;
 }
+
+/** An uncaught exception that ended the server (src/crash.ts on the server). */
+export interface ServerCrash { at: string; error: string }
 
 const PUSH_TONE = { pushed: "text-ok", failed: "text-danger", skipped: "text-fg-2" } as const;
 const PUSH_LABEL: Record<"pushed" | "failed" | "skipped", Key> = { pushed: "settings.server.pushed", failed: "settings.server.pushFailed", skipped: "settings.server.notPushed" };
