@@ -40,6 +40,8 @@ The design is split by topic, one file each in `docs/design/`. New text goes int
   Sections: The tests' waits (queue TS1); Tests while working, and the slowest files (queue TS2); One full test run on the machine (queue FX); The engine's own waits in tests, and what sets the slowest files (queue FX); Findings from the flaky tests (queue FU4); Findings from the tests that failed or hung in full runs (queue FL)
 - [State, order and reads](design/state.md): clock steps, the dashboard's reads, the status rules, the cost of rebuilding state.
   Sections: Clock steps: ordering by what was seen, not by the wall clock (queue FL, plan FL4); The dashboard's reads (queue RX1); One place for the status rules (queue RX3); The cost of rebuilding state (queue RX5)
+- [The server's responsiveness](design/performance.md): how the server measures its event loop, requests and blocks, and what the first measurement under load found.
+  Sections: Measuring the server (queue SV1); The first measurement (2026-11-20)
 - [Dependency updates](design/dependencies.md): dependency updates and what they taught.
   Sections: Hono Node adapter 2.x and the public SPA fallback (queue DU1); The lint toolchain's minimatch update (queue DU2)
 - [Ideas](design/ideas.md): the ideas overview: relationships, dispositions, assessments, correction controls, hand-offs.

@@ -39,6 +39,7 @@ import { UploadError, readLimited, saveUpload } from "./uploads.ts";
 import { COMMIT_HASH, commitDetail, fileResponse, locate } from "./files.ts";
 import { chatRange, pin, searchLines } from "./chats.ts";
 import { searchProject } from "./search.ts";
+import { perf } from "./perf.ts";
 import { dashboardFiles, isPublicFile } from "./web-static.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
@@ -126,7 +127,9 @@ function refreshRegistry(): void {
     // A deploy planned after a step or queue of this project holds the run at that step's end (src/deploy-plan.ts); so
     // does Nexus merging a worktree queue back into the run's checkout (src/merger.ts), until its fast-forward.
     let merger: Merger | undefined;
-    const engine = new Engine(store, () => changed(p.id), { coordinator, capacity, boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) || (merger?.atBoundary(q, step, state) ?? false) });
+    // Measured: making the engine recovers the project's runs after a restart (queue SV1 found it reading the whole
+    // state once per queue).
+    const engine = perf.measure(`engine start ${p.id}`, () => new Engine(store, () => changed(p.id), { coordinator, capacity, boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) || (merger?.atBoundary(q, step, state) ?? false) }));
     merger = new Merger(store, { start: (q) => void engine.start(q), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining || lifecycle.busy, poke: () => changed(p.id) });
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).
@@ -165,7 +168,7 @@ function dropProject(e: Entry): { parts: Parameters<typeof stopProject>[0]; clos
 function stateOf(e: Entry): ProjectState | undefined {
   if (!e.error && (!e.state || e.stateAt !== writeCount())) {
     const at = writeCount();
-    try { e.state = loadProjectState(e.store); e.stateAt = at; } catch (err) { e.error = (err as Error).message; }
+    try { e.state = perf.measure(`state ${e.id}`, () => loadProjectState(e.store)); e.stateAt = at; } catch (err) { e.error = (err as Error).message; }
   }
   return e.state;
 }
@@ -208,7 +211,7 @@ function changed(id: string): void {
       for (const [what, decide] of decisions) {
         const s = stateOf(e);
         if (!s) break;
-        try { decide(s); } catch (err) { console.error(`${what} in ${id}: ${(err as Error).message}`); }
+        try { perf.measure(`${what} (${id})`, () => decide(s)); } catch (err) { console.error(`${what} in ${id}: ${(err as Error).message}`); }
       }
       const s = stateOf(e);
       if (s) watch.check({ id, name: s.project.name }, s.attention);
@@ -284,6 +287,8 @@ const planner = new DeployPlanner({
 });
 const watch = new AttentionWatch();
 
+// Every request is timed by its route, its synchronous part measured as a span (src/perf.ts).
+app.use("*", perf.middleware);
 // Remote devices sign in once with the access token; this machine needs nothing (src/remote.ts).
 app.use("*", async (c, next) => {
   if (c.req.path === "/login" || isPublicFile(c.req.path) || allowed(c.env.incoming)) return next();
@@ -822,6 +827,10 @@ app.get("/api/capacity", (c) => c.json(readCapacity() ?? null));
 // only makes sense on the server machine ("Open in editor": a path on another device points nowhere).
 app.get("/api/server", async (c) => c.json({ ...(await version()), local: isLocal(c.env.incoming), update: lifecycle.status, plan: planner.view(), push_on_deploy: readDeploySettings().push_on_deploy, max_running: readGlobalSettings().defaults.max_running, running: runningSteps(), away: awayNow(readAway()), crash: crashNotice() }));
 
+// The server's measurements of itself (src/perf.ts): its event loop's delay, the requests by route, the blocks over
+// 200 ms and what ran in them. Read-only, also while standing by.
+app.get("/api/server/perf", (c) => c.json(perf.view()));
+
 // ---------------------------------------------------------------- away mode (docs/protocol/review.md, "Away mode")
 
 let awayTimer: NodeJS.Timeout | undefined;
@@ -1124,6 +1133,7 @@ async function reacquire(): Promise<void> {
 }
 let reacquiring = false;
 
+perf.start();
 if (active) activate();
 auth(); // creates the access token on the first start
 const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) => {

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { isKeptStep, type ProjectStore, type QueueView } from "@nexus/protocol";
 import { checkoutOf } from "./gitinfo.ts";
 import { lastPulled } from "./integration.ts";
+import { perf } from "./perf.ts";
 
 /** How many lines of git's --stat the opening shows at most (the summary line is always kept). */
 const STAT_LINES = 60;
@@ -63,7 +64,7 @@ export function hasRefactoringSection(dir: string | undefined): boolean {
 /** `git diff --stat` of the range, as git aligns it (git() of gitinfo.ts trims the first line's indent away). */
 function diffStat(dir: string, range: { from: string; to: string }): string | undefined {
   try {
-    return execFileSync("git", ["diff", "--stat=120", `${range.from}..${range.to}`], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: 10_000, maxBuffer: 8 * 1024 * 1024 }).trimEnd();
+    return perf.measure("git diff", () => execFileSync("git", ["diff", "--stat=120", `${range.from}..${range.to}`], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: 10_000, maxBuffer: 8 * 1024 * 1024 })).trimEnd();
   } catch { return undefined; }
 }
 

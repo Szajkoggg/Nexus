@@ -25,6 +25,7 @@ import { checkoutOf, git, patchGit } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
 import { samePath } from "./worktree.ts";
 import { cleanupIdentity, cleanupPath, cleanupRefusal, cleanupSnapshot, removeVerifiedTree } from "./cleanup-proof.ts";
+import { gitLabel, perf } from "./perf.ts";
 
 const ENV = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_EDITOR: "true", GIT_MERGE_AUTOEDIT: "no" };
 
@@ -40,7 +41,7 @@ const ROUND_SETTLE_MS = 60_000;
 
 /** Runs git, returning its output or throwing with what git said. */
 function run(cwd: string, args: string[]): string {
-  try { return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: ENV, windowsHide: true, timeout: 60_000 }).trim(); }
+  try { return perf.measure(gitLabel(args), () => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: ENV, windowsHide: true, timeout: 60_000 })).trim(); }
   catch (e) {
     const err = e as { stderr?: string; stdout?: string; message: string };
     throw new Error([err.stdout, err.stderr].filter(Boolean).join("\n").trim() || err.message);

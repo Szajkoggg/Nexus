@@ -664,6 +664,8 @@ npm run typecheck
 npm run lint     # ESLint (correctness rules, with types) and dependency-cruiser (module boundaries); about 15 s
 npm run knip     # unused files, exports and dependencies (closing refactoring steps and maintenance)
 node scripts/load-tests.mjs --burners 12 --copies 4 --rounds 5 apps/server/test/review.test.ts   # tests under load
+node scripts/perf-load.ts --minutes 3   # the server under a live-like load on a dev instance (port 4319); beside npm test too
+nexus server perf   # what the server measured of itself: event loop delay, requests by route, blocks over 200 ms
 ```
 
 One full run at a time on the machine: `npm test` and `npm run test:times` take a lock in the system's temporary

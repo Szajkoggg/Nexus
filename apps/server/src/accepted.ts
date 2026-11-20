@@ -15,6 +15,7 @@ import { execFileSync } from "node:child_process";
 import { ActionError, loadProjectState, normPath, now, pendingProvisional, type ProjectState, type ProjectStore, type PushFile, type QueueView } from "@nexus/protocol";
 import { checkoutOf } from "./gitinfo.ts";
 import { PUSH_ENV, PUSH_TIMEOUT_MS, pushFailure, runGit, type GitRunner } from "./deploy.ts";
+import { perf } from "./perf.ts";
 
 const MOVED = "the remote branch has commits the accepted one does not; bring them into the branch, then push again";
 
@@ -75,7 +76,7 @@ export class AcceptedPusher {
     if (!fresh.length) return;
     const dir = checkoutOf(this.store, q);
     let sha: string | null = null;
-    if (dir) { try { sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim() || null; } catch { sha = null; } }
+    if (dir) { try { sha = perf.measure("git rev-parse", () => execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true })).trim() || null; } catch { sha = null; } }
     const push = this.store.readPush(q.id) ?? { protocol: 1 as const, review: {}, steps: {} };
     for (const s of fresh) push.review[s.id] = { sha, finished_at: s.finished_at!, at: now() };
     this.store.writePush(q.id, push);

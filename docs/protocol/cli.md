@@ -72,6 +72,7 @@ nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring)
                                                # a kept .nexus/ (a project removed from Nexus) brings it back under its id
 nexus import <file.md> [--prefix X]            # one-time import of queues written as Markdown tables
 nexus note <queue> <step> <text>               # until the dashboard can add notes
+nexus server perf                              # the server's measurements since its start: event loop delay, requests by route, measured operations, the latest blocks over 200 ms
 nexus server away [on --until <8:00|ISO> | off]  # the user's away mode (refused from any agent session); no argument: its state
 nexus server update --after <queue>[/<step>] [--ref <ref>]   # plan a deploy for after a step or queue of this project (the user, or an orchestrator the user asked)
 nexus server update --at <HH:MM|"YYYY-MM-DD HH:MM"> [--deadline <time>] [--ref <ref>]   # plan a deploy for a time, with an optional deadline

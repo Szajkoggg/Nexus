@@ -11,12 +11,13 @@
 // steps"). Rounds recorded before keep the time windows.
 import { execFileSync } from "node:child_process";
 import { normPath, now, type BranchView, type CommitView, type GitFile, type LeftBehind, type ProjectStore, type QueueView, type RoundView, type StepCommitsView } from "@nexus/protocol";
+import { gitLabel, perf } from "./perf.ts";
 
 const TIMEOUT = 10_000;
 
 /** Runs a local git command; undefined when it fails (not a repository, an unknown ref). */
 export function git(cwd: string, args: string[]): string | undefined {
-  try { return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: TIMEOUT, maxBuffer: 8 * 1024 * 1024 }).trim(); }
+  try { return perf.measure(gitLabel(args), () => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: TIMEOUT, maxBuffer: 8 * 1024 * 1024 })).trim(); }
   catch { return undefined; }
 }
 
@@ -223,7 +224,7 @@ export function leftBehind(store: ProjectStore, q: QueueView): LeftBehind | unde
   // Not git(): its trim would eat the leading space of the first line's status code.
   let status: string | undefined;
   if (dir) {
-    try { status = execFileSync("git", ["--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all"], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: TIMEOUT }); }
+    try { status = perf.measure("git status", () => execFileSync("git", ["--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all"], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: TIMEOUT })); }
     catch { status = undefined; }
   }
   const uncommitted = (status ?? "").split(/\r?\n/).filter(Boolean).map((l) => ({ status: l.slice(0, 2).trim(), path: l.slice(3) }));

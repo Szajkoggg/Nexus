@@ -10,6 +10,7 @@ import { execFileSync } from "node:child_process";
 import { fileList, normPath, now, type BasePull, type GitFile, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
 import { git, ownWorktree } from "./gitinfo.ts";
 import { gitBranch, setupInputsChanged } from "./worktree.ts";
+import { gitLabel, perf } from "./perf.ts";
 
 export interface IntegrationContext {
   /** The base branch to merge; undefined when none can be named (the base is no branch, the checkout is on none). */
@@ -40,7 +41,7 @@ const GIT_TIMEOUT = 120_000;
 
 /** Runs git in `cwd`, its output trimmed; throws on a failure (with `status` and `stdout`, as execFileSync does). */
 function run(cwd: string, args: string[]): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], windowsHide: true, timeout: GIT_TIMEOUT, maxBuffer: 8 * 1024 * 1024 }).trim();
+  return perf.measure(gitLabel(args), () => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], windowsHide: true, timeout: GIT_TIMEOUT, maxBuffer: 8 * 1024 * 1024 })).trim();
 }
 
 /** The tracked files of the checkout have no uncommitted changes (untracked files do not count). */

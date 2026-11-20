@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { ActionError, fileList, normPath, now, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
 import { changedFiles, ownWorktree, patchGit, recordBase } from "./gitinfo.ts";
+import { gitLabel, perf } from "./perf.ts";
 
 /** Two paths name the same folder (Windows: case does not matter, nor the kind of slash). */
 export const samePath = (a: string, b: string): boolean => normPath(a).toLowerCase() === normPath(b).toLowerCase();
@@ -35,11 +36,11 @@ export function worktreeFor(store: ProjectStore, state: ProjectState, q: QueueVi
   const path = checkoutPath(state, q);
   const branch = q.branch ?? `nexus/${q.id}`;
   if (!existsSync(path)) {
-    const exists = (() => { try { execFileSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: root, stdio: "ignore" }); return true; } catch { return false; } })();
+    const exists = (() => { try { perf.measure("git rev-parse", () => execFileSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: root, stdio: "ignore" })); return true; } catch { return false; } })();
     const args = exists ? ["worktree", "add", path, branch] : ["worktree", "add", "-b", branch, path, q.base ?? "HEAD"];
     // What a new branch is made from, for its ahead/behind on the dashboard (before the worktree moves anything).
     if (!exists) recordBase(store, q, root);
-    try { execFileSync("git", args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] }); }
+    try { perf.measure(gitLabel(args), () => execFileSync("git", args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] })); }
     catch (e) { throw new ActionError(`could not create the worktree: ${(e as { stderr?: Buffer }).stderr?.toString().trim() || (e as Error).message}`, 500); }
     // A new worktree gets the project's setup command once, before its first step (the engine runs it: setupPending).
     const command = state.project.defaults.worktree_setup?.trim();
@@ -52,7 +53,7 @@ export function worktreeFor(store: ProjectStore, state: ProjectState, q: QueueVi
 
 /** The branch checked out in `cwd`; null when there is none (detached, not a repository). */
 export function gitBranch(cwd: string): string | null {
-  try { return execFileSync("git", ["branch", "--show-current"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null; }
+  try { return perf.measure("git branch", () => execFileSync("git", ["branch", "--show-current"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })).trim() || null; }
   catch { return null; }
 }
 

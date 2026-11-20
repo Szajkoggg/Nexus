@@ -188,3 +188,6 @@ change notification, which the watcher sends for it anyway. The rest of a rebuil
 `existsSync`, 15% in reading files and a quarter in parsing YAML; a cache of parsed files by modification time would be
 the next step if 120 ms starts to hurt. The engine's own 15 rebuilds are in actions (a start, a resume, a review), not
 on every change, and were left.
+
+Measured again under load on 2026-11-20 (queue SV1; [performance.md](performance.md#the-first-measurement-2026-11-20)): 260 ms on a
+generated project of 139 queues, 940 ms beside the full test suite, and 139 rebuilds in a row when the engine starts.

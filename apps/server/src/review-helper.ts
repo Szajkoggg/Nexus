@@ -25,6 +25,7 @@ import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launc
 import { checkoutOf } from "./gitinfo.ts";
 import { helperBriefing, helperPacket } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
+import { gitLabel, perf } from "./perf.ts";
 
 /**
  * Whether the orchestrator audits a review helper's acceptance (H11): the first 8 hexadecimal digits of the SHA-256 of
@@ -255,7 +256,7 @@ export class ReviewHelpers {
   private diff(q: QueueView, st: StepView, cwd: string, file: string): { stat: string; range: { from: string; to: string; round?: { from: string; to: string } } } {
     const segments = this.store.readGit(q.id)?.steps[st.id] ?? [];
     const from = segments.find((x) => x.start)?.start;
-    const git = (args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, maxBuffer: 256 * 1024 * 1024 });
+    const git = (args: string[]) => perf.measure(gitLabel(args), () => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, maxBuffer: 256 * 1024 * 1024 }));
     let to = st.commit;
     try { to ??= git(["rev-parse", "HEAD"]).trim(); } catch { to = undefined; }
     if (!from || !to) {

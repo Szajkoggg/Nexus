@@ -144,6 +144,8 @@ Setup:
 
 The server (NEXUS_PORT, default 4317):
   nexus server status                 version, the steps running in each project, and an update in progress
+  nexus server perf                   the server's measurements of itself since its start: event loop delay, the
+                                      requests by route, the measured operations, the latest blocks over 200 ms
   nexus server update [--now] [--ref <commit|branch>]
                                       let running steps finish (or stop them with --now), move the live worktree to
                                       <ref> (default main), build, restart; queues held for it go on by themselves
@@ -566,6 +568,23 @@ function printUpdate(u: Record<string, any>): void {
   if (u.error) console.log(`  error: ${u.error}`);
 }
 
+interface PerfDelay { mean_ms: number; p50_ms: number; p99_ms: number; max_ms: number }
+/** `nexus server perf`: GET /api/server/perf (docs/protocol/api.md, "Server API"), the longest first. */
+type PerfReport = { since: string; block_ms: number; loop: PerfDelay; loop_window: PerfDelay & { since: string }; routes: { route: string; count: number; total_ms: number; mean_ms: number; max_ms: number; sync_max_ms: number; slow: number }[]; spans: { what: string; count: number; total_ms: number; mean_ms: number; max_ms: number }[]; blocks: { at: string; ms: number; during: { what: string; ms: number }[] }[] };
+function printPerf(p: PerfReport): void {
+  // A server from before queue SV answers this path with its dashboard page, not with measurements.
+  if (!p?.loop) throw new UsageError("this Nexus server does not measure itself yet (it predates nexus server perf); it does after an update");
+  const d = (x: PerfDelay) => `p50 ${x.p50_ms} ms, p99 ${x.p99_ms} ms, max ${x.max_ms} ms`;
+  console.log(`measured since ${p.since}`);
+  console.log(`event loop delay: ${d(p.loop)}; since ${p.loop_window.since}: ${d(p.loop_window)}`);
+  console.log("requests by total time (count, mean, max, longest synchronous part, slow over the block limit):");
+  for (const r of p.routes.slice(0, 15)) console.log(`  ${r.route}  ${r.count}x  mean ${r.mean_ms} ms  max ${r.max_ms} ms  sync ${r.sync_max_ms} ms  slow ${r.slow}`);
+  console.log("measured operations by total time (count, mean, max):");
+  for (const s of p.spans.slice(0, 15)) console.log(`  ${s.what}  ${s.count}x  mean ${s.mean_ms} ms  max ${s.max_ms} ms`);
+  console.log(`blocks over ${p.block_ms} ms: ${p.blocks.length ? "" : "none"}`);
+  for (const b of p.blocks.slice(0, 10)) console.log(`  ${b.at}  ${b.ms} ms: ${b.during.map((s) => `${s.what} ${Math.round(s.ms)} ms`).join("; ") || "nothing measured"}`);
+}
+
 const commands: Record<string, () => void | Promise<void>> = {
   async server() {
     const sub = args[1] ?? "status";
@@ -582,6 +601,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       printPlan(s.plan);
       return printUpdate(s.update);
     }
+    if (sub === "perf") return printPerf((await server("GET", "/api/server/perf")) as PerfReport);
     let by: { project: string; session: string } | undefined;
     if (sub === "update" || sub === "cancel" || sub === "cancel-plan") {
       // Restarting Nexus restarts every agent's runtime: the user's call, which an orchestrator may carry out when
@@ -632,7 +652,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       if (what === "off") return printAway((await server("POST", "/api/server/away", { until: null })).away);
       throw new UsageError("nexus server away [on --until <8:00|ISO time> | off]");
     }
-    throw new UsageError("nexus server status|update|cancel|cancel-plan|away");
+    throw new UsageError("nexus server status|perf|update|cancel|cancel-plan|away");
   },
 
   status() {

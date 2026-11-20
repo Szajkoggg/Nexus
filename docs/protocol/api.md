@@ -254,6 +254,18 @@ from 1 to 20, written as the global `defaults.max_running`; at least one of them
 user's only: like withdrawing an approval, it is refused without the dashboard page's own `Origin`. A server waiting
 to take over answers every `/api/projects…` request, and every write under `/api/server/`, with 503.
 
+**The server's measurements of itself** (docs/design/performance.md). `GET /api/server/perf` (read-only, also while a
+successor stands by) gives what the server measured since its start: `since`, `block_ms` (200), `loop` (the event
+loop's delay: `mean_ms`, `p50_ms`, `p99_ms`, `max_ms`) and `loop_window` (the same since the last summary in the log,
+with its `since`); `routes`, each `route` ("GET /api/projects/:id/state") with `count`, `total_ms`, `mean_ms`,
+`max_ms`, `sync_max_ms` (the longest synchronous part), `slow` (requests of `block_ms` or more) and `statuses` (count by
+status), the most total time first; `spans`, the measured synchronous operations by their path ("GET
+/api/projects/:id/queues/:queue/git > git rev-parse", "state <project>", "engine (<project>)", "engine start
+<project>"), each with `count`, `total_ms`, `mean_ms`, `max_ms`, at most 40, the most total time first; `blocks`, the
+latest 50 times the loop was blocked `block_ms` or more, newest first, each `at`, `ms` and `during` (the longest five
+spans that ended in it, `what` and `ms`; empty when nothing measured ran). The same blocks and the requests of
+`block_ms` or more are written to the server's log as they happen (`perf: …` lines), with a summary every 10 minutes.
+
 **Server crash.** An uncaught exception still ends the server (it logs the stack and exits with 1); it also writes
 `<NEXUS_HOME>/crash.json` first (docs/protocol/files.md). `GET /api/server` gives `crash`: the latest crash as `at`
 and `error` (its first line), until the user closes its notice; null otherwise. `POST /api/server/crash/dismiss`

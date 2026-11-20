@@ -8,6 +8,7 @@ import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { join, relative, resolve, isAbsolute } from "node:path";
 import { EDGE_BLOCK, agentEnv, edgeBlock, shortInput, type AgentEvents, type RefusalItem, type TurnTokens, type AgentOptions, type AgentProcess, type Priority, type TurnFailure } from "./agent.ts";
+import { perf } from "./perf.ts";
 
 export interface CodexOptions extends AgentOptions {
   /** The thread to resume; a new thread is started without one. */
@@ -105,7 +106,7 @@ export function classifyCodexError(error: Json | null | undefined, resetsAt?: st
 export function gitWritableRoots(cwd: string): string[] {
   let gitDir: string, common: string;
   try {
-    const out = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const out = perf.measure("git rev-parse", () => execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
     [gitDir, common] = out.trim().split(/\r?\n/).map((p) => resolve(p)) as [string, string];
   } catch { return []; }
   const rel = relative(resolve(cwd), gitDir);
