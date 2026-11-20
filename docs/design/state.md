@@ -191,3 +191,4 @@ on every change, and were left.
 
 Measured again under load on 2026-11-20 (queue SV1; [performance.md](performance.md#the-first-measurement-2026-11-20)): 260 ms on a
 generated project of 139 queues, 940 ms beside the full test suite, and 139 rebuilds in a row when the engine starts.
+Queue SM replaces the rebuilds with a model kept in memory and fed line by line ([model.md](model.md)).

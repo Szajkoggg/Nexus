@@ -42,6 +42,8 @@ The design is split by topic, one file each in `docs/design/`. New text goes int
   Sections: Clock steps: ordering by what was seen, not by the wall clock (queue FL, plan FL4); The dashboard's reads (queue RX1); One place for the status rules (queue RX3); The cost of rebuilding state (queue RX5)
 - [The server's responsiveness](design/performance.md): how the server measures its event loop, requests and blocks, and what the first measurement under load found.
   Sections: Measuring the server (queue SV1); The first measurement (2026-11-20); The dashboard's git reads without holding the loop (queue SV2)
+- [The derived model](design/model.md): the read layer over the files (queue SM): what the model holds, how the watcher feeds it, contradictions, rebuilding, today's readers and the order of moving them.
+  Sections: What the model is; What it holds; How the watcher feeds it; Being as current as a read of the files; When a file contradicts its position; Derivation; Rebuilding; The two findings of the measurement, and the step that removes each; Today's readers; The order of moving the readers; The gate; Beyond the decision (proposals, not decided)
 - [Dependency updates](design/dependencies.md): dependency updates and what they taught.
   Sections: Hono Node adapter 2.x and the public SPA fallback (queue DU1); The lint toolchain's minimatch update (queue DU2)
 - [Ideas](design/ideas.md): the ideas overview: relationships, dispositions, assessments, correction controls, hand-offs.

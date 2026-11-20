@@ -102,7 +102,8 @@ dashboard answers in 7 to 24 s. That is the state the live instance is in while 
    template follows.
 3. **Fewer rebuilds and decisions per change**: activity lines (the agent host's appends, and the watcher's events for
    `activity.jsonl`) change no derived status, so they need not invalidate the snapshot nor run the decisions; a
-   rebuild that reuses the parsed files of a previous one (by modification time) next.
+   rebuild that reuses the parsed files of a previous one (by modification time) next. Planned in queue SM: items 2
+   and 3 in [model.md](model.md#the-two-findings-of-the-measurement-and-the-step-that-removes-each).
 4. **The dashboard's reads**: `/api/server`'s version cached (it changes only with a restart or a checkout), the
    queue's git and commits read only for what is open and not again for a notification that changed nothing of the
    queue's; the digest and conversations from the snapshot.
