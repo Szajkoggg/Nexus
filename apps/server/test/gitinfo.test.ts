@@ -61,10 +61,10 @@ test("the engine records HEAD when a step opens and when its outcome's turn ends
     assert.equal(r1.end, r2.start, "Q1 ended where Q2 began");
     assert.equal(r2.end, git(root, ["rev-parse", "HEAD"]));
     assert.equal(r1.session, queue().run!.session);
-    const c1 = stepCommits(store, queue(), "Q1")!;
+    const c1 = (await stepCommits(store, queue(), "Q1"))!;
     assert.deepEqual(c1.rounds[0]!.commits.map((c) => [c.subject, c.files, c.insertions, c.deletions, c.foreign]), [["Q1 work", 1, 1, 0, false]]);
     assert.equal(c1.rounds[0]!.open, false);
-    assert.deepEqual(stepCommits(store, queue(), "Q2")!.rounds[0]!.commits.map((c) => c.subject), ["Q2 work"]);
+    assert.deepEqual((await stepCommits(store, queue(), "Q2"))!.rounds[0]!.commits.map((c) => c.subject), ["Q2 work"]);
   } finally { engine.shutdown(); }
 });
 
@@ -109,7 +109,7 @@ test("a step's round of commits begins before its worker hears of the step, and 
   } finally { engine.shutdown(); }
 });
 
-test("in the main checkout, a commit outside the worker's turns on the step is foreign; in a worktree none is", () => {
+test("in the main checkout, a commit outside the worker's turns on the step is foreign; in a worktree none is", async () => {
   const { root, store, commit } = repo();
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "approved", stop_conditions: [], checks: [], approvals: [], history: [],
     steps: [{ id: "Q1", title: "Step 1", goal: "", acceptance: [] }] });
@@ -126,22 +126,22 @@ test("in the main checkout, a commit outside the worker's turns on the step is f
   const theirs = commit(root, "theirs", 2, at(-10_000)); // the user's, between turns
   recordStepEnd(store, "Q", "Q1");
   const view = () => loadProjectState(store).queues[0]!;
-  const commits = stepCommits(store, view(), "Q1")!.rounds[0]!.commits;
+  const commits = (await stepCommits(store, view(), "Q1"))!.rounds[0]!.commits;
   assert.deepEqual(commits.map((c) => [c.sha, c.subject, c.insertions, c.foreign]), [[theirs, "theirs subject", 2, true], [mine, "mine subject", 3, false]]);
 
   // The same queue in a worktree of its own: nobody else commits there, so nothing is marked.
   const wt = join(root, "..", "wt");
   git(root, ["worktree", "add", "-q", "-b", "nexus/Q", wt]);
   store.writeQueue({ ...store.readQueue("Q"), worktree: wt.replaceAll("\\", "/"), branch: "nexus/Q" });
-  assert.ok(stepCommits(store, view(), "Q1")!.rounds[0]!.commits.every((c) => !c.foreign));
+  assert.ok((await stepCommits(store, view(), "Q1"))!.rounds[0]!.commits.every((c) => !c.foreign));
 });
 
-test("a queue's branch: ahead and behind of its base and of the local remote-tracking ref, with that ref's age", () => {
+test("a queue's branch: ahead and behind of its base and of the local remote-tracking ref, with that ref's age", async () => {
   const { root, store, commit } = repo();
   const wt = join(root, "..", "wt");
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "approved", stop_conditions: [], checks: [], approvals: [], history: [],
     worktree: "auto", branch: "nexus/Q", steps: [{ id: "Q1", title: "Step 1", goal: "", acceptance: [] }] });
-  assert.equal(branchState(store, loadProjectState(store).queues[0]!), undefined, "no worktree yet: nothing");
+  assert.equal(await branchState(store, loadProjectState(store).queues[0]!), undefined, "no worktree yet: nothing");
   recordBase(store, store.readQueue("Q"), root); // as the engine does when it makes the worktree
   assert.equal(store.readGit("Q")!.base!.ref, "main");
   git(root, ["worktree", "add", "-q", "-b", "nexus/Q", wt, "main"]);
@@ -154,20 +154,20 @@ test("a queue's branch: ahead and behind of its base and of the local remote-tra
   git(root, ["update-ref", "-m", "fetch: as a test", "refs/remotes/origin/nexus/Q", a]);
   git(root, ["config", "branch.nexus/Q.remote", "origin"]);
   git(root, ["config", "branch.nexus/Q.merge", "refs/heads/nexus/Q"]);
-  const v = branchState(store, loadProjectState(store).queues[0]!)!;
+  const v = (await branchState(store, loadProjectState(store).queues[0]!))!;
   assert.equal(v.branch, "nexus/Q");
   assert.deepEqual(v.base, { ref: "main", ahead: 2, behind: 1 });
   assert.deepEqual([v.upstream?.ref, v.upstream?.ahead, v.upstream?.behind], ["origin/nexus/Q", 1, 0]);
   assert.ok(v.upstream?.at && Math.abs(Date.parse(v.upstream.at) - Date.now()) < 120_000, `the ref's age is when it was set: ${v.upstream?.at}`);
 });
 
-test("a project that is not a git repository shows nothing", () => {
+test("a project that is not a git repository shows nothing", async () => {
   const { store } = repo(false);
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "approved", stop_conditions: [], checks: [], approvals: [], history: [],
     steps: [{ id: "Q1", title: "Step 1", goal: "", acceptance: [] }] });
   recordStepStart(store, "Q", "Q1", "S1");
   recordStepEnd(store, "Q", "Q1");
   const q = loadProjectState(store).queues[0]!;
-  assert.equal(stepCommits(store, q, "Q1"), undefined);
-  assert.equal(branchState(store, q), undefined);
+  assert.equal(await stepCommits(store, q, "Q1"), undefined);
+  assert.equal(await branchState(store, q), undefined);
 });

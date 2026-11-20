@@ -12,7 +12,7 @@ import { closeSync, createReadStream, openSync, readSync, realpathSync, statSync
 import { extname, isAbsolute, resolve } from "node:path";
 import { Readable } from "node:stream";
 import type { CommitDetail } from "@nexus/protocol";
-import { git } from "./gitinfo.ts";
+import { gitAsync } from "./gitinfo.ts";
 
 /** Text longer than this is cut (docs/design/dashboard.md, "The file viewer": files over 1 MB are cut with a note). */
 export const MAX_TEXT = 1024 * 1024;
@@ -128,9 +128,9 @@ const SEP = "\x1f";
  * merge against its first parent; a binary file's lines are null). Undefined for a hash that is not one commit
  * (unknown, ambiguous, or not a commit).
  */
-export function commitDetail(dir: string, hash: string): CommitDetail | undefined {
+export async function commitDetail(dir: string, hash: string): Promise<CommitDetail | undefined> {
   if (!COMMIT_HASH.test(hash)) return undefined;
-  const out = git(dir, ["show", "--no-color", "--no-ext-diff", "--numstat", "--diff-merges=first-parent",
+  const out = await gitAsync(dir, ["show", "--no-color", "--no-ext-diff", "--numstat", "--diff-merges=first-parent",
     `--format=@@${SEP}%H${SEP}%aI${SEP}%an${SEP}%s`, `${hash}^{commit}`, "--"]);
   if (!out) return undefined;
   const [first, ...rest] = out.split(/\r?\n/);

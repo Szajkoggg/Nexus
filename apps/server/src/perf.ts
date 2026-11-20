@@ -95,6 +95,22 @@ export class Perf {
     this.window?.disable();
   }
 
+  /**
+   * Times asynchronous work (a git process the loop does not wait for): counted under "async <what>" in the spans, by
+   * its whole time, but never part of a block (the loop runs on meanwhile).
+   */
+  async timed<T>(what: string, work: Promise<T>): Promise<T> {
+    const t0 = performance.now();
+    try { return await work; }
+    finally {
+      const key = `async ${what}`;
+      const s = this.spans.get(key) ?? { count: 0, total_ms: 0, max_ms: 0 };
+      const ms = performance.now() - t0;
+      s.count++; s.total_ms += ms; s.max_ms = Math.max(s.max_ms, ms);
+      this.spans.set(key, s);
+    }
+  }
+
   /** Runs fn (synchronous) as a measured span. Its time counts for `what` whether or not the measuring is started. */
   measure<T>(what: string, fn: () => T): T {
     this.stack.push(what);

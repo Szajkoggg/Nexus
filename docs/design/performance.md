@@ -108,3 +108,64 @@ dashboard answers in 7 to 24 s. That is the state the live instance is in while 
    queue's; the digest and conversations from the snapshot.
 5. **Process priority** (the queue's last part): the test suite's processes below the server's, once the server's own
    blocking is down; measured again then with the same script.
+
+## The dashboard's git reads without holding the loop (queue SV2)
+
+What the dashboard reads from git now runs in git processes the loop does not wait for (`gitAsync` in
+`apps/server/src/gitinfo.ts`, the same 10 s limit and output limit as before): a step's commits (`stepCommits`, behind
+`GET …/steps/:step/commits`), a queue's branch (`branchState`, `GET …/queues/:queue/git`), what a stopped step left
+(`leftBehind`, `GET …/queues/:queue/left`) and one commit by its hash (`commitDetail`, `GET …/commits/:hash`). Their
+independent calls run side by side (the base's and the upstream's counts, each round's log and turn ranges). They only
+read, so nothing can fall between two of their operations that matters: each answers from what it read.
+
+Continue and the approval of a stopped queue decide by what the stopped step left. They read it first (asynchronously,
+`readStoppedWork` in `src/stopwork.ts`), then check, decide and write in one synchronous go as before; a queue stopped
+at another step by then is refused with "try again" (it was read for another stop), so a choice is never recorded
+against work that was not shown. The dashboard still waits for the action's answer, as before.
+
+`perf` counts such work apart, as `async git <subcommand>`: its whole time, never part of a block.
+`apps/server/test/slow-git.test.ts` slows `git status` with an fsmonitor hook that sleeps 3 s: the stopped step's
+`/left` takes that long, and `/api/projects` asked meanwhile answers at once (with the synchronous git it waited the
+whole time: the test fails so).
+
+**Before and after**, `node scripts/perf-load.ts --minutes 3` on the user's machine, the same load as SV1's quiet run:
+
+| | Before | After |
+|---|---|---|
+| Event loop delay p50 / p99 / max | 0.87 / 5.3 / 5.7 s | 0.016 / 2.4 / 3.2 s |
+| Synchronous git, all of it | 53 s | 10 s |
+| Changes the server handled in 3 minutes | 190 | 354 |
+| What a dashboard waited for `state` (mean / p95) | 0.68 / 1.9 s | 0.19 / 1.2 s |
+| … for `server` | 4.3 / 8.6 s | 1.4 / 4.6 s |
+| … for the queue's git / the step's commits (mean) | 1.3 / 1.5 s | 2.4 / 1.5 s |
+
+The loop is free most of the time now and the server keeps up with twice the changes; the remaining blocks are the
+state rebuilds and the engine's decisions (SV1's items 2 and 3). The queue's git answers no sooner: with the loop free
+the dashboards ask more often, and up to a dozen git processes run at once (778 `rev-parse` in three minutes, 0.5 s
+each on average, up to 4.7 s): the number of calls per read, SV1's item 4, is what is left there.
+
+**What stays synchronous, and why.** The git calls on the engine's path read and then write at once, and the engine
+relies on nothing else happening between: made asynchronous, another change could fall between the read and what
+follows it (the queue's stop condition). They are described in the queue's stop and wait for the user's decision:
+
+- `recordStepStart`, `recordStepEnd`, `recordTurn` (`gitinfo.ts`): the HEAD read at a step's opening is recorded
+  before the worker hears of the step, and at a turn's start and end as the runtime reports them. Read later, a
+  commit the worker made meanwhile would count as before the round, or the next step's as this one's; and two records
+  of one queue (a turn's end and the next turn's start) could be written in the other order.
+- The integration step Nexus runs without a model (`engine.ts` `integrateWithoutModel`, `integrateAgain`;
+  `integration.ts` `cleanCheckout`, `mergeConflicts`, `mergeBase`): `step.started`, the merge, `step.done` and the next
+  step's opening are one synchronous go. Between them the engine's own decisions on a change, or a Stop of the user,
+  would see a step started with no process at work (the state a restart leaves, which `integrateAgain` handles by
+  aborting the merge).
+- A worktree's creation (`worktree.ts` `worktreeFor`, `recordBase`) and its setup's HEAD, before the worker's
+  session is written and started; a fresh session's hand-over (`engine.ts`, its commits and uncommitted changes);
+  the closing step's commit range (`closing.ts`) and the integration context, read while the step opens.
+- The HEAD a step was reviewed at (`accepted.ts` `recordReviews`): read later, a next step's commit could be pushed
+  as the reviewed one.
+- Merge back (`mergeback.ts` `fastForward`, `reintegrate`, `cleanUp`, under `withMergeLock`, a lock held only while the
+  synchronous call runs) and the planned deploy's check (`deploy-plan.ts`, a decision in the order of `changed()`:
+  before the engine's, so the engine sees a run held for the deploy).
+- Elsewhere on the engine's path: a step's left work in a survey (`surveyLeftWork`), the checks' setup HEAD
+  (`check-runs.ts`), Codex's git directories at its start (`codex.ts`), the review helper's diff (`review-helper.ts`).
+- Not the server's: `findNexusDir` in `packages/protocol/src/store.ts` (the CLI finding its project from a worktree;
+  the server never calls it).

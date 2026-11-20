@@ -182,7 +182,9 @@ the user decides about what the stopped step (`stop_step`) left (`apps/server/sr
 - When the step left commits of its own, the lift takes a choice, `work: keep | discard` in the body of `continue` and
   `approve`; without it they are refused (409, naming the step and the number of commits). With none nothing is asked.
   What the lift itself would refuse (a run still going; Continue on an unapproved revision; approving an approved
-  one) is refused first, so no choice is recorded for a lift that does not happen.
+  one) is refused first, so no choice is recorded for a lift that does not happen. The step's work is read (git)
+  before the lift checks and records anything; a queue stopped at another step by the time it decides is refused (409,
+  "now stopped at another step; try again"), with nothing recorded.
 - **Keep** appends a `work` change (`to: kept`, `commits`, `by`) and lifts as before. The commits stay, and go out
   with the next accepted commit when the project pushes what was accepted.
 - **Discard** appends a `work` change (`to: discarded`, `commits`) and does not lift: Continue does not go on, and the

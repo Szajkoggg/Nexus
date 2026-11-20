@@ -26,7 +26,7 @@ import { cleanUp, mergeBack } from "./mergeback.ts";
 import { Merger } from "./merger.ts";
 import { fixProjectRules, projectRules } from "./rulesfix.ts";
 import { RemovalBlocked, checkRemoval, deleteNexusDir, removalView, stopProject, unregister } from "./removal.ts";
-import { decideStoppedWork, discardRecorded } from "./stopwork.ts";
+import { decideStoppedWork, discardRecorded, readStoppedWork } from "./stopwork.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { Conversations } from "./conversations.ts";
 import { listModels } from "./models.ts";
@@ -447,11 +447,11 @@ app.get("/api/projects/:id/rules", (c) => {
   return c.json(projectRules(e.root));
 });
 
-app.get("/api/projects/:id/commits/:hash", (c) => {
+app.get("/api/projects/:id/commits/:hash", async (c) => {
   const e = c.get("entry");
   const hash = c.req.param("hash");
   if (!COMMIT_HASH.test(hash)) return c.json({ error: "not a commit hash (7 to 40 lowercase hex digits)" }, 400);
-  const commit = commitDetail(e.root, hash);
+  const commit = await commitDetail(e.root, hash);
   return commit ? c.json(commit) : c.json({ error: "not found" }, 404);
 });
 
@@ -493,11 +493,14 @@ app.post("/api/projects/:id/sessions/:session/messages", act((st, b, p) =>
 // Approving a stopped queue lifts its stop: first the user's choice about the stopped step's work (src/stopwork.ts).
 // `skip_closing: true`: the user skips the queue's closing refactoring step with the approval of a stopped queue's new
 // revision (checked before anything is recorded), as at Continue.
-app.post("/api/projects/:id/queues/:queue/approve", act((st, b, p) => {
+// The stopped step's work is read first (its git without holding the loop); then the action checks, decides and writes
+// in one go, as before (src/stopwork.ts).
+app.post("/api/projects/:id/queues/:queue/approve", act(async (st, b, p) => {
+  const left = await readStoppedWork(st, p("queue"));
   if (b.skip_closing !== undefined && typeof b.skip_closing !== "boolean") throw new ActionError("skip_closing is true or false");
   const skipClosing = b.skip_closing === true;
   if (skipClosing) closingToSkipAtApproval(st, p("queue"));
-  const d = decideStoppedWork(st, p("queue"), b.work, "user_approval");
+  const d = decideStoppedWork(st, p("queue"), b.work, "user_approval", left);
   if (!d.proceed) return { message: d.message };
   return approveQueue(st, p("queue"), b.words, { skipClosing });
 }));
@@ -599,7 +602,8 @@ app.post("/api/projects/:id/recurring/:rid", act((_st, b, p, e) => {
 app.delete("/api/projects/:id/recurring/:rid", act((_st, _b, p, e) => ({ message: e.engine.removeRecurring(p("rid")) })));
 // Continue on a stopped queue: the user's lift of the stop, then the run goes on (only from the dashboard, as every write).
 // `skip_closing: true`: the user skips the queue's closing refactoring step with it (checked before anything is recorded).
-app.post("/api/projects/:id/queues/:queue/continue", act((st, b, p, e) => {
+app.post("/api/projects/:id/queues/:queue/continue", act(async (st, b, p, e) => {
+  const left = await readStoppedWork(st, p("queue"));
   if (b.skip_closing !== undefined && typeof b.skip_closing !== "boolean") throw new ActionError("skip_closing is true or false");
   const skipClosing = b.skip_closing === true;
   if (skipClosing) {
@@ -607,7 +611,7 @@ app.post("/api/projects/:id/queues/:queue/continue", act((st, b, p, e) => {
     if (!q) throw new ActionError(`unknown queue ${p("queue")}`, 404);
     closingToSkip(q);
   }
-  const d = decideStoppedWork(st, p("queue"), b.work, "user_continue");
+  const d = decideStoppedWork(st, p("queue"), b.work, "user_continue", left);
   if (!d.proceed) return { message: d.message };
   return e.engine.continueQueue(p("queue"), { skipClosing });
 }));
@@ -730,27 +734,27 @@ app.get("/api/projects/:id/sessions/:session/activity", (c) => {
 
 // Git on the dashboard (src/gitinfo.ts; local git only, never a fetch): a step's commits per round, a queue's branch.
 // null when the project is not a git repository (or nothing was recorded).
-app.get("/api/projects/:id/queues/:queue/steps/:step/commits", (c) => {
+app.get("/api/projects/:id/queues/:queue/steps/:step/commits", async (c) => {
   const e = c.get("entry");
   const q = stateOf(e)?.queues.find((x) => x.id === c.req.param("queue"));
   if (!q) return c.json({ error: "unknown queue" }, 404);
-  return c.json(stepCommits(e.store, q, c.req.param("step")) ?? null);
+  return c.json((await stepCommits(e.store, q, c.req.param("step"))) ?? null);
 });
 // What a stopped queue's stopped step left (its own commits, the checkout's uncommitted changes) and whether a Discard
 // is recorded for this stop; null when the queue is not stopped at a step.
-app.get("/api/projects/:id/queues/:queue/left", (c) => {
+app.get("/api/projects/:id/queues/:queue/left", async (c) => {
   const e = c.get("entry");
   const q = stateOf(e)?.queues.find((x) => x.id === c.req.param("queue"));
   if (!q) return c.json({ error: "unknown queue" }, 404);
-  const left = leftBehind(e.store, q);
+  const left = await leftBehind(e.store, q);
   const view: LeftView | null = left ? { ...left, discarded: discardRecorded(q) ?? null } : null;
   return c.json(view);
 });
-app.get("/api/projects/:id/queues/:queue/git", (c) => {
+app.get("/api/projects/:id/queues/:queue/git", async (c) => {
   const e = c.get("entry");
   const q = stateOf(e)?.queues.find((x) => x.id === c.req.param("queue"));
   if (!q) return c.json({ error: "unknown queue" }, 404);
-  return c.json(branchState(e.store, q) ?? null);
+  return c.json((await branchState(e.store, q)) ?? null);
 });
 
 // Refused actions of every session of the project, oldest first; with ?queue= (and &step=) only those of a step.
