@@ -1,7 +1,7 @@
 // A model of a folder's files kept in memory (queue SM; docs/design/model.md): every file a store reads, parsed once,
 // a log read on from where it was left, the state derived from it once per change. The files stay the one source of
 // truth: the model can be thrown away and built again at any time, and gives what the files give.
-import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { z } from "zod";
 import { clockMark, observe } from "./clock.ts";
@@ -102,9 +102,12 @@ export class FileCache implements Reader {
       this.present.delete(d);
       if (d === this.root) break;
     }
-    // A folder gone: everything kept under it.
-    for (const m of [this.parsedFiles, this.present, this.listings, this.logs] as Map<string, unknown>[]) {
-      for (const key of m.keys()) if (key.startsWith(`${k}/`)) m.delete(key);
+    // A folder gone: everything kept under it (one still there keeps it: what changed in it is reported for itself).
+    const under = `${k}/`;
+    const maps = [this.parsedFiles, this.present, this.listings, this.logs] as Map<string, unknown>[];
+    const holds = (m: Map<string, unknown>) => { for (const key of m.keys()) if (key.startsWith(under)) return true; return false; };
+    if (maps.some(holds) && !existsSync(path)) {
+      for (const m of maps) for (const key of m.keys()) if (key.startsWith(under)) m.delete(key);
     }
     if (!this.logOnly(k)) this.version++;
   }
@@ -352,6 +355,17 @@ export class ProjectModel {
   changed(): void { this.cache.version++; }
   /** A file under the project changed (the watcher's report). */
   touched(path: string): void { this.cache.touched(path); }
+
+  /**
+   * A report of Node's recursive watcher (fs.watch: `rename` or `change`, and the path): passed on as `touched`,
+   * except a folder's `change` (what changed in it is reported for itself). Says what it was: a state input, a log
+   * only, or nothing for the model.
+   */
+  watched(event: string, path: string): "state" | "log" | undefined {
+    if (event === "change") { try { if (statSync(path).isDirectory()) return undefined; } catch { /* gone: as any other */ } }
+    this.touched(path);
+    return isLogOnly(path) ? "log" : "state";
+  }
   /** Thrown away: everything read again from the files. */
   rebuild(): void { this.cache.clear(); this.state = undefined; }
   close(): void { this.cache.close(); this.unhook(); }

@@ -179,3 +179,21 @@ test("a write that makes a folder is seen at once: the folder's existence is ask
   p.model.store.writeRecurring({ protocol: 1, id: "R", template: "tiny", params: {}, every: "daily 08:00", set_by: "user", created_at: "2026-11-20T10:00:00.000Z", updated_at: "2026-11-20T10:00:00.000Z" });
   assert.deepEqual(p.model.store.recurringIds(), ["R"]);
 });
+
+test("Node's watcher's reports: a folder's change keeps what lies in it; a folder gone forgets it (SM4)", () => {
+  const p = project();
+  const worker = p.files.sessionIds().find((s) => s.startsWith("w-"))!;
+  const dir = p.files.sessionDir(worker);
+  p.model.current();
+  p.model.store.readActivity(worker);
+  const version = p.model.cache.version;
+  resetWork();
+  assert.equal(p.model.watched("change", dir), undefined, "a folder's change: nothing for the model");
+  p.model.store.readActivity(worker);
+  assert.equal(p.model.cache.version, version);
+  assert.equal(workCounts().files, 0, "nothing read again");
+  rmSync(dir, { recursive: true, force: true });
+  assert.equal(p.model.watched("rename", dir), "state");
+  assert.ok(!p.model.store.sessionIds().includes(worker));
+  assert.deepEqual(p.model.store.readActivity(worker).entries, []);
+});

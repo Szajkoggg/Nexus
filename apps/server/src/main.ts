@@ -1,6 +1,6 @@
 // The Nexus server: reads every registered project's .nexus/ directory, serves the dashboard and its API,
 // and tells connected dashboards when a project's files change. It writes nothing in phase 1.
-import { appendFileSync, createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";
+import { appendFileSync, createWriteStream, existsSync, mkdirSync, watch as watchFiles, type FSWatcher as FilesWatcher, type WriteStream } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
@@ -173,6 +173,8 @@ function dropProject(e: Entry): { parts: Parameters<typeof stopProject>[0]; clos
   pending.delete(e.id);
   const w = watchers.get(e.id);
   watchers.delete(e.id);
+  modelWatchers.get(e.id)?.close();
+  modelWatchers.delete(e.id);
   watchedNotes.delete(e.id);
   watch.forget(e.id);
   e.model.close();
@@ -263,18 +265,42 @@ function logChanged(id: string, path: string): void {
   if (logPending.has(key)) return;
   logPending.set(key, setTimeout(() => { logPending.delete(key); broadcast({ type: "log", project: id, session }); }, 150));
 }
+/**
+ * What a project's watchers leave out: uploaded pictures (a 10 MB write need not reload the project), the server's own
+ * clock mark for the CLI (clock.json), temporary and lock files.
+ */
+const unwatched = (dir: string, p: string): boolean => p.endsWith(".tmp") || p.endsWith(".lock") || /^[\\/](uploads([\\/]|$)|clock\.json$)/.test(p.slice(dir.length));
+/**
+ * Each project's own recursive watcher of its .nexus folder (Node's), feeding its model: chokidar drops a share of a
+ * file's atomic rewrites on Windows (measured: 7 of 40 rewrites of one file a few tens of ms apart; Node's watcher
+ * missed none of 100), and a model that misses one keeps that file's old copy until its next reported change.
+ */
+const modelWatchers = new Map<string, FilesWatcher>();
 function watchProject(id: string, dir: string): void {
+  const reported = (path: string, kind: "state" | "log" | undefined) => {
+    if (kind === "log") logChanged(id, path);
+    else if (kind === "state") changed(id);
+  };
+  // A watcher that failed may have missed a change: the model reads everything again at its next read.
+  const failed = (err: Error) => { console.error(`watch ${id}: ${err.message}; its model is read again`); projects.get(id)?.model.rebuild(); changed(id); };
+  try {
+    const native = watchFiles(dir, { recursive: true }, (event, name) => {
+      const model = projects.get(id)?.model;
+      if (!model) return;
+      if (!name) { model.rebuild(); changed(id); return; }
+      const path = join(dir, name);
+      if (!unwatched(dir, path)) reported(path, model.watched(event, path));
+    });
+    native.on("error", failed);
+    modelWatchers.set(id, native);
+  } catch (err) { console.error(`watch ${id}: ${(err as Error).message}`); }
   watchers.set(id, chokidar
-    // Uploaded pictures change no state: a 10 MB write need not reload the project. Nor does the server's own clock
-    // mark for the CLI (clock.json).
-    .watch(dir, { ignoreInitial: true, followSymlinks: false, ignored: (p) => p.endsWith(".tmp") || p.endsWith(".lock") || /^[\\/](uploads([\\/]|$)|clock\.json$)/.test(p.slice(dir.length)) })
+    .watch(dir, { ignoreInitial: true, followSymlinks: false, ignored: (p) => unwatched(dir, p) })
     .on("all", (_event, path) => {
       projects.get(id)?.model.touched(path);
-      if (isLogOnly(path)) logChanged(id, path);
-      else changed(id);
+      reported(path, isLogOnly(path) ? "log" : "state");
     })
-    // A watcher that failed may have missed a change: the model reads everything again at its next read.
-    .on("error", (err) => { console.error(`watch ${id}: ${(err as Error).message}; its model is read again`); projects.get(id)?.model.rebuild(); changed(id); }));
+    .on("error", (err) => failed(err as Error)));
 }
 
 // NEXUS_HOME's files that every project's state, the statistics and the estimates read, kept in memory (model.ts):
@@ -1136,6 +1162,8 @@ async function release(): Promise<void> {
   pending.clear();
   const closing = [...watchers.values()].map((w) => w.close());
   watchers.clear();
+  for (const w of modelWatchers.values()) w.close();
+  modelWatchers.clear();
   await Promise.all(closing);
   planner.shutdown(); // its timers write the plan file: no longer this server's
   capacity?.shutdown(); // so does the coordinator: the successor writes capacity.yaml anew

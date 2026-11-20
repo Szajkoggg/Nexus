@@ -18,13 +18,17 @@ useProjectReaders((dir) => {
     const m = new ProjectModel(dir);
     model = m;
     models.set(key, m);
-    // As main.ts's watcher reports a project's changes (another process's lines), here with Node's own recursive
-    // watcher: it never keeps the test's process alive, as chokidar's may.
+    // As main.ts's watcher of the model reports a project's changes (another process's lines): Node's own recursive
+    // watcher, not keeping the test's process alive.
     // A store is made before its folder (ProjectStore.init): then the folder above it is watched (the model takes only
     // what lies under its own).
     const at = existsSync(dir) ? dir : dirname(dir);
     try {
-      const w = watch(at, { recursive: true, persistent: false }, (_event, name) => { if (name) m.touched(join(at, name)); else m.rebuild(); });
+      const w = watch(at, { recursive: true, persistent: false }, (event, name) => {
+        if (!name) { m.rebuild(); return; }
+        const path = join(at, name);
+        if (!path.endsWith(".tmp") && !path.endsWith(".lock")) m.watched(event, path);
+      });
       // Closed once its folder is gone (the test removed it): on Windows a watcher of a removed folder can hold the
       // process at its end.
       const gone = setInterval(() => { if (!existsSync(at)) { clearInterval(gone); w.close(); } }, 1000).unref();
