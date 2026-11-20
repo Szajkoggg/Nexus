@@ -31,7 +31,7 @@ export function normPath(p: string, base = process.cwd()): string {
 // ---------------------------------------------------------------- generic file helpers
 
 function readYaml<S extends z.ZodType>(file: string, schema: S): z.infer<S> {
-  return schema.parse(YAML.parse(readFileSync(file, "utf8")));
+  return schema.parse(YAML.parse(readText(file)));
 }
 
 /**
@@ -44,6 +44,28 @@ let writes = 0;
 export const writeCount = (): number => writes;
 /** Counts a write made outside this module's helpers. */
 export const countWrite = (): void => { writes++; };
+
+/**
+ * The work this process's reads have done through this module, counted rather than timed so a test can hold it on a
+ * busy machine (queue SM's gate, packages/protocol/test/work-gate.test.ts): `files` read whole, the `bytes` they had,
+ * `probes` (a file's existence asked) and `listings` (a folder's entries listed), and `rebuilds`, whole derivations of
+ * a project's state (loadProjectState). Reads outside the store (templates, the ideas' notes) are not counted.
+ */
+export interface WorkCounts { files: number; bytes: number; probes: number; listings: number; rebuilds: number }
+const work: WorkCounts = { files: 0, bytes: 0, probes: 0, listings: 0, rebuilds: 0 };
+/** The work counted since the process started (or since the last resetWork). */
+export const workCounts = (): WorkCounts => ({ ...work });
+export const resetWork = (): void => { for (const k of Object.keys(work) as (keyof WorkCounts)[]) work[k] = 0; };
+/** Counts a whole derivation of a project's state (state.ts). */
+export const countRebuild = (): void => { work.rebuilds++; };
+
+function readText(file: string): string {
+  const b = readFileSync(file);
+  work.files++; work.bytes += b.length;
+  return b.toString("utf8");
+}
+function exists(file: string): boolean { work.probes++; return existsSync(file); }
+function list(dir: string): string[] { work.listings++; return readdirSync(dir); }
 
 /** How long a rename is tried again while Windows refuses it (see renameRetrying). */
 const RENAME_RETRY_MS = 2_000;
@@ -82,8 +104,8 @@ export interface JsonlRead<T> { entries: T[]; lines: number[]; errors: string[] 
 /** Reads a JSONL log. A final line without a newline is still being written and is skipped. */
 export function readJsonl<S extends z.ZodType>(file: string, schema: S): JsonlRead<z.infer<S>> {
   const out: JsonlRead<z.infer<S>> = { entries: [], lines: [], errors: [] };
-  if (!existsSync(file)) return out;
-  const text = readFileSync(file, "utf8");
+  if (!exists(file)) return out;
+  const text = readText(file);
   const complete = text.endsWith("\n") ? text : text.slice(0, text.lastIndexOf("\n") + 1);
   complete.split("\n").forEach((line, i) => {
     if (!line.trim()) return;
@@ -120,7 +142,7 @@ const registryFile = () => join(nexusHome(), "projects.yaml");
 
 export function readRegistry(): RegistryFile {
   const f = registryFile();
-  return existsSync(f) ? readYaml(f, RegistryFile) : { protocol: 1, projects: [] };
+  return exists(f) ? readYaml(f, RegistryFile) : { protocol: 1, projects: [] };
 }
 export function writeRegistry(r: RegistryFile): void {
   writeYaml(registryFile(), r);
@@ -134,7 +156,7 @@ export function writeRegistry(r: RegistryFile): void {
  */
 export function findNexusDir(cwd = process.cwd()): string | null {
   for (let d = resolve(cwd); ; d = dirname(d)) {
-    if (existsSync(join(d, NEXUS_DIRNAME, "project.yaml"))) return normPath(join(d, NEXUS_DIRNAME));
+    if (exists(join(d, NEXUS_DIRNAME, "project.yaml"))) return normPath(join(d, NEXUS_DIRNAME));
     if (dirname(d) === d) break;
   }
   try {
@@ -142,7 +164,7 @@ export function findNexusDir(cwd = process.cwd()): string | null {
       cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     const main = dirname(common);
-    if (existsSync(join(main, NEXUS_DIRNAME, "project.yaml"))) return normPath(join(main, NEXUS_DIRNAME));
+    if (exists(join(main, NEXUS_DIRNAME, "project.yaml"))) return normPath(join(main, NEXUS_DIRNAME));
   } catch { /* not a git repository */ }
   return null;
 }
@@ -179,7 +201,7 @@ export class ProjectStore {
     mkdirSync(join(store.dir, "sessions"), { recursive: true });
     writeFileSync(join(store.dir, ".gitignore"), "*\n", "utf8");
     writes++;
-    if (!existsSync(store.projectFile)) store.writeStoredProject(StoredProject.parse({ protocol: 1, follows_global: true, ...project }));
+    if (!exists(store.projectFile)) store.writeStoredProject(StoredProject.parse({ protocol: 1, follows_global: true, ...project }));
     return store;
   }
 
@@ -225,7 +247,7 @@ export class ProjectStore {
    * Writes only when the file is not migrated yet; returns whether it wrote.
    */
   migrateProject(): boolean {
-    const migrated = migrateStored(YAML.parse(readFileSync(this.projectFile, "utf8")), readGlobalSettings());
+    const migrated = migrateStored(YAML.parse(readText(this.projectFile)), readGlobalSettings());
     if (migrated) this.writeStoredProject(migrated);
     return !!migrated;
   }
@@ -246,19 +268,19 @@ export class ProjectStore {
   queueDir(id: string): string { return join(this.dir, "queues", id); }
   /** Where `nexus review add` copies a step's review files (its only writer): queues/<queue>/review/<step>/. */
   reviewDir(queue: string, step: string): string { return join(this.queueDir(queue), "review", step); }
-  queueIds(): string[] { return subdirs(join(this.dir, "queues")).filter((q) => existsSync(join(this.queueDir(q), "queue.yaml"))); }
+  queueIds(): string[] { return subdirs(join(this.dir, "queues")).filter((q) => exists(join(this.queueDir(q), "queue.yaml"))); }
   /** queue.yaml in the present form (parseQueue: old review policies read as levels, their approvals kept). */
-  readQueue(id: string): QueueFile { return parseQueue(YAML.parse(readFileSync(join(this.queueDir(id), "queue.yaml"), "utf8"))); }
+  readQueue(id: string): QueueFile { return parseQueue(YAML.parse(readText(join(this.queueDir(id), "queue.yaml")))); }
   writeQueue(q: QueueInput): void { writeYaml(join(this.queueDir(q.id), "queue.yaml"), QueueFile.parse(q)); }
 
   readNotes(queueId: string): { notes: Note[]; errors: string[] } {
     const notes: Note[] = []; const errors: string[] = [];
     const root = join(this.queueDir(queueId), "notes");
     for (const step of subdirs(root)) {
-      for (const f of readdirSync(join(root, step)).filter((n) => n.endsWith(".md"))) {
+      for (const f of list(join(root, step)).filter((n) => n.endsWith(".md"))) {
         const file = join(root, step, f);
         try {
-          const { meta, body } = parseFrontMatter(readFileSync(file, "utf8"));
+          const { meta, body } = parseFrontMatter(readText(file));
           notes.push({ ...NoteMeta.parse(meta), queue: queueId, body });
         } catch (e) { errors.push(`${file}: ${(e as Error).message}`); }
       }
@@ -276,7 +298,7 @@ export class ProjectStore {
 
   // sessions
   sessionDir(id: string): string { return join(this.dir, "sessions", id); }
-  sessionIds(): string[] { return subdirs(join(this.dir, "sessions")).filter((s) => existsSync(join(this.sessionDir(s), "session.yaml"))); }
+  sessionIds(): string[] { return subdirs(join(this.dir, "sessions")).filter((s) => exists(join(this.sessionDir(s), "session.yaml"))); }
   readSession(id: string): SessionFile { return readYaml(join(this.sessionDir(id), "session.yaml"), SessionFile); }
   writeSession(s: SessionFile): void { writeYaml(join(this.sessionDir(s.id), "session.yaml"), SessionFile.parse(s)); }
 
@@ -293,37 +315,37 @@ export class ProjectStore {
   // server-owned runtime files
   readGit(queueId: string): GitFile | undefined {
     const f = join(this.queueDir(queueId), "git.yaml");
-    return existsSync(f) ? readYaml(f, GitFile) : undefined;
+    return exists(f) ? readYaml(f, GitFile) : undefined;
   }
   writeGit(queueId: string, g: GitFile): void { writeYaml(join(this.queueDir(queueId), "git.yaml"), GitFile.parse(g)); }
   readPush(queueId: string): PushFile | undefined {
     const f = join(this.queueDir(queueId), "push.yaml");
-    return existsSync(f) ? readYaml(f, PushFile) : undefined;
+    return exists(f) ? readYaml(f, PushFile) : undefined;
   }
   writePush(queueId: string, p: PushFile): void { writeYaml(join(this.queueDir(queueId), "push.yaml"), PushFile.parse(p)); }
   /** The checks Nexus ran (checks.yaml; one writer: the server's engine). */
   readChecks(queueId: string): ChecksFile | undefined {
     const f = join(this.queueDir(queueId), "checks.yaml");
-    return existsSync(f) ? readYaml(f, ChecksFile) : undefined;
+    return exists(f) ? readYaml(f, ChecksFile) : undefined;
   }
   writeChecks(queueId: string, c: ChecksFile): void { writeYaml(join(this.queueDir(queueId), "checks.yaml"), ChecksFile.parse(c)); }
   readStart(queueId: string): StartFile | undefined {
     const f = join(this.queueDir(queueId), "start.yaml");
-    return existsSync(f) ? readYaml(f, StartFile) : undefined;
+    return exists(f) ? readYaml(f, StartFile) : undefined;
   }
   writeStart(queueId: string, s: StartFile): void { writeYaml(join(this.queueDir(queueId), "start.yaml"), StartFile.parse(s)); }
   clearStart(queueId: string): void {
     const f = join(this.queueDir(queueId), "start.yaml");
-    if (existsSync(f)) { unlinkSync(f); writes++; }
+    if (exists(f)) { unlinkSync(f); writes++; }
   }
   readPlan(queueId: string): PlanFile | undefined {
     const f = join(this.queueDir(queueId), "plan.yaml");
-    return existsSync(f) ? readYaml(f, PlanFile) : undefined;
+    return exists(f) ? readYaml(f, PlanFile) : undefined;
   }
   writePlan(queueId: string, p: PlanFile): void { writeYaml(join(this.queueDir(queueId), "plan.yaml"), PlanFile.parse(p)); }
   clearPlan(queueId: string): void {
     const f = join(this.queueDir(queueId), "plan.yaml");
-    if (existsSync(f)) { unlinkSync(f); writes++; }
+    if (exists(f)) { unlinkSync(f); writes++; }
   }
   /**
    * Moves the chains of before the plan into it: a start.yaml with `after` (one queue it waited for) becomes a
@@ -347,21 +369,21 @@ export class ProjectStore {
   /** The user's decisions on matching earlier queues to the notes (ideas-read.ts); none when the file is missing. */
   readIdeaMatches(): IdeaMatchesFile {
     const f = join(this.dir, "idea-matches.yaml");
-    return existsSync(f) ? readYaml(f, IdeaMatchesFile) : IdeaMatchesFile.parse({ protocol: 1 });
+    return exists(f) ? readYaml(f, IdeaMatchesFile) : IdeaMatchesFile.parse({ protocol: 1 });
   }
   /** Written only by the server, from the user's action (actions.ts, decideIdeaMatches). */
   writeIdeaMatches(m: IdeaMatchesFile): void { writeYaml(join(this.dir, "idea-matches.yaml"), IdeaMatchesFile.parse(m)); }
 
   readIdeaStatuses(): IdeaStatusesFile {
     const f = join(this.dir, "idea-statuses.yaml");
-    return existsSync(f) ? readYaml(f, IdeaStatusesFile) : IdeaStatusesFile.parse({ protocol: 1 });
+    return exists(f) ? readYaml(f, IdeaStatusesFile) : IdeaStatusesFile.parse({ protocol: 1 });
   }
   /** Only the server writes status decisions and observed assessment invalidations. */
   writeIdeaStatuses(value: IdeaStatusesFile): void { writeYaml(join(this.dir, "idea-statuses.yaml"), IdeaStatusesFile.parse(value)); }
 
   readIdeaHandoffs(): IdeaHandoffsFile {
     const file = join(this.dir, "idea-handoffs.yaml");
-    return existsSync(file) ? readYaml(file, IdeaHandoffsFile) : { protocol: 1, records: [] };
+    return exists(file) ? readYaml(file, IdeaHandoffsFile) : { protocol: 1, records: [] };
   }
   /** Only the server writes direct idea handoffs; never a partner's events. */
   writeIdeaHandoffs(value: IdeaHandoffsFile): void { writeYaml(join(this.dir, "idea-handoffs.yaml"), IdeaHandoffsFile.parse(value)); }
@@ -369,18 +391,18 @@ export class ProjectStore {
   /** The project's tag lists (.nexus/tags.yaml); empty lists while the file does not exist. */
   readTags(): TagsFile {
     const f = join(this.dir, "tags.yaml");
-    return existsSync(f) ? readYaml(f, TagsFile) : TagsFile.parse({ protocol: 1 });
+    return exists(f) ? readYaml(f, TagsFile) : TagsFile.parse({ protocol: 1 });
   }
   /** Written only by the server (tags.ts). */
   writeTags(t: TagsFile): void { writeYaml(join(this.dir, "tags.yaml"), TagsFile.parse(t)); }
   /** The recurring queues' ids (.nexus/recurring/<id>.yaml). */
   recurringIds(): string[] {
     const d = join(this.dir, "recurring");
-    return existsSync(d) ? readdirSync(d).filter((f) => f.endsWith(".yaml")).map((f) => f.slice(0, -5)).sort() : [];
+    return exists(d) ? list(d).filter((f) => f.endsWith(".yaml")).map((f) => f.slice(0, -5)).sort() : [];
   }
   readRecurring(id: string): RecurringFile | undefined {
     const f = join(this.dir, "recurring", `${id}.yaml`);
-    return existsSync(f) ? readYaml(f, RecurringFile) : undefined;
+    return exists(f) ? readYaml(f, RecurringFile) : undefined;
   }
   /** Written only by the server (apps/server/src/recurring.ts). */
   writeRecurring(r: RecurringFile): void {
@@ -388,25 +410,25 @@ export class ProjectStore {
   }
   clearRecurring(id: string): void {
     const f = join(this.dir, "recurring", `${id}.yaml`);
-    if (existsSync(f)) { unlinkSync(f); writes++; }
+    if (exists(f)) { unlinkSync(f); writes++; }
   }
   /** The server's note on the static analysis reminder (.nexus/static-analysis.yaml); empty while there is none. */
   readStaticAnalysisNote(): StaticAnalysisNote {
     const f = join(this.dir, "static-analysis.yaml");
-    return existsSync(f) ? readYaml(f, StaticAnalysisNote) : StaticAnalysisNote.parse({ protocol: 1 });
+    return exists(f) ? readYaml(f, StaticAnalysisNote) : StaticAnalysisNote.parse({ protocol: 1 });
   }
   /** Written only by the server (apps/server/src/static-reminder.ts). */
   writeStaticAnalysisNote(n: StaticAnalysisNote): void { writeYaml(join(this.dir, "static-analysis.yaml"), StaticAnalysisNote.parse(n)); }
   /** The project's metrics (.nexus/metrics.yaml); none while the file does not exist. */
   readMetrics(): MetricsFile {
     const f = join(this.dir, "metrics.yaml");
-    return existsSync(f) ? readYaml(f, MetricsFile) : MetricsFile.parse({ protocol: 1 });
+    return exists(f) ? readYaml(f, MetricsFile) : MetricsFile.parse({ protocol: 1 });
   }
   /** Written only by the server (metric-define.ts). */
   writeMetrics(m: MetricsFile): void { writeYaml(join(this.dir, "metrics.yaml"), MetricsFile.parse(m)); }
   readRun(queueId: string): RunFile | undefined {
     const f = join(this.queueDir(queueId), "run.yaml");
-    return existsSync(f) ? readYaml(f, RunFile) : undefined;
+    return exists(f) ? readYaml(f, RunFile) : undefined;
   }
   writeRun(queueId: string, run: RunFile): void { writeYaml(join(this.queueDir(queueId), "run.yaml"), RunFile.parse(run)); }
   /**
@@ -415,14 +437,14 @@ export class ProjectStore {
    */
   archiveRun(queueId: string): string | undefined {
     const f = join(this.queueDir(queueId), "run.yaml");
-    if (!existsSync(f)) return undefined;
+    if (!exists(f)) return undefined;
     const name = `run.${new Date().toISOString().replace(/[:.]/g, "-")}.yaml`;
     renameRetrying(f, join(this.queueDir(queueId), name));
     return name;
   }
   clearRun(queueId: string): void {
     const f = join(this.queueDir(queueId), "run.yaml");
-    if (existsSync(f)) { unlinkSync(f); writes++; }
+    if (exists(f)) { unlinkSync(f); writes++; }
   }
 
   readDelivered(sessionId: string): JsonlRead<Delivery> { return readJsonl(join(this.sessionDir(sessionId), "delivered.jsonl"), Delivery); }
@@ -449,7 +471,7 @@ export class ProjectStore {
   }
   /** Takes up the server's clock mark (a missing or unreadable file: none, as before the file existed). */
   observeClock(): void {
-    try { observe((JSON.parse(readFileSync(join(this.dir, "clock.json"), "utf8")) as { at?: string }).at); } catch { /* none */ }
+    try { observe((JSON.parse(readText(join(this.dir, "clock.json"))) as { at?: string }).at); } catch { /* none */ }
   }
   appendApplied(sessionId: string, a: Applied): void { appendJsonl(join(this.sessionDir(sessionId), "applied.jsonl"), Applied.parse(a)); }
 
@@ -459,7 +481,7 @@ export class ProjectStore {
   /** The chat's pinned messages (none when the file is missing or broken). Written only by the server. */
   readPins(sessionId: string): PinsFile {
     const f = join(this.sessionDir(sessionId), "pins.json");
-    try { return existsSync(f) ? PinsFile.parse(JSON.parse(readFileSync(f, "utf8"))) : { pins: [] }; } catch { return { pins: [] }; }
+    try { return exists(f) ? PinsFile.parse(JSON.parse(readText(f))) : { pins: [] }; } catch { return { pins: [] }; }
   }
   writePins(sessionId: string, p: PinsFile): void {
     const f = join(this.sessionDir(sessionId), "pins.json");
@@ -471,7 +493,7 @@ export class ProjectStore {
 
   readRuntime(sessionId: string): RuntimeFile | undefined {
     const f = join(this.sessionDir(sessionId), "runtime.json");
-    try { return existsSync(f) ? RuntimeFile.parse(JSON.parse(readFileSync(f, "utf8"))) : undefined; } catch { return undefined; }
+    try { return exists(f) ? RuntimeFile.parse(JSON.parse(readText(f))) : undefined; } catch { return undefined; }
   }
   writeRuntime(sessionId: string, r: RuntimeFile): void {
     const f = join(this.sessionDir(sessionId), "runtime.json");
@@ -494,7 +516,7 @@ const globalSettingsFile = () => join(nexusHome(), "settings.yaml");
 /** The global settings (<NEXUS_HOME>/settings.yaml); the built-in defaults while the file does not exist. */
 export function readGlobalSettings(): GlobalSettings {
   const f = globalSettingsFile();
-  return existsSync(f) ? readYaml(f, GlobalSettings) : builtInSettings();
+  return exists(f) ? readYaml(f, GlobalSettings) : builtInSettings();
 }
 /**
  * <NEXUS_HOME>/limits.json: where the limit on queues running at once was kept before it became a global setting
@@ -505,7 +527,7 @@ const limitsFile = () => join(nexusHome(), "limits.json");
 /** The limit limits.json holds, if it holds a valid one. */
 function legacyMaxRunning(): number | undefined {
   try {
-    return MaxRunning.safeParse((JSON.parse(readFileSync(limitsFile(), "utf8")) as { max_running?: unknown }).max_running).data;
+    return MaxRunning.safeParse((JSON.parse(readText(limitsFile())) as { max_running?: unknown }).max_running).data;
   } catch { return undefined; }
 }
 
@@ -523,7 +545,7 @@ export function writeGlobalSettings(g: GlobalSettings): void {
  */
 export function ensureGlobalSettings(): GlobalSettings {
   const f = globalSettingsFile();
-  const raw = existsSync(f) ? (YAML.parse(readFileSync(f, "utf8")) as { defaults?: { max_running?: unknown } } | null) : undefined;
+  const raw = exists(f) ? (YAML.parse(readText(f)) as { defaults?: { max_running?: unknown } } | null) : undefined;
   const g = readGlobalSettings();
   if (raw?.defaults?.max_running !== undefined) return g;
   const legacy = legacyMaxRunning();
@@ -535,7 +557,7 @@ export function ensureGlobalSettings(): GlobalSettings {
 const awayFile = () => join(nexusHome(), "away.yaml");
 /** The away mode (missing: never turned on). */
 export function readAway(): AwayFile {
-  try { return existsSync(awayFile()) ? readYaml(awayFile(), AwayFile) : AwayFile.parse({ protocol: 1 }); } catch { return AwayFile.parse({ protocol: 1 }); }
+  try { return exists(awayFile()) ? readYaml(awayFile(), AwayFile) : AwayFile.parse({ protocol: 1 }); } catch { return AwayFile.parse({ protocol: 1 }); }
 }
 /** Only the server writes it, from the user's action or at its end (away.ts). */
 export function writeAway(a: AwayFile): void {
@@ -546,7 +568,7 @@ export function writeAway(a: AwayFile): void {
 const capacityFile = () => join(nexusHome(), "capacity.yaml");
 /** The capacity coordinator's state; undefined when there is none, or it cannot be read (nothing is shown then). */
 export function readCapacity(): CapacityFile | undefined {
-  try { return existsSync(capacityFile()) ? readYaml(capacityFile(), CapacityFile) : undefined; } catch { return undefined; }
+  try { return exists(capacityFile()) ? readYaml(capacityFile(), CapacityFile) : undefined; } catch { return undefined; }
 }
 /** Only the server writes it (apps/server/src/capacity.ts). */
 export function writeCapacity(c: CapacityFile): void {
@@ -556,7 +578,7 @@ export function writeCapacity(c: CapacityFile): void {
 
 const usageFile = () => join(nexusHome(), "usage.json");
 export function readUsage(): UsageFile | undefined {
-  try { return existsSync(usageFile()) ? UsageFile.parse(JSON.parse(readFileSync(usageFile(), "utf8"))) : undefined; } catch { return undefined; }
+  try { return exists(usageFile()) ? UsageFile.parse(JSON.parse(readText(usageFile()))) : undefined; } catch { return undefined; }
 }
 export function writeUsage(u: UsageFile): void {
   mkdirSync(nexusHome(), { recursive: true });
@@ -566,7 +588,8 @@ export function writeUsage(u: UsageFile): void {
 }
 
 function subdirs(dir: string): string[] {
-  if (!existsSync(dir)) return [];
+  if (!exists(dir)) return [];
+  work.listings++;
   return readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
 }
 

@@ -242,11 +242,32 @@ queue with the evidence (its stop condition).
 
 ## The gate
 
-SM2 builds the counters into the store's reads (bytes read, files opened, whole derivations, whole reads of the
-project) and a generator of a synthetic `.nexus` at 1× and 4× Nexus's own size. From SM3 the suite holds these rules
-for the readers moved: one appended line reads that line and the 64 bytes before it; a request makes no whole read of
-the project and at most one derivation; the counts are the same at 1× and 4×. The generator should also rewrite
-`runtime.json` as a streaming agent does (above), so the gate sees the second kind of frequent write.
+The store counts the work of its reads (`workCounts` in `packages/protocol/src/store.ts`): files read whole and their
+bytes, probes (a file's existence asked), folder listings, and whole derivations of a state (`loadProjectState`).
+Reads outside the store (templates, the ideas' notes) are not counted. `packages/protocol/test/synthetic.ts` builds a
+synthetic `.nexus` from a fixed seed (no clock, no random ids: the same tree for the same seed, which a test holds),
+shaped like Nexus's own as counted on 2026-11-20 (only its sizes: queues, steps, sessions by role, the logs' lines and
+bytes, the server's files) and scalable; `node scripts/synthetic-nexus.ts <folder> --scale 4` writes one. Its 1× is
+within 15% of Nexus's on every count (a test holds that too): 137 queues, about 360 steps, 260 sessions, about 6,000
+events (4.3 MB), 37,000 activity lines (9.3 MB), 6,400 chat lines; it takes about 2 s to write, 8 s at 4×.
+
+`packages/protocol/test/work-gate.test.ts` measures today's reads at 1× and 4× (SM2, before the model):
+
+| | 1× | 4× |
+|---|---|---|
+| A whole rebuild (a request after a change) | 1,442 files, 5.7 MB, 2,403 probes | 5,762 files, 23.3 MB, 9,561 probes |
+| The start (the recovery: a state per queue, then one) | 138 rebuilds, 199,000 files, 791 MB | 549 rebuilds, 3.2 million files, 12.8 GB |
+| One activity line (93 bytes) and its change | a whole rebuild | a whole rebuild |
+| One event line (138 bytes) and its change | a whole rebuild | a whole rebuild |
+| The conversation list (`Conversations.list`'s reads) | 271 files, 0.77 MB | 1,078 files, 3.1 MB |
+
+It holds these as they are now (the start rebuilds once per queue and once more; a line makes a whole read; a rebuild
+reads about four times as much at 4×). The gate's rules are written beside them as skipped tests, which SM3 turns on
+for the readers it moves: one appended line reads that line and the 64 bytes before it, and rebuilds nothing; the
+start reads the project once; a request makes no whole read; the counts are the same at 1× and 4×. The start's figure
+is one queue's `releaseOrphanedSteps` measured and counted for every queue (each is the same whole read; running all of
+them takes minutes at 4×). The generator does not rewrite `runtime.json` as a streaming agent does yet (above): that
+belongs with the scenario of a streaming agent in SM3's gate.
 
 ## Beyond the decision (proposals, not decided)
 

@@ -2,7 +2,7 @@
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
 import { applyCheckSets, enterAcceptedReview, reviewRound } from "./checks.ts";
 import { CONVERSATION_ONLY, HELPER_VERDICTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
-import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
+import { ProjectStore, chainPlan, countRebuild, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
 import { inFileOrder } from "./clock.ts";
@@ -283,6 +283,7 @@ export function stepClosed(q: Pick<QueueView, "rejection">, st: { id: string; st
 }
 
 export function loadProjectState(store: ProjectStore): ProjectState {
+  countRebuild();
   const warnings: string[] = [];
   const project = store.readProject();
   const away = readAway();
