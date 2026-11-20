@@ -183,6 +183,9 @@ test("a thinking partner replies in the reader's language and writes files in th
     const c = conversations.create({ title: "Ideas" });
     conversations.say(c.id, "first");
     await until("the first reply", () => replies(c.id) === 1);
+    // The change comes after the first turn, not only after its text: a message sent into the running turn goes to the
+    // process it runs in, and the change counts from the message after (queue KM: the second reply came from it).
+    await until("the first turn's end", () => conversations.idle());
     updateSettings(b.store, { languages: { reader: "es", working: "fr" } });
     conversations.say(c.id, "second");
     await until("the second reply", () => replies(c.id) === 2);

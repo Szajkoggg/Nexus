@@ -179,7 +179,11 @@ export class AgentHost<E extends object = object> {
     proc.on("refusal", (r) => on.refusal?.(r));
     proc.on("background", (w) => on.background?.(w));
     proc.on("compacted", (c) => on.compacted?.(c));
-    proc.on("settled", () => on.settled?.());
+    proc.on("settled", () => {
+      // A restart held for the moment a turn of the runtime's own could still start (turnEnd below): none came.
+      if (this.afterTurn.has(proc) && proc.state === "idle") { this.afterTurn.delete(proc); this.ended.add(proc); proc.kill(); this.forget(l); }
+      on.settled?.();
+    });
     proc.on("facts", (f) => {
       if (f.model) model = f.model;
       if (f.contextTokens !== undefined) begin();
@@ -193,7 +197,10 @@ export class AgentHost<E extends object = object> {
       const last = { started_at: open!.started, ended_at: now() };
       open = undefined;
       this.write(session.id, this.record.countTurns ? { state: "idle", last_turn: last, turns: (this.store.readRuntime(session.id)?.turns ?? 0) + 1 } : { state: "idle", last_turn: last });
-      if (this.afterTurn.has(proc)) { this.afterTurn.delete(proc); this.ended.add(proc); proc.kill(); this.forget(l); }
+      // A restart after the turn: not while the runtime may still run a message sent into this turn as a turn of its
+      // own (AgentProcess.settling, queue KM): killed now, the process would take that message with it. It ends after
+      // that turn, or once the moment is over (settled).
+      if (this.afterTurn.has(proc) && !proc.settling) { this.afterTurn.delete(proc); this.ended.add(proc); proc.kill(); this.forget(l); }
       on.turnEnd?.(end);
     });
     proc.on("exit", (code) => {
@@ -247,12 +254,12 @@ export class AgentHost<E extends object = object> {
 
   /**
    * A new process from the next message on (another model or effort): a working process is ended when its turn ends,
-   * an idle one now.
+   * a settling one when its moment is over (or after the turn it still starts), an idle one now.
    */
   restartAfterTurn(session: string): void {
     const l = this.running(session);
     if (!l) return;
-    if (l.proc.state === "working") { this.afterTurn.add(l.proc); return; }
+    if (l.proc.state === "working" || l.proc.settling) { this.afterTurn.add(l.proc); return; }
     this.ended.add(l.proc);
     l.proc.kill();
     this.live.delete(session);

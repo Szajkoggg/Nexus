@@ -77,7 +77,9 @@ Decisions, building it:
   the request went out on that false idle in about 2 of 150 full test runs). So does everything else that waits for
   the orchestrator to be idle (`Orchestrator.idle`, queue KM): a runtime switch (the fallback's or the user's), and the
   restart of a process whose settings changed, which a message during the settling leaves for the next message or the
-  settling's end.
+  settling's end. A process restarted after its turn (a partner's or the orchestrator's settings changed) is not
+  killed while it settles either: the message sent into the turn would go with it (queue KM4); it ends after that
+  turn, or once the moment is over.
 - While the summary is written, nothing else goes to the old session: the user's message would land in a session that
   is about to end, so it waits in its inbox and is carried into the fresh session's first turn, as a worker's unread
   messages are. Notices are not carried: the fresh session is told them anew, as what no session of its line was told

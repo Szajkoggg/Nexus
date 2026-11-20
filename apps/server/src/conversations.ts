@@ -383,6 +383,9 @@ ${text}`;
     if (existing && !this.host.stale(s.id, this.launcher(s))) return existing;
     if (existing) {
       if (existing.proc.state === "working") { this.host.restartAfterTurn(s.id); return existing; }
+      // Settling (AgentProcess.settling): a message sent into its last turn may still run as a turn of its own, which
+      // ending it now would lose. This message goes to it too; the next one, once it is over, finds it stale.
+      if (existing.proc.settling) return existing;
       this.retire(s.id);
     }
     return this.host.start(s, this.launcher(s), {}, (l) => {

@@ -303,3 +303,30 @@ test("a Codex web search shows in the chat with what it did: its query, the page
   assert.equal(webSearchText({ type: "webSearch", action: { type: "findInPage", url: "https://x.test/", pattern: "LTS" } }), "Find in page: LTS (https://x.test/)");
   assert.equal(webSearchText({ type: "webSearch", query: "old shape" }), "Web search: old shape");
 });
+
+test("a message sent as a partner's turn ends, with its settings changed meanwhile, is answered before the restart (queue KM)", async () => {
+  // FAKE_LATE_NEXT: the first turn's result waits for the next message, which then runs as a turn of its own after it.
+  // The changed notes folder makes the process stale: it is restarted after its turn, but not while that message may
+  // still run (AgentProcess.settling): killed at the result, the process would take the message with it.
+  // The late turn takes a moment (FAKE-SLOW), as Claude Code's does: the kill came before its reply.
+  process.env.FAKE_LATE_NEXT = "1";
+  process.env.FAKE_CHAT_SLOW_MS = "300";
+  const x = setup();
+  const replies = (id: string) => x.store.readChat(id).entries.filter((e) => e.from === "partner" && e.kind === "message").length;
+  try {
+    const c = x.conversations.create({ title: "Late" });
+    x.conversations.say(c.id, "first");
+    await x.until("the first reply", () => replies(c.id) === 1);
+    delete process.env.FAKE_LATE_NEXT; // for the next process
+    updateSettings(x.store, { conversations: { notes_dir: "Dev/Late" } });
+    x.conversations.say(c.id, "FAKE-SLOW: second");
+    await x.until("the second message answered", () => replies(c.id) === 2);
+    assert.equal(x.store.readChat(c.id).entries.filter((e) => e.from === "partner" && e.kind === "message").at(-1)!.text, "slow reply");
+    assert.equal(x.args().length, 1, "answered by the process it was sent to");
+    await x.until("the old process ended", () => x.conversations.idle() && x.conversations.view(c.id).state === "exited");
+    x.conversations.say(c.id, "third");
+    await x.until("the third reply", () => replies(c.id) === 3);
+    assert.equal(x.args().length, 2, "a new process from the message after");
+    assert.ok((x.args()[1]!.argv as string[]).includes("Edit(Dev/Late/**)"), "on the changed settings");
+  } finally { delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_CHAT_SLOW_MS; x.stop(); }
+});
