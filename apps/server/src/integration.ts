@@ -87,14 +87,11 @@ type MergeOutcome =
  * it was. `contained`: HEAD has the base already. Undefined when git cannot read the refs.
  *
  * `known`: what the caller read already in the same synchronous go, so it is not asked of git again (queue SV2B):
- * HEAD (`from`), the base's commit (`sha`), and that the merge was tested clean (`clean`, by mergeConflicts). A merge
- * that conflicts after all is still caught by the merge itself and aborted.
+ * HEAD (`from`, undefined before the first commit), the base's commit (`sha`), and that the merge was tested clean
+ * (`clean`, by mergeConflicts). A merge that conflicts after all is still caught by the merge itself and aborted.
  */
-export function mergeBase(cwd: string, base: string, known: { from?: string; sha?: string; clean?: boolean } = {}): MergeOutcome | undefined {
-  let { from, sha } = known;
-  if (!from && !sha) [from, sha] = (git(cwd, ["rev-parse", "HEAD", `${base}^{commit}`]) ?? "").split(/\r?\n/);
-  from ||= git(cwd, ["rev-parse", "HEAD"]);
-  sha ||= git(cwd, ["rev-parse", `${base}^{commit}`]);
+export function mergeBase(cwd: string, base: string, known: { from: string | undefined; sha: string | undefined; clean?: boolean }): MergeOutcome | undefined {
+  const { from, sha } = known;
   if (!from || !sha) return undefined;
   // The base's commits HEAD lacks: none when HEAD contains the base; the count the record gives once merged.
   const ahead = git(cwd, ["rev-list", "--count", `${from}..${sha}`]);

@@ -207,10 +207,9 @@ export class CheckRunner {
     const fix = sets.filter((s) => s.round === round && s.state === "failed" && s.done !== done.id).length;
     // HEAD and uncommitted changes to tracked files from one git call (queue SV2B).
     const status = cwd ? checkoutStatus(cwd) : undefined;
-    const head = status?.head ?? undefined;
     const dirty = status ? !status.clean : false;
     const set: CheckSet = {
-      done: done.id, round, fix, commit: head ?? null, ...(dirty ? { dirty } : {}), requested_at: now(), state: "queued",
+      done: done.id, round, fix, commit: status?.head ?? null, ...(dirty ? { dirty } : {}), requested_at: now(), state: "queued",
       checks: defs.map((name) => ({ name, command: name, runs: [] })),
     };
     const i = sets.findIndex((s) => s.done === done.id);
