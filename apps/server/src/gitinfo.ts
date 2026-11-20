@@ -13,15 +13,16 @@ import { execFile, execFileSync } from "node:child_process";
 import { normPath, now, type BranchView, type CommitView, type GitFile, type LeftBehind, type ProjectStore, type QueueView, type RoundView, type StepCommitsView } from "@nexus/protocol";
 import { gitLabel, perf } from "./perf.ts";
 
-const TIMEOUT = 10_000;
+/** The limits of every local git read here, waited for (git) or not (gitAsync). */
+const LIMITS = { encoding: "utf8", windowsHide: true, timeout: 10_000, maxBuffer: 8 * 1024 * 1024 } as const;
 
 /**
- * Runs a local git command without holding the event loop (queue SV2): the same limits as git(), undefined when it
+ * Runs a local git command without holding the event loop (queue SV2): the same LIMITS as git(), undefined when it
  * fails. `trim: false` keeps the output as git wrote it (a status's leading space is part of its first code).
  */
 export function gitAsync(cwd: string, args: string[], o: { trim?: boolean } = {}): Promise<string | undefined> {
   return perf.timed(gitLabel(args), new Promise((resolve) => {
-    execFile("git", args, { cwd, encoding: "utf8", windowsHide: true, timeout: TIMEOUT, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+    execFile("git", args, { cwd, ...LIMITS }, (err, stdout) => {
       resolve(err ? undefined : o.trim === false ? stdout : stdout.trim());
     });
   }));
@@ -29,7 +30,7 @@ export function gitAsync(cwd: string, args: string[], o: { trim?: boolean } = {}
 
 /** Runs a local git command; undefined when it fails (not a repository, an unknown ref). */
 export function git(cwd: string, args: string[]): string | undefined {
-  try { return perf.measure(gitLabel(args), () => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: TIMEOUT, maxBuffer: 8 * 1024 * 1024 })).trim(); }
+  try { return perf.measure(gitLabel(args), () => execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "ignore"], ...LIMITS })).trim(); }
   catch { return undefined; }
 }
 

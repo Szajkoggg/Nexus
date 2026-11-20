@@ -102,13 +102,7 @@ export class Perf {
   async timed<T>(what: string, work: Promise<T>): Promise<T> {
     const t0 = performance.now();
     try { return await work; }
-    finally {
-      const key = `async ${what}`;
-      const s = this.spans.get(key) ?? { count: 0, total_ms: 0, max_ms: 0 };
-      const ms = performance.now() - t0;
-      s.count++; s.total_ms += ms; s.max_ms = Math.max(s.max_ms, ms);
-      this.spans.set(key, s);
-    }
+    finally { this.count(`async ${what}`, performance.now() - t0); }
   }
 
   /** Runs fn (synchronous) as a measured span. Its time counts for `what` whether or not the measuring is started. */
@@ -123,12 +117,17 @@ export class Perf {
   private end(ms: number): void {
     const path = this.stack.join(" > ");
     this.stack.pop();
-    const s = this.spans.get(path) ?? { count: 0, total_ms: 0, max_ms: 0 };
-    s.count++; s.total_ms += ms; s.max_ms = Math.max(s.max_ms, ms);
-    this.spans.set(path, s);
+    this.count(path, ms);
     if (!this.running || ms < 1) return;
     this.ended.push({ what: path, ms: round(ms) });
     if (this.ended.length > KEEP_SPANS * 2) this.ended = this.longest(this.ended, KEEP_SPANS);
+  }
+
+  /** Adds one run of `what` to the span statistics. */
+  private count(what: string, ms: number): void {
+    const s = this.spans.get(what) ?? { count: 0, total_ms: 0, max_ms: 0 };
+    s.count++; s.total_ms += ms; s.max_ms = Math.max(s.max_ms, ms);
+    this.spans.set(what, s);
   }
 
   private longest(spans: Span[], n: number): Span[] { return [...spans].sort((a, b) => b.ms - a.ms).slice(0, n); }
