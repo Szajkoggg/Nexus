@@ -1652,7 +1652,7 @@ export class Engine implements Member {
         // path: the worker's cwd may be a worktree whose own .nexus does not exist.
         disallowedTools: project.defaults.protect_nexus ? nexusDenyRules(this.store.dir) : undefined,
         appendSystemPrompt: workerBriefing(project.languages),
-        ...(this.lateTurnMs !== undefined ? { lateTurnMs: this.lateTurnMs } : {}),
+        lateTurnMs: this.lateTurnMs, // undefined: Claude's default
         env,
       } };
     };
