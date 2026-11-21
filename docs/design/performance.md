@@ -275,3 +275,97 @@ The server keeps up with twice the changes and answers in a third of the time, b
 slower than on a quiet machine (a rebuild 587 ms against 260 ms): below normal gives way only where the processor
 has a choice, and the suite's disk and memory traffic and its git processes are not prioritised by it. The suite took
 as long as before: on this machine nothing else wanted the cores it gave way on.
+
+## The measurement after the model, and the worker thread (queue SW)
+
+The user's decision of 2026-11-18 put the processing of agent output, the ingesting and the round of decisions on a
+worker thread; queue SM built the model on the event loop and left the thread to a measurement after SM4
+([model.md](model.md#beyond-the-decision-proposals-not-decided)). SW1 measured (2026-11-21) and weighed it.
+
+**The measurement**: `node scripts/perf-load.ts --minutes 3` at main's `01cb79b` (after SM4 and MF), the same load as
+SV1's quiet run, on the user's machine with nothing else at work.
+
+| | After SM4 (`01cb79b`) |
+|---|---|
+| Start until the first answer | 1.1 s |
+| Event loop delay p50 / p99 / max | 15 ms / 117 ms / 767 ms |
+| Blocks of 200 ms or more | 31, 12.2 s together (7% of the three minutes) |
+| A derivation of the state (`state big`: count, mean, max) | 87, 61 ms, 352 ms |
+| The decisions on a change (`engine (big)`: count, mean, max) | 46, 32 ms, 152 ms |
+| Synchronous git (calls, time) | 156, 8.6 s (110 `rev-parse`, 28 `status`, 14 `rev-list`, 2 `worktree`, 2 `branch`) |
+| The requests' synchronous time (count, sum) | 9,827, 45 s |
+| What a dashboard waited for `state` (mean / p95) | 67 / 109 ms |
+| … for `server` / the queue's git (p95) | 429 / 691 ms |
+| Notifications; steps accepted | 1,077; 14 |
+
+**What the blocks are**, by the spans each names:
+
+- **A step's boundary, 22 of 31 (203 to 667 ms).** The engine's synchronous git as a step ends and the next opens (a
+  turn's end after its settle time: `recordStepEnd`, the base pull's `status` and `rev-list`, the round records'
+  `rev-parse`; `engine (big)` with its `rev-parse` inside on the next change): six to eight git processes of about
+  50 ms each. They come in pairs: the load's two queues run 20-second steps started together. The user kept them
+  synchronous (SV2B). A real step lasts minutes to an hour, so in use they come far more rarely than here; beside the
+  full test suite each git process took about 350 ms (SV3), a boundary 2 to 3 s.
+- **A derivation, 4 (283 to 494 ms)**: `state big` of 280 to 350 ms where its mean is 61 ms (three blocks), and one
+  request's derivation of 317 ms.
+- **The start, 5 (291 to 736 ms)**: making the engine (444 ms, once), the two queues' worktrees (`git worktree`, 170 ms
+  each, with their `rev-parse`; once per queue) and the first requests' derivations (411 ms).
+
+What holds the loop most is not a block: the dashboards' reads (45 s of synchronous time in 9,827 requests, a quarter of
+the three minutes: two dashboards reading 12 endpoints on each of 1,077 notifications, `state` 16 ms, `digest` 14 ms,
+`conversations` 10 ms each).
+
+**What a worker thread would cost.** The state of the measured size, copied between threads (`v8.serialize` in one,
+`deserialize` in the other, on the synthetic `.nexus`: model.md, "The gate"):
+
+| | 1× | 4× |
+|---|---|---|
+| The state's size (serialized) | 7.3 MB | 30 MB |
+| A derivation from memory (median) | 48 ms | 197 ms |
+| Serializing it / deserializing it (median) | 10 / 17 ms | 48 / 67 ms |
+| `structuredClone` (median) | 23 ms | 121 ms |
+
+- **The decisions cannot be parted from the model.** The engine, the orchestrator, the merger and the user's actions
+  read the state and write in one synchronous go (SV2B; `stopwork.ts`'s read, check and write). With the model in a
+  worker and the decisions on the request thread, each of their reads becomes asynchronous and something else can fall
+  between a read and its write; made synchronous again (`Atomics.wait`) the request thread waits as long as now.
+- **So everything that writes would go to the worker**, or a file would get a second writer (the queue's stop
+  condition): the engine, the agent hosts (they write `runtime.json` and the activity), the orchestrator, the
+  conversations, the merger, the actions, the git calls. The request thread would keep the HTTP and WebSocket handling
+  and a copy of the state: each change costs it a deserialization (17 ms; 67 ms at 4×, plus freezing the copy) in place
+  of the derivation (61 ms here), and the worker a serialization on top of the derivation. Every route that reads logs
+  or files through the model (activity, chats, the digest, conversations, ideas, search) becomes a message to the
+  worker and back, or the request thread keeps a second model and a second watcher.
+- **What it would win**: the boundary's git and the derivations no longer hold the GET routes that read the copy. It
+  would not shorten what the user waits for after an action (a POST goes to the worker and waits for its loop as now),
+  nor the dashboards' 45 s of reads, which stay on the request thread.
+- **What it would risk**: the agents' pipes and timers live in the worker's loop; a worker that fails takes its agents'
+  output with it, and restarting it is a restart of the engine (the recovery) without the process ending. Lifecycle code
+  throughout (`engine.ts`, `agent-host.ts`, `handover.ts`, `lifecycle.ts`): a large change.
+
+**Proposed: no worker thread now.** The loop's p99 is 117 ms and a dashboard's `state` p95 109 ms; the blocks left are
+the step boundaries' synchronous git, the user's choice of SV2B, which a worker would only move, and a derivation's
+outliers. The targeted proposals below (a step boundary's `rev-parse` read from the repository's files instead of a
+git process, the boundary measured as a span of its own, the dashboards' reads keyed on the version) take what is left
+for a fraction of the change. The worker thread is worth weighing again when a
+derivation from memory on the live project passes about 150 ms on average (`nexus server perf`, `state <project>`: the
+4× history costs 197 ms) and a derivation per queue cannot bring it down.
+
+**Beyond the decision (proposals, not decided):**
+
+- **A step boundary's HEAD and refs read from the repository's files**: 110 of the 156 synchronous git calls were
+  `rev-parse`, about 50 ms each (350 ms beside the test suite) for what `.git/HEAD`, the worktree's `gitdir`, a loose
+  ref or `packed-refs` say in microseconds. Still synchronous, in the same order (SV2B's decision kept); git itself
+  where the files are not plain (a reftable repository, an unknown ref, a ref expression).
+- **The step boundary measured as a span of its own**: the turn's settle timer in `engine.ts` (`turnEnd`:
+  `recordStepEnd`, `advance`, the next step's opening) runs outside `changed()`, so 17 of the 31 blocks name only their
+  git calls; a span (`engine turn end (<project>)`) would name what ran them.
+- **The dashboards' reads keyed on the version**: after the model they are the loop's largest load (45 s of synchronous
+  time in three minutes, two dashboards); `state`, `digest`, `conversations` and `estimates` could answer "not
+  modified" for a version the dashboard already holds, short of the deltas (model.md, "Beyond the decision").
+- **A derivation's outliers**: `state big` took 280 to 350 ms three times against a mean of 61 ms; whether that is the
+  garbage collector over the model's heap (`--trace-gc` on the load) is to be seen before a derivation per queue.
+- **The load beside the full test suite again**: SV3's figures predate the model; the step boundaries' git is where that
+  load would hurt most (2 to 3 s a boundary).
+- **The worker thread again** when a derivation from memory on the live project passes about 150 ms on average, with
+  this section's costs measured again at that size.

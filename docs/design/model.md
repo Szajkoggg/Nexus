@@ -452,7 +452,9 @@ the derivation itself (about 70 ms here; a derivation per queue is the proposal 
   decision puts the processing of agent output, the ingesting and the round of decisions on a worker thread. With the
   model, ingesting a line is a read of that line, and a derivation is from memory; the engine's decisions read and
   write synchronously by the user's decision of SV2B, so moving them would make every read across threads
-  asynchronous, and the state copied between threads (several MB) on each change. Measure after SM4 first.
+  asynchronous, and the state copied between threads (several MB) on each change. Measured after SM4: proposed not
+  to build it now (performance.md, "The measurement after the model, and the worker thread (queue SW)", with what to
+  do instead).
 - **Changes to the dashboard as deltas**: SM3 sends `log` beside `changed` (which reads to ask again). The decision's
   aim, the changes themselves with a sequence number and a full reload on a gap, is a queue of its own after SM4.
 - **A derivation per queue**: only if the derivation from memory shows in SM4's measurement; the fold over events in
