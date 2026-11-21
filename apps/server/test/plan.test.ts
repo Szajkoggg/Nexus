@@ -14,6 +14,7 @@ import {
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { TestClock } from "./test-clock.ts";
 import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
@@ -30,9 +31,11 @@ function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean 
     approveQueue(store, id);
   }
   const engines: Engine[] = [];
+  // The undo window ends when the test moves this clock (UNDO_MS), not after real time a busy machine stretches.
+  const clock = new TestClock();
   let orchestrator: Orchestrator | undefined;
   const tick = () => { routeAnswers(store); acceptReviews(store); const s = loadProjectState(store); orchestrator?.onChange(s); engines.at(-1)!.onChange(s); };
-  const newEngine = () => { const e = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100, undoMs: UNDO_MS }); engines.push(e); return e; };
+  const newEngine = () => { const e = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100, undoMs: UNDO_MS, clock }); engines.push(e); return e; };
   let engine = newEngine();
   if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick);
   const timer = setInterval(tick, 150);
@@ -43,7 +46,7 @@ function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean 
   const say = (...args: string[]) => orchestrator!.say(`FAKE-NEXUS: ${JSON.stringify(args)}`);
   const hello = async () => { orchestrator!.say("Hello"); await until("the orchestrator's session", () => !!orchestrator!.session()); };
   const stop = () => { clearInterval(timer); orchestrator?.shutdown(); for (const e of engines) e.shutdown(); };
-  return { store, get engine() { return engine; }, queue, until, restart, said, say, hello, stop };
+  return { store, get engine() { return engine; }, clock, tick, queue, until, restart, said, say, hello, stop };
 }
 
 /** An external worker session, for events written by hand. */
@@ -63,7 +66,7 @@ function doneByHand(store: ProjectStore, queue: string, steps: string[]): void {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-/** The undo window of the user's changes to the plan, short for the tests, and long enough for a loaded machine. */
+/** The undo window of the user's changes to the plan, on the test's clock (setup's `clock`). */
 const UNDO_MS = 3_000;
 
 test("two predecessors: C starts only once both are done; the plan stays after the start", async () => {
@@ -204,8 +207,9 @@ test("the user's reorder: B after C makes those after B wait for B's predecessor
     assert.throws(() => x.engine.move("B", "B"), /cannot start after itself/);
     // To the front: nothing before it, so it starts, once the move can no longer be undone.
     assert.equal(x.engine.move("B", null).message, "queue B starts once the change can no longer be undone");
-    await sleep(UNDO_MS / 2);
+    x.tick(); x.clock.advance(UNDO_MS - 1); x.tick();
     assert.equal(x.queue("B").run, undefined, "not within the undo window");
+    x.clock.advance(1);
     await x.until("B to finish", () => x.queue("B").run?.state === "finished", LONGER.run);
   } finally { x.stop(); }
 });
@@ -232,8 +236,9 @@ test("the user adds and removes one predecessor: set by them, the others as they
     x.engine.removePredecessor("C", "B");
     assert.equal(x.engine.removePredecessor("C", "D").message, "queue C no longer waits for D; it waits for no other queue: it starts as soon as it may");
     assert.deepEqual(x.store.readPlan("C")!.after, [], "still in the plan, with none before it");
-    await sleep(UNDO_MS / 2);
+    x.tick(); x.clock.advance(UNDO_MS - 1); x.tick();
     assert.equal(x.queue("C").run, undefined, "not within the undo window");
+    x.clock.advance(1);
     await x.until("C to finish", () => x.queue("C").run?.state === "finished", LONGER.run);
   } finally { x.stop(); }
 });
@@ -275,7 +280,7 @@ test("undo: every plan file the change wrote as it was, the orchestrator's marks
 
     // Too late.
     const late = x.engine.addPredecessor("D", "C");
-    await sleep(UNDO_MS + 100);
+    x.clock.advance(UNDO_MS + 1);
     conflict(() => x.engine.undoPlan("D", late.undo.change), /its time is over/);
   } finally { x.stop(); }
 });
@@ -285,6 +290,8 @@ test("the user takes away the orchestrator's predecessor: their decision, told o
   try {
     await x.hello();
     x.engine.plan("C", { after: ["A", "B"], by: "orchestrator" });
+    // The orchestrator is told of decisions made since its session began, on the real clock: the test's clock catches up.
+    x.clock.advance(Math.max(0, Date.now() - x.clock.now()));
     x.engine.removePredecessor("C", "A");
     await x.until("told of the removal", () => x.said(/^The user took A out of the predecessors of queue C \(a dependency you had set\)\.$/));
     x.say("run", "C", "start", "--after", "A", "--after", "B", "--reason", "A first after all");
@@ -306,8 +313,9 @@ test("the undo window holds across a restart: a queue the user freed starts once
     x.engine.plan("C", { after: ["A"], by: "user" });
     x.engine.removePredecessor("C", "A");
     const engine = x.restart();
-    await sleep(UNDO_MS / 2);
+    x.tick(); x.clock.advance(UNDO_MS - 1); x.tick();
     assert.equal(x.queue("C").run, undefined, "not within the window");
+    x.clock.advance(1);
     assert.equal(engine, x.engine);
     await x.until("C to finish", () => x.queue("C").run?.state === "finished", LONGER.run);
   } finally { x.stop(); }

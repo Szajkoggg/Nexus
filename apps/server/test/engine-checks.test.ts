@@ -175,7 +175,11 @@ test("after a fix round every check runs again: one that passed before and broke
   x.plan("lint", [0, 1, 1, 0]);
   try {
     x.engine.start("Q", { runtime: "claude" });
-    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run, );
+    // One wait for each set and fix round, not one for the run: each takes a few processes, and a busy machine
+    // stretches them all (queue CI8).
+    await x.until("the first set failed", () => x.sets()[0]?.state === "failed", LONGER.run);
+    await x.until("the first fix round's set failed", () => x.sets()[1]?.state === "failed", LONGER.run);
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     const sets = x.sets();
     const outcome = (i: number) => sets[i]!.checks.map((c) => `${c.name.split(" ").at(-1)}:${c.ok}:${c.runs.length}`);
     assert.deepEqual(outcome(0), ["lint:true:1", "unit:false:2"], "only the failed check runs again at once");

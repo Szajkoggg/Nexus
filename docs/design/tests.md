@@ -332,3 +332,20 @@ is the command line), Microsoft-Windows-VolumeSnapshot-Driver/Operational event 
 is the shadow copy's id) and Microsoft-Windows-Ntfs/Operational event 4 mounting `\Device\HarddiskVolumeShadowCopyN`
 (it is made; its first field is the same id). The messages are in the system's language, so src/snapshots.ts reads
 the fields by position. A gap in the write times of the files under `%TEMP%\nexus-*` shows the stall itself.
+
+## Waits for a stretch, not for a whole run; a window on the test's clock (queue CI8)
+
+Four tests failed in full runs without a volume shadow copy (integration-free's check-fix and conflict tests,
+engine-checks' P3, context-care's fallback summary), each in one `LONGER.run` wait (30 s) for a whole run. Such a run
+is a chain of 12 to 20 processes started one after another (the worker's job host, the fake's `nexus` calls, the
+stand-in checks, git), and load stretches every one of them alike: 5.3 s alone, 22 to 26 s under
+`scripts/load-tests.mjs`, 30 to 41 s in a full run. Nothing waited in line (the capacity coordinator granted within
+22 to 104 ms; each test has its own full-test lock) and the engine never stood still: the wait covered too much, and the
+suite as a whole slowing (618 s to 1070 s in three days, for 10 % more tests) moved the chain past it. The waits are
+now one per stretch (a step done, a check set failed, the fix round's set, the end), each a few processes under the
+same limit, rather than a longer limit for the whole.
+
+plan.test.ts ran a real 3 s undo window and checked it after real sleeps; a test process that got no CPU for 1.5 s saw
+the queue started "within" the window, or its undo refused as "its time is over". The window is now on a `TestClock`
+(apps/server/test/test-clock.ts, the engine's `clock` option), moved by the test; a test whose orchestrator is told of
+decisions made since its session began moves the clock up to the real time first.

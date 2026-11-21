@@ -136,6 +136,9 @@ for (const runtime of ["claude", "codex"] as const) {
     const { engine, queue, received, until, done } = setup(["done", "done", "done"], { fill: 0.8, noSummary: true });
     try {
       engine.start("Q", { runtime });
+      // One wait for each step (each in a session of its own, after a summary asked for), not one for the run: each
+      // takes a few processes, and a busy machine stretches them all (queue CI8).
+      for (const [i, id] of ["Q1", "Q2", "Q3"].entries()) await until(`${id} done`, () => queue().steps[i]!.status === "done", LONGER.run);
       await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       const q = queue();
       // Asked once at the end of each step that has a next step (Q1 in the first session, Q2 in the second).
