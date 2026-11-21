@@ -28,12 +28,11 @@ function stampOf(path: string): string {
  */
 function checkingFiles(cache: FileCache): void {
   const proto = Object.getPrototypeOf(cache) as FileCache;
-  const files = new Map<string, string>(), folders = new Map<string, string>(), probes = new Map<string, boolean>();
-  const logs = new Set<string>();
-  const look = (path: string, seen: Map<string, string>) => {
-    const now = stampOf(path), was = seen.get(path);
+  const stamps = new Map<string, string>(), probes = new Map<string, boolean>(), logs = new Set<string>();
+  const look = (path: string) => {
+    const now = stampOf(path), was = stamps.get(path);
     if (was !== undefined && was !== now) cache.touched(path);
-    seen.set(path, now);
+    stamps.set(path, now);
   };
   const probe = (path: string) => {
     const now = existsSync(path), was = probes.get(path);
@@ -41,16 +40,15 @@ function checkingFiles(cache: FileCache): void {
     probes.set(path, now);
   };
   cache.has = (file) => { probe(file); return proto.has.call(cache, file); };
-  cache.parsed = <T>(file: string, parse: (text: string) => T): T => { look(file, files); return proto.parsed.call(cache, file, parse) as T; };
-  cache.dirs = (dir) => { look(dir, folders); return proto.dirs.call(cache, dir); };
-  cache.names = (dir) => { look(dir, folders); return proto.names.call(cache, dir); };
+  cache.parsed = <T>(file: string, parse: (text: string) => T): T => { look(file); return proto.parsed.call(cache, file, parse) as T; };
+  cache.dirs = (dir) => { look(dir); return proto.dirs.call(cache, dir); };
+  cache.names = (dir) => { look(dir); return proto.names.call(cache, dir); };
   cache.jsonl = ((file, schema, o) => { logs.add(file); return proto.jsonl.call(cache, file, schema, o); }) as FileCache["jsonl"];
   // Every log read looks whether its file grew, as a running agent's does in the server.
   cache.live = () => true;
   const state = cache.state!;
   cache.state = () => {
-    for (const p of [...files.keys()]) look(p, files);
-    for (const p of [...folders.keys()]) look(p, folders);
+    for (const p of [...stamps.keys()]) look(p);
     for (const p of [...probes.keys()]) probe(p);
     cache.sync([...logs]);
     return state();
