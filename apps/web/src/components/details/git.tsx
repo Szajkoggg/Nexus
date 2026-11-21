@@ -15,7 +15,7 @@ export function StepCommits({ project, queue, step, toggle }: {
   /** The review's one line: "Commits · 3", which opens and closes the list. */
   toggle?: { open: boolean; onToggle: () => void };
 }) {
-  const { data, error } = useQuery<StepCommitsView | null>(projectUrl(project, `/queues/${enc(queue)}/steps/${enc(step)}/commits`), usePage().version);
+  const { data, error } = useQuery<StepCommitsView | null>(projectUrl(project, `/queues/${enc(queue)}/steps/${enc(step)}/commits`), usePage().queueVersion(queue));
   if (!data && error) {
     return toggle
       ? <span className="text-danger" title={t("common.readFailed", { reason: error })}>{t("details.commits")} ✗</span>
@@ -155,7 +155,7 @@ export function WorktreeActions({ project, root, queue }: { project: string; roo
 
 /** The queue's branch: ahead and behind of its base and of its remote-tracking ref (as last fetched: never fetched here). */
 export function BranchLine({ project, queue }: { project: string; queue: string }) {
-  const { data: b, error } = useQuery<BranchView | null>(projectUrl(project, `/queues/${enc(queue)}/git`), usePage().version);
+  const { data: b, error } = useQuery<BranchView | null>(projectUrl(project, `/queues/${enc(queue)}/git`), usePage().queueVersion(queue));
   if (!b && error) return <div className="mt-3 rounded-lg bg-surface-2 p-3"><span className="text-sm text-fg-3">{t("details.branch")} </span><ReadError error={error} className="inline" /></div>;
   if (!b) return null;
   const counts = (x: { ahead: number; behind: number }) => (

@@ -1,11 +1,11 @@
 // Actions the agents wanted but were refused (sessions/<id>/refusals.jsonl): per step, and per project grouped by
 // kind. From a Claude Code refusal the user can add an allow rule to the project's Nexus settings; Codex refusals are
 // shown only (Nexus does not write Codex's own configuration).
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { Refusal } from "@nexus/protocol";
 import { groupRefusals, refusalKind, suggestAllowRule } from "@nexus/protocol/refusals";
-import { act, enc, projectUrl, useQuery, type ProjectState } from "../api.ts";
-import { usePage } from "../page.ts";
+import { act, enc, projectUrl, useLiveRead, type ProjectState } from "../api.ts";
+import { refusalsApplier } from "../liveViews.ts";
 import { Button, ReadError, Section, TimeAgo } from "./ui.tsx";
 import { rich, t, type Key } from "../i18n.ts";
 
@@ -15,10 +15,13 @@ const BY: Record<Refusal["by"], Key> = {
   auto_review: "refusals.by.autoReview",
 };
 
+const allRefusals = refusalsApplier<Refusal>({});
+
 /** The refusals of one step. */
 export function StepRefusals({ project, queue, step }: { project: ProjectState; queue: string; step: string }) {
   const id = project.project.id;
-  const { data: list, error } = useQuery<Refusal[]>(projectUrl(id, `/refusals?queue=${enc(queue)}&step=${enc(step)}`), usePage().logs);
+  const apply = useMemo(() => refusalsApplier<Refusal>({ queue, step }), [queue, step]);
+  const { data: list, error } = useLiveRead<Refusal[]>(projectUrl(id, `/refusals?queue=${enc(queue)}&step=${enc(step)}`), id, apply);
   const [open, setOpen] = useState<string>();
   if (!list && error) return <Section title={t("refusals.title")}><ReadError error={error} /></Section>;
   if (!list?.length) return null;
@@ -48,7 +51,7 @@ export function StepRefusals({ project, queue, step }: { project: ProjectState; 
 /** Every refusal of the project, grouped by kind (tool, command prefix), with counts and the latest time. */
 export function ProjectRefusals({ project }: { project: ProjectState }) {
   const id = project.project.id;
-  const { data: list, error } = useQuery<Refusal[]>(projectUrl(id, "/refusals"), usePage().version);
+  const { data: list, error } = useLiveRead<Refusal[]>(projectUrl(id, "/refusals"), id, allRefusals);
   const [open, setOpen] = useState<string>();
   if (!list && error) return <ReadError what={t("refusals.title")} error={error} className="mb-8" />;
   if (!list?.length) return null;

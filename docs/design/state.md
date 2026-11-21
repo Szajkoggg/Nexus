@@ -118,7 +118,9 @@ What is asked again comes from the live notifications, counted per scope (`Versi
 own counter (its state, orchestrator chat, conversations), and `changed` or `projects` the project list. A reconnect
 may have missed anything: it bumps an epoch that is part of every project's version. Before, one global tick refetched
 every read on any message from any project. Reads inside a step or queue still key on the project state's
-`generated_at`, which moves only with that project.
+`generated_at`, which moves only with that project. Since queue SD the largest reads (the state, the logs, the chats) are no longer asked again: they
+apply the changes the server sends, and the rest are asked only on the changes that concern them
+([live.md](live.md)).
 
 Every request goes through `apps/web/src/http.ts` (queue RX2): `request` checks the status and rejects with an
 `HttpError` (the server's reason, else the status text; its status; `reason`, the server's own only), `open` does the

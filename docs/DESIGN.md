@@ -45,7 +45,7 @@ The design is split by topic, one file each in `docs/design/`. New text goes int
 - [The derived model](design/model.md): the read layer over the files (queue SM): what the model holds, how the watcher feeds it, contradictions, rebuilding, today's readers and the order of moving them.
   Sections: What the model is; What it holds; How the watcher feeds it; Being as current as a read of the files; When a file contradicts its position; Derivation; Rebuilding; The two findings of the measurement, and the step that removes each; Today's readers; The order of moving the readers; The gate; Built in SM3; Beyond the decision (proposals, not decided)
 - [The dashboard gets the changes](design/live.md): the deltas the server sends from the model's changes (queue SD): the state's parts, logs, chat agents' heads, one sequence per project, gaps and full reloads, which views apply them and which are asked again.
-  Sections: What the dashboard does today; The principle; The state's delta; Logs; A chat agent's head; Order and gaps: one sequence per project; The views; How it is built and tested (SD2); Beyond the decision (proposals, not decided)
+  Sections: What the dashboard does today; The principle; The state's delta; Logs; A chat agent's head; Order and gaps: one sequence per project; The views; How it is built and tested (SD2); Built in SD2; Beyond the decision (proposals, not decided)
 - [Dependency updates](design/dependencies.md): dependency updates and what they taught.
   Sections: Hono Node adapter 2.x and the public SPA fallback (queue DU1); The lint toolchain's minimatch update (queue DU2)
 - [Ideas](design/ideas.md): the ideas overview: relationships, dispositions, assessments, correction controls, hand-offs.

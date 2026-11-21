@@ -78,7 +78,7 @@ export function PlanView({ project, queues, onOpen }: {
   const { reload: onChanged } = usePage();
   const layout = useMemo(() => planLayout(queues), [queues]);
   const base = usePlanActions(project, onChanged);
-  const estimates = useQuery<EstimatesResponse>(projectUrl(project, "/estimates"), usePage().version).data;
+  const estimates = useQuery<EstimatesResponse>(projectUrl(project, "/estimates"), usePage().queues).data;
   const actions: Actions = {
     ...base, targets: (q) => moveTargets(layout, queues, q), estimates,
     move: (q, after) => base.moveReplacing(q, after, planList(layout).find((n) => n.id === q)?.before.map((b) => b.queue) ?? []),

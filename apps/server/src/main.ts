@@ -39,7 +39,9 @@ import { Lifecycle, ROOT, projectPart, version } from "./lifecycle.ts";
 import { DeployPlanner, PlanError, planTime } from "./deploy-plan.ts";
 import { UploadError, readLimited, saveUpload } from "./uploads.ts";
 import { COMMIT_HASH, commitDetail, fileResponse, locate } from "./files.ts";
-import { chatRange, pin, searchLines } from "./chats.ts";
+import { chatRange, chatView, pin, searchLines } from "./chats.ts";
+import { LiveStream, type LiveSources } from "./live.ts";
+import { SEQ_HEADER, type LogKind } from "@nexus/protocol/live";
 import { searchProject } from "./search.ts";
 import { perf } from "./perf.ts";
 import { dashboardFiles, isPublicFile } from "./web-static.ts";
@@ -179,6 +181,7 @@ function dropProject(e: Entry): { parts: Parameters<typeof stopProject>[0]; clos
   watchedNotes.delete(e.id);
   watch.forget(e.id);
   e.model.close();
+  live.forget(e.id);
   return { parts: [e.engine, e.orchestrator, e.conversations, e.merger], closed: (w?.close() ?? Promise.resolve()).catch((err: Error) => console.error(`watch ${e.id}: not closed: ${err.message}`)) };
 }
 
@@ -194,11 +197,63 @@ function stateOf(e: Entry): ProjectState | undefined {
 // ---------------------------------------------------------------- change notification
 
 const sockets = new Set<WebSocket>();
-/** Tells every open dashboard what changed: a project, the project list, or the server's own state. */
-function broadcast(m: { type: "changed"; project: string } | { type: "log"; project: string; session: string } | { type: "projects" | "server" }): void {
-  const msg = JSON.stringify(m);
-  for (const s of sockets) if (s.readyState === s.OPEN) s.send(msg);
+/** A socket whose unsent data passes this is closed: the page reconnects and reads in full (docs/design/live.md). */
+const SOCKET_BEHIND = 8 * 1024 * 1024;
+function sendAll(msg: string): void {
+  for (const s of sockets) {
+    if (s.readyState !== s.OPEN) continue;
+    if (s.bufferedAmount > SOCKET_BEHIND) { s.terminate(); sockets.delete(s); continue; }
+    s.send(msg);
+  }
 }
+/** Tells every open dashboard that the project list or the server's own state changed (a project's changes: `live`). */
+function broadcast(m: { type: "projects" | "server" }): void { sendAll(JSON.stringify(m)); }
+
+/** A project's line in the project list (GET /api/projects, and the live stream's `summary`). */
+function summaryOf(e: Entry, s: ProjectState | undefined): ProjectSummary {
+  const count = (st: string) => s?.queues.filter((q) => q.status === st).length ?? 0;
+  // Running: at work now; a queue whose run the user stopped is not (queue EF, queueWorkedOn).
+  const running = s?.queues.filter(queueWorkedOn).length ?? 0;
+  return {
+    id: e.id, root: e.root, name: s?.project.name ?? e.id, error: e.error,
+    running, waiting: count("waiting"), stopped: count("stopped"),
+    open_questions: s?.questions.filter(isOpenQuestion).length ?? 0,
+    attention: s?.attention ?? [],
+  };
+}
+
+/** The chat agents' heads the stream compares: the orchestrator's always, a conversation's when it was touched. */
+const heads: LiveSources["heads"] = (id, sessions) => {
+  const e = projects.get(id);
+  if (!e) return [];
+  const orch = e.orchestrator.head();
+  const out: ReturnType<LiveSources["heads"]> = [{ session: orch.session?.id ?? "", orchestrator: true, head: orch }];
+  for (const sid of sessions) {
+    const item = e.conversations.item(sid);
+    if (item) out.push({ session: sid, head: e.conversations.head(sid), conversation: item });
+  }
+  return out;
+};
+
+/**
+ * The changes themselves, numbered per project (src/live.ts): published at the end of a change's decisions, at a log's
+ * 150 ms, before a project's read is answered and after a write, before it answers.
+ */
+const live = new LiveStream({
+  send: sendAll,
+  listening: () => sockets.size > 0,
+  sources: {
+    state: (id) => { const e = projects.get(id); return e && stateOf(e); },
+    summary: (id, s) => summaryOf(projects.get(id)!, s),
+    log: (id, session, kind) => {
+      const st = projects.get(id)!.store;
+      return kind === "activity" ? st.readActivity(session) : kind === "chat" ? st.readChat(session) : st.readRefusals(session);
+    },
+    pins: (id, session) => chatView(projects.get(id)!.store, session, 1).pins,
+    heads,
+  },
+});
+const publish = (id: string) => { if (!projects.has(id)) return; try { live.publish(id); } catch (err) { console.error(`live ${id}: ${(err as Error).message}`); } };
 const pending = new Map<string, NodeJS.Timeout>();
 
 function changed(id: string): void {
@@ -234,7 +289,7 @@ function changed(id: string): void {
       const s = stateOf(e);
       if (s) watch.check({ id, name: s.project.name }, s.attention);
     }
-    broadcast({ type: "changed", project: id });
+    publish(id);
   }, 150));
 }
 
@@ -258,13 +313,17 @@ function syncNotesWatcher(id: string, state: ProjectState): void {
  * decision runs; the dashboards ask again for that project's logs (a `log` message), once per 150 ms per session.
  */
 const logPending = new Map<string, NodeJS.Timeout>();
+const LOG_KINDS: Record<string, LogKind> = { "activity.jsonl": "activity", "chat.jsonl": "chat", "refusals.jsonl": "refusals", "pins.json": "pins" };
 function logChanged(id: string, path: string): void {
   if (!active) return;
-  const session = /[\\/]sessions[\\/]([^\\/]+)[\\/][^\\/]+$/.exec(path)?.[1];
-  if (!session) return;
+  const m = /[\\/]sessions[\\/]([^\\/]+)[\\/]([^\\/]+)$/.exec(path);
+  const kind = m && LOG_KINDS[m[2]!];
+  if (!m || !kind) return;
+  const session = m[1]!;
+  live.logChanged(id, session, kind);
   const key = `${id}/${session}`;
   if (logPending.has(key)) return;
-  logPending.set(key, setTimeout(() => { logPending.delete(key); broadcast({ type: "log", project: id, session }); }, 150));
+  logPending.set(key, setTimeout(() => { logPending.delete(key); publish(id); }, 150));
 }
 /**
  * What a project's watchers leave out: uploaded pictures (a 10 MB write need not reload the project), the server's own
@@ -411,30 +470,32 @@ app.use("/api/projects/:id/*", async (c, next) => {
   const e = projects.get(c.req.param("id"));
   if (!e) return c.json({ error: "unknown project" }, 404);
   c.set("entry", e);
-  return next();
+  // The live stream (docs/protocol/live.md, "Where a reply stands"): a read is answered after what is pending was sent,
+  // and names where the stream stood; a write sends what it changed before it answers, and names where that left it.
+  const read = c.req.method === "GET" || c.req.method === "HEAD";
+  if (read) publish(e.id);
+  const at = live.position(e.id);
+  await next();
+  if (!read) publish(e.id);
+  c.res.headers.set(SEQ_HEADER, read ? at : live.position(e.id));
 });
 
+// Each line names where its project's stream stood (`seq`), the header the epoch: the list applies the later summaries.
 app.get("/api/projects", (c) => {
   refreshRegistry();
   const list: ProjectSummary[] = [...projects.values()].map((e) => {
-    const s = stateOf(e);
-    const count = (st: string) => s?.queues.filter((q) => q.status === st).length ?? 0;
-    // Running: at work now; a queue whose run the user stopped is not (queue EF, queueWorkedOn).
-    const running = s?.queues.filter(queueWorkedOn).length ?? 0;
-    return {
-      id: e.id, root: e.root, name: s?.project.name ?? e.id, error: e.error,
-      running, waiting: count("waiting"), stopped: count("stopped"),
-      open_questions: s?.questions.filter(isOpenQuestion).length ?? 0,
-      attention: s?.attention ?? [],
-    };
+    publish(e.id);
+    return { ...summaryOf(e, stateOf(e)), seq: live.seq(e.id) };
   });
+  c.header(SEQ_HEADER, live.epoch);
   return c.json(list);
 });
 
+// The state's full read, from the texts the live stream keeps (one serialization per change, however many read it).
 app.get("/api/projects/:id/state", (c) => {
   const e = c.get("entry");
-  const s = stateOf(e);
-  return s ? c.json(s) : c.json({ error: e.error }, 500);
+  const json = live.stateJson(e.id);
+  return json ? c.body(json, 200, { "content-type": "application/json" }) : c.json({ error: e.error }, 500);
 });
 
 // Expected times of a project's queues, as estimates (@nexus/protocol estimates.ts): the samples are the finished
@@ -798,7 +859,9 @@ app.get("/api/projects/:id/search", (c) => {
 app.get("/api/projects/:id/sessions/:session/activity", (c) => {
   const e = c.get("entry");
   const queue = c.req.query("queue"), step = c.req.query("step");
-  const items = e.store.readActivity(c.req.param("session")).entries.filter((a) => (!queue || a.queue === queue) && (!step || a.step === step));
+  const read = e.store.readActivity(c.req.param("session"));
+  live.opened(e.id, c.req.param("session"), "activity", read);
+  const items = read.entries.filter((a) => (!queue || a.queue === queue) && (!step || a.step === step));
   return c.json(items.slice(-Number(c.req.query("limit") ?? 300)));
 });
 
@@ -831,7 +894,7 @@ app.get("/api/projects/:id/queues/:queue/git", async (c) => {
 app.get("/api/projects/:id/refusals", (c) => {
   const e = c.get("entry");
   const queue = c.req.query("queue"), step = c.req.query("step");
-  const all = e.store.sessionIds().flatMap((s) => e.store.readRefusals(s).entries)
+  const all = e.store.sessionIds().flatMap((s) => { const r = e.store.readRefusals(s); live.opened(e.id, s, "refusals", r); return r.entries; })
     .filter((r) => (!queue || r.queue === queue) && (!step || r.step === step));
   return c.json(all.sort((a, b) => a.at.localeCompare(b.at)));
 });
@@ -1069,7 +1132,11 @@ app.get("/api/models/:runtime", async (c) => {
 
 // The orchestrator chat.
 app.get("/api/projects/:id/orchestrator", (c) => {
-  return c.json(c.get("entry").orchestrator.view());
+  const e = c.get("entry");
+  const view = e.orchestrator.view();
+  // Its chat's later lines and pins come as log messages (the earlier sessions' chats do not change).
+  if (view.session) live.opened(e.id, view.session.id, "chat");
+  return c.json(view);
 });
 app.post("/api/projects/:id/orchestrator/messages", act((_st, b, _p, e) => e.orchestrator.say(b.text)));
 app.post("/api/projects/:id/orchestrator/reset", act((_st, _b, _p, e) => e.orchestrator.reset()));
@@ -1080,7 +1147,11 @@ app.get("/api/projects/:id/conversations", (c) => {
 });
 app.get("/api/projects/:id/conversations/:cid", (c) => {
   const e = c.get("entry");
-  try { return c.json(e.conversations.view(c.req.param("cid"))); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
+  try {
+    const view = e.conversations.view(c.req.param("cid"));
+    live.opened(e.id, view.session.id, "chat");
+    return c.json(view);
+  } catch (err) { return c.json({ error: (err as Error).message }, 404); }
 });
 app.post("/api/projects/:id/conversations", act((_st, b, _p, e) => e.conversations.create(b)));
 // The step's latest conversation that is not archived ("Chat about this" opens it, or starts one when there is none).
@@ -1244,5 +1315,7 @@ server.on("upgrade", (req, socket, head) => {
   wss.handleUpgrade(req, socket, head, (ws) => {
     sockets.add(ws);
     ws.on("close", () => sockets.delete(ws));
+    // The socket's first message: the epoch and where each project's stream stands (docs/protocol/live.md).
+    ws.send(live.hello([...projects.keys()]));
   });
 });

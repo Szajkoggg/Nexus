@@ -4,7 +4,8 @@ import type { ChatEntry, RuntimeFile, SessionFile, SessionView } from "@nexus/pr
 import type { NumberedEntry } from "@nexus/protocol/chat";
 import { tokenCount } from "@nexus/protocol/tokens";
 import { PinButton, PinsBar, SearchBar, SearchButton, StopButton, type PinView, type SearchState } from "./ChatTools.tsx";
-import { act, actResult, enc, projectUrl, request, useAction, useQuery, type Version } from "../api.ts";
+import { act, actResult, enc, projectUrl, request, useAction, useLiveRead } from "../api.ts";
+import { applyConversation, applyConversations, applyOrchestrator } from "../liveViews.ts";
 import { Button, Clock, Composer, Menu, ReadError, TimeAgo, type MenuEntry } from "./ui.tsx";
 import { CopyButton, ReplyTools } from "./MessageTools.tsx";
 import { messageSource, replyTools } from "../messageTools.ts";
@@ -67,8 +68,8 @@ const SUMMARY_FILE = ".nexus/orchestrator/summary.md";
 interface Search { open: boolean; set: (open: boolean) => void }
 
 /** The orchestrator's chat of a project: its data, and why it could not be read (shown in its place, ChatPanel). */
-export function useOrchestrator(project: string | undefined, version: Version) {
-  return useQuery<View>(project ? projectUrl(project, "/orchestrator") : undefined, version);
+export function useOrchestrator(project: string | undefined) {
+  return useLiveRead<View>(project ? projectUrl(project, "/orchestrator") : undefined, project, applyOrchestrator);
 }
 
 /** A chat: what it is (its header; on a desktop's orchestrator chat, in the middle column's header), the messages, and the composer. */
@@ -655,8 +656,7 @@ function AboutStep({ project, c, className = "" }: { project: string; c: Session
  * conversations, each a link into it.
  */
 export function StepChat({ project, queue, step }: { project: string; queue: string; step: string }) {
-  const { logs } = usePage();
-  const list = useQuery<ConversationItem[]>(projectUrl(project, "/conversations"), logs).data;
+  const list = useLiveRead<ConversationItem[]>(projectUrl(project, "/conversations"), project, applyConversations).data;
   const { busy, error, run } = useAction();
   const mine = (list ?? []).filter((c) => !c.archived && c.about?.queue === queue && c.about.step === step);
   const go = (fresh: boolean) => run(async () => {
@@ -740,15 +740,15 @@ function Conversations({ project, name, defaultRuntime, inline, desk, switcher }
   /** The Ideas panel's switch (to the overview), in the column's header on a desktop, atop the list on the phone. */
   switcher: (wide: boolean) => ReactNode;
 }) {
-  const { reload: onChanged, logs } = usePage();
-  const { data: list, error: listError } = useQuery<ConversationItem[]>(projectUrl(project, "/conversations"), logs);
+  const { reload: onChanged } = usePage();
+  const { data: list, error: listError } = useLiveRead<ConversationItem[]>(projectUrl(project, "/conversations"), project, applyConversations);
   usePlaces(); // the list's unread dots follow each conversation's place
   // The open conversation (or the new-conversation form) is a layer above the panel: Back returns to the list.
   const layer = layerValue(useNav(), "conversation");
   const creating = layer === "new";
   const open = creating ? undefined : layer;
   const [showArchived, setShowArchived] = useState(false);
-  const { data: view, error: viewError } = useQuery<ConversationView>(open ? projectUrl(project, `/conversations/${enc(open)}`) : undefined, logs);
+  const { data: view, error: viewError } = useLiveRead<ConversationView>(open ? projectUrl(project, `/conversations/${enc(open)}`) : undefined, project, applyConversation);
   // On the phone's tab the list or one conversation at a time; on a desktop both, side by side.
   const side = !desk;
   const current = list?.find((c) => c.id === open);

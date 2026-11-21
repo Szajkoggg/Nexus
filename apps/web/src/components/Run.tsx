@@ -1,10 +1,11 @@
 // Running queues through Nexus-launched sessions: controls, live activity, sessions and usage.
-import { useEffect, useState, type ReactNode } from "react";
+import { activityApplier } from "../liveViews.ts";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { retryLine } from "@nexus/protocol/times";
 import { tokenCount } from "@nexus/protocol/tokens";
 import { questionBarrier, runGoing } from "@nexus/protocol/status-rules";
 import { QuestionWait } from "./QuestionWait.tsx";
-import { act, enc, projectUrl, useAction, useQuery, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
+import { act, enc, projectUrl, useAction, useQuery, useLiveRead, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
 import { Button, ReadError, RunTimes, Section, TimeAgo } from "./ui.tsx";
 import { formatClock, formatDateTime, formatDuration, formatTime, formatNumber, rich, t, type Key } from "../i18n.ts";
 import { EffortSelect, ModelSelect } from "./Settings.tsx";
@@ -277,8 +278,8 @@ const KIND_ICON: Record<string, string> = { tool: "›", text: "¶", tool_error:
 
 /** What the agent did during a step, from the runtime's stream. */
 export function Activity({ project, session, queue, step }: { project: string; session: string; queue: string; step: string }) {
-  const { logs } = usePage();
-  const { data: items, error } = useQuery<ActivityEntry[]>(projectUrl(project, `/sessions/${enc(session)}/activity?queue=${enc(queue)}&step=${enc(step)}`), logs);
+  const apply = useMemo(() => activityApplier<ActivityEntry>(session, { queue, step }), [session, queue, step]);
+  const { data: items, error } = useLiveRead<ActivityEntry[]>(projectUrl(project, `/sessions/${enc(session)}/activity?queue=${enc(queue)}&step=${enc(step)}`), project, apply);
   const [all, setAll] = useState(false);
   if (!items && error) return <Section title={t("run.activity")}><ReadError error={error} /></Section>;
   if (!items?.length) return null;

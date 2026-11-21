@@ -22,8 +22,7 @@ const sinceIso = (range: Range) => {
 
 export function ProjectStats({ project, queues, phone }: { project: string; queues: QueueView[]; phone: boolean }) {
   const [range, setRange] = useState<Range>("30d");
-  const { version } = usePage();
-  const data = useQuery<ProjectMetrics>(projectUrl(project, "/metrics"), version).data;
+  const data = useQuery<ProjectMetrics>(projectUrl(project, "/metrics"), usePage().queues).data;
   const cards = useMemo(() => (data ? metricCards(project, data, sinceIso(range)) : undefined), [data, project, range]);
   const title = (p: MetricPoint) => queues.find((q) => q.id === p.queue)?.steps.find((s) => s.id === p.step)?.title;
   return (

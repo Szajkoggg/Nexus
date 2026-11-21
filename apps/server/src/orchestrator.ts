@@ -156,18 +156,23 @@ export class Orchestrator {
   }
 
   view() {
-    const s = this.session();
-    const o = this.store.readProject().orchestrator;
+    const head = this.head();
+    const s = head.session ?? undefined;
     // The newest 300 entries with their lines, and the session's pins (chats.ts); a fresh session has none.
     const own = s ? chatView(this.store, s.id, VIEW_ENTRIES) : { chat: [], pins: [] };
+    return { ...head, ...own, earlier: s ? this.earlier(s, own.chat.length) : [] };
+  }
+
+  /** What the chat view shows beside the chat (the live stream's `session` message sends it when it changes). */
+  head() {
+    const s = this.session();
+    const o = this.store.readProject().orchestrator;
     return {
       session: s ?? null,
       model: s ? s.model ?? null : o?.model ?? null,
       effort: s ? s.effort ?? null : o?.effort ?? null,
       state: this.proc?.state ?? "exited",
       runtime: s ? this.store.readRuntime(s.id) ?? null : null,
-      ...own,
-      earlier: s ? this.earlier(s, own.chat.length) : [],
     };
   }
 

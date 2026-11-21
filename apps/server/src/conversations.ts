@@ -66,6 +66,10 @@ const IDLE_MS = 15 * 60_000; // an idle partner's process ends; the next message
 type Extra = { timer?: NodeJS.Timeout; handoff?: boolean; handoffNext?: boolean; compacting?: boolean; compacted?: boolean };
 type Live = Hosted<Extra>;
 
+/** The conversation list's order: the archived last, then the latest message first (the dashboard sorts the same). */
+export const byConversationOrder = (a: { archived?: boolean; last_at: string }, b: { archived?: boolean; last_at: string }): number =>
+  Number(!!a.archived) - Number(!!b.archived) || b.last_at.localeCompare(a.last_at);
+
 export class Conversations {
   private readonly store: ProjectStore;
   private readonly orchestrator: Orchestrator;
@@ -88,17 +92,31 @@ export class Conversations {
     return this.store.sessionIds()
       .map((id) => { try { return this.store.readSession(id); } catch { return undefined; } })
       .filter((s): s is SessionFile => s?.role === "conversation")
-      .map((s) => {
-        const chat = this.store.readChat(s.id).entries;
-        return { ...s, state: this.host.get(s.id)?.proc.state ?? "exited", last_at: chat.at(-1)?.at ?? s.created_at, messages: chat.filter((c) => c.kind === "message").length };
-      })
-      .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || b.last_at.localeCompare(a.last_at));
+      .map((s) => this.itemOf(s))
+      .sort(byConversationOrder);
+  }
+
+  /** A conversation's line in the list, or undefined when the session is no conversation (the live stream's item). */
+  item(id: string) {
+    let s: SessionFile | undefined;
+    try { s = this.store.readSession(id); } catch { return undefined; }
+    return s.role === "conversation" ? this.itemOf(s) : undefined;
+  }
+
+  private itemOf(s: SessionFile) {
+    const chat = this.store.readChat(s.id).entries;
+    return { ...s, state: this.host.get(s.id)?.proc.state ?? "exited", last_at: chat.at(-1)?.at ?? s.created_at, messages: chat.filter((c) => c.kind === "message").length };
   }
 
   view(id: string) {
+    return { ...this.head(id), ...chatView(this.store, id, 400) };
+  }
+
+  /** What a conversation's view shows beside its chat (the live stream's `session` message sends it when it changes). */
+  head(id: string) {
     const s = this.session(id);
     return {
-      session: s, state: this.host.get(id)?.proc.state ?? "exited", runtime: this.store.readRuntime(id) ?? null, ...chatView(this.store, id, 400),
+      session: s, state: this.host.get(id)?.proc.state ?? "exited", runtime: this.store.readRuntime(id) ?? null,
       model: s.model ?? null, effort: s.effort ?? null, notes_dir: this.store.readProject().conversations.notes_dir ?? null,
       // Whether its runtime compacts on request: the dashboard offers Compact only then.
       compact: this.canCompact(s),

@@ -9,6 +9,8 @@ export interface ProjectSummary {
   id: string; name: string; root: string; error?: string;
   running: number; waiting: number; stopped: number; open_questions: number;
   attention: AttentionItem[];
+  /** Where the project's live stream stood when the line was read (docs/protocol/live.md); absent in a live summary. */
+  seq?: number;
 }
 
 /** One commit in a step's round (git log with its diffstat). */

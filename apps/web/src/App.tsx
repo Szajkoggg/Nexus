@@ -1,7 +1,8 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectState, QueueStatus } from "@nexus/protocol";
-import { projectUrl, reloads, useLive, useQuery, type AttentionItem, type ProjectSummary, type QueueView } from "./api.ts";
-import { bump, logsVersion, noVersions, projectVersion } from "./query.ts";
+import { projectUrl, reloads, stream, useLive, useLiveRead, useQuery, writtenAt, type AttentionItem, type ProjectSummary, type QueueView } from "./api.ts";
+import { bump, noVersions, projectVersion, queueVersion, queuesVersion, settingsVersion } from "./query.ts";
+import { applyConversations, applyStateMessage } from "./liveViews.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
 import { NewFromTemplate, RecurringList } from "./components/Recurring.tsx";
 import { QueueDetail } from "./components/details/QueueDetail.tsx";
@@ -70,19 +71,41 @@ export function App() {
   // What the live notifications changed (query.ts): each read is asked again only when its own version moves, so a
   // change in another project refetches nothing of this one's.
   const [versions, setVersions] = useState(noVersions);
-  const connected = useLive((m) => setVersions((v) => bump(v, m)));
-  const { data: projects, error: projectsError } = useQuery<ProjectSummary[]>("/api/projects", versions.list);
+  // The project list's lines as the live stream's state messages bring them (docs/protocol/live.md), each newer than
+  // the line the list was read with.
+  const [summaries, setSummaries] = useState<Readonly<Record<string, { seq: number; summary: ProjectSummary }>>>({});
+  useEffect(() => { stream.gap = (p) => setVersions((v) => bump(v, { type: "state", project: p, seq: 0, reload: true })); }, []);
+  const connected = useLive((m) => {
+    // The live views apply the message first (query.ts, LiveView); the reads asked again in full move with the versions.
+    stream.receive(m);
+    if (m.type === "hello") setSummaries({});
+    if (m.type === "state" && m.summary) { const s = { seq: m.seq, summary: m.summary }; setSummaries((x) => ({ ...x, [m.project]: s })); }
+    setVersions((v) => bump(v, m));
+  });
+  const listed = useQuery<ProjectSummary[]>("/api/projects", versions.list);
+  const projectsError = listed.error;
+  const projects = useMemo(() => listed.data?.map((p) => {
+    const s = summaries[p.id];
+    return s && s.seq > (p.seq ?? -1) ? { ...s.summary, seq: s.seq } : p;
+  }), [listed.data, summaries]);
   const projectId = route.project ?? projects?.[0]?.id;
   const version = projectVersion(versions, projectId);
-  const logs = logsVersion(versions, projectId);
-  const { data: state, error } = useQuery<ProjectState>(projectId ? projectUrl(projectId, "/state") : undefined, version);
+  const { data: state, error } = useLiveRead<ProjectState>(projectId ? projectUrl(projectId, "/state") : undefined, projectId, applyStateMessage);
   /**
-   * After the user's own write: the project's reads and what spans projects are asked again (the live notification
-   * may come later).
+   * After the user's own write: the reads asked again in full are asked again (the project's, and what spans projects);
+   * the live views get the write's changes from the stream.
    */
-  const reload = useCallback(() => setVersions((v) => bump(v, { type: "changed", project: projectId })), [projectId]);
-  /** The same, resolving once the reads it asks have landed: a control stays in progress until then (query.ts, Reloads). */
-  const reloaded = useCallback((...urls: string[]) => { const landed = reloads.next(urls); reload(); return landed; }, [reload]);
+  const reload = useCallback(() => { if (projectId) setVersions((v) => bump(v, { type: "state", project: projectId, seq: 0, reload: true })); }, [projectId]);
+  /**
+   * The same, resolving once the reads it asks have landed (query.ts, Reloads) and the page stands where the write left
+   * the live stream (its answer's header): a control stays in progress until then.
+   */
+  const reloaded = useCallback((...urls: string[]) => {
+    const landed = reloads.next(urls);
+    const reached = projectId ? stream.reached(projectId, writtenAt(projectId)) : Promise.resolve();
+    reload();
+    return Promise.all([landed, reached]).then(() => undefined);
+  }, [reload, projectId]);
   // The reads at the new versions are asked in this commit's effects; once all of them have run (the microtask after),
   // the writes waiting for their outcome wait for those reads.
   useEffect(() => { queueMicrotask(() => reloads.asked()); }, [versions]);
@@ -90,8 +113,10 @@ export function App() {
   const notify = useNotifications(projects);
   // App provides the page (below): what it reads itself takes the versions directly.
   const reader = state?.project.languages.reader;
-  const page = useMemo<Page>(() => ({ version, logs, all: versions.all, reload, reloaded, reader }), [version, logs, versions.all, reload, reloaded, reader]);
-  const { data: orchestrator, error: orchestratorError } = useOrchestrator(projectId, logs);
+  const queues = queuesVersion(versions, projectId), settings = settingsVersion(versions, projectId);
+  const queueVersionOf = useCallback((q: string) => queueVersion(versions, projectId, q), [versions, projectId]);
+  const page = useMemo<Page>(() => ({ version, queues, settings, queueVersion: queueVersionOf, all: versions.all, reload, reloaded, reader }), [version, queues, settings, queueVersionOf, versions.all, reload, reloaded, reader]);
+  const { data: orchestrator, error: orchestratorError } = useOrchestrator(projectId);
   const server = useServer(versions.all);
   // Each panel is a layer in the browser history: opening pushes an entry, closing (or Back) pops it.
   const settingsOpen = isOpen(route.nav, "settings");
@@ -166,7 +191,7 @@ export function App() {
   const [form, setForm] = useApprovalForm(projectId, queue?.id, queue?.revision);
   const fullApproval = !!(queue && !step && needsApproval(queue) && (form ?? (phone ? "panel" : "full")) === "full");
   // "Ideas · N" in a desktop's switch: the conversations that are not archived.
-  const ideas = useQuery<{ id: string; archived?: boolean; last_at?: string }[]>(projectId ? projectUrl(projectId, "/conversations") : undefined, logs).data;
+  const ideas = useLiveRead<{ id: string; archived?: boolean; last_at: string }[]>(projectId ? projectUrl(projectId, "/conversations") : undefined, projectId, applyConversations).data;
   // Unread markers on the chat switch and the phone's tabs, from each chat's place (chatPlace.ts).
   usePlaces();
   const unread: Unread = {

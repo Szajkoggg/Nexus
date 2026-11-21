@@ -1,6 +1,6 @@
 # The dashboard gets the changes (queue SD)
 
-Status: planned in SD1 (2026-11-21); built in SD2. It follows the user's decision of 2026-11-18 on the server's
+Status: planned in SD1 (2026-11-21); built in SD2 ("Built in SD2", below). It follows the user's decision of 2026-11-18 on the server's
 responsiveness (the user's notes, "Server responsiveness: one read layer over the files"): the server sends the changes
 themselves, not only "changed" ("aim for the best"), and the views apply them; in many places this is worth doing now.
 It builds on the derived model of queue SM ([model.md](model.md)). The messages and replies are in
@@ -198,6 +198,64 @@ stream.
 - **The acceptance test**: a dashboard client in a test (a WebSocket and the fake runtimes running a queue) applies
   every message and, after each, holds the same state, activity, chat and conversation list as a full read at the same
   `seq`; a dropped message (the test skips one) and a reconnect make it read in full.
+
+## Built in SD2
+
+As planned above, with these differences and findings:
+
+- **The reload limit has a floor**: a state delta goes as a reload only when it is larger than half the state *and*
+  than 64 KB. On a small project one queue's view is half the state, and the first version reloaded on every step's
+  change (the API test showed it).
+- **A state message may carry the summary alone**, and the first publication after no socket was open is a `reload`
+  (nothing to diff against); a page's first reads ask after it, so it costs nothing.
+- **Every read and write under `/api/projects/:id/` publishes** (a middleware), not only the live views' reads: a read
+  then names where the stream stood, a write where it left it. When nothing changed this costs a comparison of the
+  same state object and of the orchestrator's head.
+- **Logs are sent only once a reply has read them** (`LiveStream.opened`): the stream keeps for each such log how far the
+  views hold it, and a log no reply read cannot be held by any view, so its lines are not sent (the measurement's
+  streaming sessions sent 8 log messages a minute instead of 179).
+- **A reply can land before the socket brings the messages up to where it stands** (the HTTP answer overtakes the
+  socket): the view waits for them (`Stream.reached`) before it is fed. Without it the view was shown but never fed.
+- **The project list** is read at its version (a reconnect, `projects`) and overlaid with the summaries the state
+  messages bring, each newer than the line's `seq`; it is not a `LiveView` because it spans projects.
+- **One view per URL**, shared by every component that shows it (`useLiveRead` in `api.ts`): the state is read once
+  for the page and `IdeaLinks`, the conversation list once for its four readers. The first build let a remount's
+  cleanup drop the URL's entry while another view held it: every landing made a new view and read again (10,000
+  requests a minute in the measurement); the cleanup now lets go only of its own view.
+- **The heads** are `Orchestrator.head()` and `Conversations.head(id)`, the views without their chats (the views are
+  built from them), and `Conversations.item(id)` the list's line of one conversation.
+
+Tests: `packages/protocol/test/live.test.ts` (the diff and apply over a derived state changing, and every list case),
+`apps/web/test/live.test.ts` (the stream and its views: fed after the reply, messages during a read, a gap, a new hello,
+a reply from before the socket or another server, a reload, a write's wait, a reply before its messages; the
+appliers), `apps/web/test/query.test.ts` (what each message bumps), `apps/server/test/live-api.test.ts` (a real server
+running a queue on the fake runtimes: a client applying every message holds, at each sequence number, the state and the
+activity a full read at that number holds; no gap on one socket; a write's outcome shows where its answer stands).
+
+**The measurement** (the user's question: requests a dashboard sends in a minute of an active run). `node
+scripts/perf-load.ts --minutes 2 --dashboards 0 --page`: the generated project the size of Nexus's own, two queues
+running on the fake runtimes (20-second steps, accepted as they come), an agent's activity appended every 400 ms, and
+the real dashboard in headless Edge at 1440 px on a running step, its fetches and socket messages counted in the page
+after it settled. Before: SD1's code (`9bcace6`, the dashboard built from it); after: SD2's.
+
+| | Before | After |
+|---|---|---|
+| Requests a minute | 834 | 87 |
+| … the state, the orchestrator's chat, the conversations, a step's activity and refusals | 20 + 179 + 179 + 179 + 179 | 0 (applied); 1 activity and 1 refusals read at a step's switch |
+| … the project list | 20 | 0 |
+| … the server, the digest, the usage | 20 each | 23 each (on a queue's change) |
+| … a step's commits | 20 | 15 (its queue's changes only) |
+| Bytes of the replies a minute | 68.6 MB | under 0.05 MB |
+| Socket messages a minute | 183 (`changed`, `log`) | 55 (47 state deltas, 8 activity lines of the held log) |
+| Steps done in 2 minutes | 10 | 10 |
+| Event loop delay p50 / p99 | 15.9 / 85.5 ms | 15.9 / 100.9 ms |
+
+The page asks a tenth of what it asked, and the bytes fall from about a megabyte a second to nothing worth counting:
+the state is no longer sent whole on a change. The loop's figures are the run's step boundaries (their synchronous
+git, performance.md), unchanged; the server's own share of the reads fell with them (`GET …/state` was 38 a minute of
+about 10 ms each, `conversations` 343 of 7 ms). What is left are the narrowed reads that span projects (`server`,
+`digest`, `usage`) on every queue change, about once every two seconds here: "Not modified" below would take most of
+them.
 
 ## Beyond the decision (proposals, not decided)
 

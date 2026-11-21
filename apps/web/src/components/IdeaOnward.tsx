@@ -1,8 +1,9 @@
 // Idea-scoped conversations and direct, reviewable handoffs. Neither button grants permission to start a queue.
+import { applyConversations } from "../liveViews.ts";
 import { useEffect, useRef, useState } from "react";
 import type { IdeaHandoff, IdeaScope, SessionFile, previewIdeaHandoff } from "@nexus/protocol";
 import type { IdeaNoteView, IdeasResponse } from "@nexus/protocol/ideas";
-import { actResult, enc, HttpError, projectUrl, useAction, useQuery } from "../api.ts";
+import { actResult, enc, HttpError, projectUrl, useAction, useQuery, useLiveRead } from "../api.ts";
 import { chatHref } from "../hash.ts";
 import { t } from "../i18n.ts";
 import { nav } from "../nav.ts";
@@ -55,8 +56,8 @@ function Delivery({ project, record, retryable = true }: { project: string; reco
 }
 
 export function IdeaActivity({ project, file }: { project: string; file: string }) {
-  const { version, logs } = usePage();
-  const chats = useQuery<SessionFile[]>(projectUrl(project, "/conversations"), logs);
+  const { version } = usePage();
+  const chats = useLiveRead<(SessionFile & { last_at: string })[]>(projectUrl(project, "/conversations"), project, applyConversations);
   const handoffs = useQuery<IdeaHandoff[]>(projectUrl(project, "/ideas/handoffs"), version);
   return <details data-idea-activity className="space-y-3 text-xs [overflow-wrap:anywhere]"><summary>{t("ideas.onwardHistory")}</summary>
     {(chats.error || handoffs.error) && <ReadError error={chats.error ?? handoffs.error!} />}

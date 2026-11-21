@@ -540,7 +540,7 @@ export function SettingsPanel({ project, tags, server, tools }: {
 }) {
   const { reload: onChanged } = usePage();
   const [tab, setTab] = useState<"project" | "global">("project");
-  const { data: info, error: infoError } = useQuery<ProjectSettingsInfo>(projectUrl(project.id, "/settings"), usePage().version);
+  const { data: info, error: infoError } = useQuery<ProjectSettingsInfo>(projectUrl(project.id, "/settings"), usePage().settings);
   return (
     <div>
       <div className="break-all pr-8 text-xs text-fg-3">{tab === "project" ? project.root : t("settings.globalNote")}</div>
