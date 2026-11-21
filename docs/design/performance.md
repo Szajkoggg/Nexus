@@ -362,7 +362,7 @@ derivation from memory on the live project passes about 150 ms on average (`nexu
   git calls; a span (`engine turn end (<project>)`) would name what ran them.
 - **The dashboards' reads keyed on the version**: after the model they are the loop's largest load (45 s of synchronous
   time in three minutes, two dashboards); `state`, `digest`, `conversations` and `estimates` could answer "not
-  modified" for a version the dashboard already holds, short of the deltas (model.md, "Beyond the decision").
+  modified" for a version the dashboard already holds, short of the deltas (planned in queue SD: [live.md](live.md)).
 - **A derivation's outliers**: `state big` took 280 to 350 ms three times against a mean of 61 ms; whether that is the
   garbage collector over the model's heap (`--trace-gc` on the load) is to be seen before a derivation per queue.
 - **The load beside the full test suite again**: SV3's figures predate the model; the step boundaries' git is where that

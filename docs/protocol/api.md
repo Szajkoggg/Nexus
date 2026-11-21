@@ -20,6 +20,7 @@ action, before?, after }], imports }, version, root }`; see ["A project's rules 
 Live: a WebSocket at `/ws` sends `{"type":"changed","project":id}` (a file of the project's state changed, or the server
 changed it), `{"type":"log","project":id,"session":id}` (a line of a session's activity, chat or refusals, or its pins:
 no state changed; at most one per session every 150 ms; queue SM), `{"type":"projects"}` and `{"type":"server"}`.
+Planned in queue SD: the changes themselves, with a sequence number per project ([The live stream](live.md#the-live-stream-websocket)).
 
 Writes (JSON bodies only; a request with a foreign `Origin` is refused). Every write is a user action and is taken
 only from the dashboard's own page: the request must carry this server's `Origin` and, if it sends one,

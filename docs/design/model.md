@@ -456,7 +456,8 @@ the derivation itself (about 70 ms here; a derivation per queue is the proposal 
   to build it now (performance.md, "The measurement after the model, and the worker thread (queue SW)", with what to
   do instead).
 - **Changes to the dashboard as deltas**: SM3 sends `log` beside `changed` (which reads to ask again). The decision's
-  aim, the changes themselves with a sequence number and a full reload on a gap, is a queue of its own after SM4.
+  aim, the changes themselves with a sequence number and a full reload on a gap, is a queue of its own after SM4
+  (planned in queue SD: [live.md](live.md)).
 - **A derivation per queue**: only if the derivation from memory shows in SM4's measurement; the fold over events in
   file order across sessions and the passes across queues (plan, train, attention) make it a larger change.
 - **A `runtime.json` rewrite of facts only** (tokens, cost, model) skipping the decisions: SM4 measures how often it

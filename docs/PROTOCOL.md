@@ -28,6 +28,8 @@ The protocol is split by topic, one file each in `docs/protocol/`. New text goes
   Sections: Checks run by Nexus; The capacity coordinator
 - [Server API](protocol/api.md): the HTTP API: searching, uploads, files, remote access, push, planned deploys.
   Sections: Server API
+- [The live stream](protocol/live.md): the WebSocket's messages with the changes themselves, the sequence number per project, where a reply stands, the dashboard's rules for gaps and full reloads (planned, queue SD).
+  Sections: The live stream (WebSocket)
 - [Conversations](protocol/conversations.md): the ideas overview, thinking-partner conversations, idea hand-offs.
   Sections: Conversations; Idea conversation scope and direct delivery (IC5)
 - [The orchestrator](protocol/orchestrator.md): the orchestrator's session, its fallback and context care, stopping a chat agent's turn.
