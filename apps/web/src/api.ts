@@ -3,7 +3,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import { Action, type ActionState } from "./action.ts";
 import { HttpError, onReply, request } from "./http.ts";
 import { LiveView, Query, Reloads, Requests, Stream, fetchJson, fetchPositioned, type Applied, type PageMessage, type ProjectMessage, type QueryView, type Version } from "./query.ts";
-import { SEQ_HEADER } from "@nexus/protocol/live";
+import { SEQ_HEADER, readPosition } from "@nexus/protocol/live";
 
 export { HttpError, open, request } from "./http.ts";
 
@@ -62,8 +62,8 @@ const liveViews = new Map<string, LiveView<unknown>>();
 const written = new Map<string, number>();
 onReply((url, r) => {
   const project = /^\/api\/projects\/([^/?]+)\//.exec(url)?.[1];
-  const [epoch, seq] = (r.headers.get(SEQ_HEADER) ?? "").split(" ");
-  if (project && seq && epoch === stream.epoch) written.set(decodeURIComponent(project), Number(seq));
+  const { epoch, seq } = readPosition(r.headers.get(SEQ_HEADER));
+  if (project && seq !== undefined && epoch === stream.epoch) written.set(decodeURIComponent(project), seq);
 });
 /** Where the project's last write left the stream (undefined: none known). */
 export const writtenAt = (project: string): number | undefined => written.get(project);

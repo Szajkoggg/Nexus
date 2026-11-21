@@ -3,7 +3,7 @@
 // list. Each returns the new reply, undefined when the message does not concern it, or "reload" for a full read. Free
 // of React, so that the tests apply them as the page does.
 import type { ProjectState } from "@nexus/protocol";
-import { applyState } from "@nexus/protocol/live";
+import { applyState, byConversationOrder } from "@nexus/protocol/live";
 import type { Applied, ProjectMessage } from "./query.ts";
 
 /** The project's state: a state message's delta (a summary alone changes nothing of it). */
@@ -65,10 +65,6 @@ export function applyConversation<T extends ChatHeld>(held: T, m: ProjectMessage
   if (m.type === "session") return !m.orchestrator && m.session === held.session?.id ? { ...held, ...(m.head as Partial<T>) } : undefined;
   return chatLines(held, m, 400);
 }
-
-/** The conversation list's order: the archived last, then the latest message first (as the server sorts it). */
-const byConversationOrder = (a: { archived?: boolean; last_at: string }, b: { archived?: boolean; last_at: string }): number =>
-  Number(!!a.archived) - Number(!!b.archived) || b.last_at.localeCompare(a.last_at);
 
 /** The conversation list: a conversation's item replaced or added, the list sorted again. */
 export function applyConversations<T extends { id: string; archived?: boolean; last_at: string }>(held: T[], m: ProjectMessage): Applied<T[]> {

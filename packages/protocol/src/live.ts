@@ -5,10 +5,10 @@ import type { ProjectState } from "./state.ts";
 import type { ProjectSummary } from "./api.ts";
 
 /** The parts of the state replaced whole when they differ. */
-export const WHOLE_PARTS = ["project", "away", "tags", "metrics", "attention", "warnings", "generated_at"] as const;
+const WHOLE_PARTS = ["project", "away", "tags", "metrics", "attention", "warnings", "generated_at"] as const;
 export type WholePart = (typeof WHOLE_PARTS)[number];
 /** The lists sent member by member, each with the key of its members. */
-export const KEYED_PARTS = { queues: "id", sessions: "id", questions: "qid", recurring: "id" } as const;
+const KEYED_PARTS = { queues: "id", sessions: "id", questions: "qid", recurring: "id" } as const;
 export type KeyedPart = keyof typeof KEYED_PARTS;
 const KEYED = Object.keys(KEYED_PARTS) as KeyedPart[];
 
@@ -125,7 +125,7 @@ export function applyState(held: ProjectState, d: StateDelta): ProjectState | un
 // ---------------------------------------------------------------- the messages
 
 /** A chat agent's head: what its views show beside the chat (docs/protocol/live.md). */
-export interface SessionHead { [field: string]: unknown }
+interface SessionHead { [field: string]: unknown }
 
 /** Every message about a project carries it and its sequence number. */
 interface ProjectMessage { project: string; seq: number }
@@ -141,3 +141,13 @@ export type LiveMessage =
 
 /** The response header naming where a reply stands: `<epoch> <seq>` (the project list: `<epoch>`). */
 export const SEQ_HEADER = "Nexus-Seq";
+
+/** Where a reply stands, from its `Nexus-Seq` header (each part undefined when the header leaves it out). */
+export function readPosition(header: string | null): { epoch: string | undefined; seq: number | undefined } {
+  const [epoch, seq] = (header ?? "").split(" ");
+  return { epoch: epoch || undefined, seq: seq ? Number(seq) : undefined };
+}
+
+/** The conversation list's order: the archived last, then the latest message first (the server and the dashboard). */
+export const byConversationOrder = (a: { archived?: boolean; last_at: string }, b: { archived?: boolean; last_at: string }): number =>
+  Number(!!a.archived) - Number(!!b.archived) || b.last_at.localeCompare(a.last_at);

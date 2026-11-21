@@ -4,7 +4,7 @@
 // live notifications bump only the versions they concern (a change in one project refetches nothing of another's).
 // The live stream's views (docs/design/live.md) hold a reply and apply the changes the server sends after it.
 import { HttpError, request } from "./http.ts";
-import { SEQ_HEADER, type LiveMessage } from "@nexus/protocol/live";
+import { SEQ_HEADER, readPosition, type LiveMessage } from "@nexus/protocol/live";
 
 /** What a query is asked at: the same URL at a new version is asked again. */
 export type Version = string | number | undefined;
@@ -168,6 +168,9 @@ export function bump(v: Versions, m: PageMessage): Versions {
   return out;
 }
 
+/** Every read of the project asked again in full, as a reload message moves them (a gap, or the user's own write). */
+export const bumpProject = (v: Versions, project: string): Versions => bump(v, { type: "state", project, seq: 0, reload: true });
+
 /** The version a project's own reads are asked at: it moves with every change of its state (and a reconnect). */
 export const projectVersion = (v: Versions, id: string | undefined): string => `${v.epoch}.${id ? v.project[id] ?? 0 : 0}`;
 /** The version of the reads that change only with the project's queues (estimates, metrics). */
@@ -189,8 +192,7 @@ export const fetchPositioned: LiveFetcher = async (url) => {
   const r = await fetch(url);
   const body = await r.json().catch(() => undefined) as unknown;
   if (!r.ok) throw new Error(`${r.status} ${(body as { error?: string } | undefined)?.error ?? r.statusText}`);
-  const [epoch, seq] = (r.headers.get(SEQ_HEADER) ?? "").split(" ");
-  return { body, epoch: epoch || undefined, seq: seq ? Number(seq) : undefined };
+  return { body, ...readPosition(r.headers.get(SEQ_HEADER)) };
 };
 
 /** What applying a message to a held answer gives: the new answer, nothing (it does not concern it), or a full read. */

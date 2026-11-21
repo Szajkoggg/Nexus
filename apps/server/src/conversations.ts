@@ -22,6 +22,7 @@ import { partnerBriefing, restartedNotice } from "./prompts.ts";
 import { RESTARTED, STOPPED, chatView } from "./chats.ts";
 import { guardSettings, webFetchDenyRules } from "./web-guard.ts";
 import { shellRules } from "./shell-rules.ts";
+import { byConversationOrder } from "@nexus/protocol/live";
 
 // `nexus help` (decided 2026-11-15, queue OP): how Nexus works, its topics; it reads only. A Codex partner runs it in
 // its sandbox, which reads everywhere.
@@ -65,10 +66,6 @@ const IDLE_MS = 15 * 60_000; // an idle partner's process ends; the next message
  */
 type Extra = { timer?: NodeJS.Timeout; handoff?: boolean; handoffNext?: boolean; compacting?: boolean; compacted?: boolean };
 type Live = Hosted<Extra>;
-
-/** The conversation list's order: the archived last, then the latest message first (the dashboard sorts the same). */
-export const byConversationOrder = (a: { archived?: boolean; last_at: string }, b: { archived?: boolean; last_at: string }): number =>
-  Number(!!a.archived) - Number(!!b.archived) || b.last_at.localeCompare(a.last_at);
 
 export class Conversations {
   private readonly store: ProjectStore;
