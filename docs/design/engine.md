@@ -45,7 +45,11 @@ also ends the tree. Failure to create or join the job fails the launch instead o
 At a step boundary, the helper enumerates job members except itself and the runtime, opens each as a process handle,
 verifies its membership on that same handle, terminates it and waits for exit. A reused PID outside the job is
 never terminated. Enumeration repeats until only the two roots remain; failure or a timeout halts the queue and
-ends its worker, without opening the next step. New inbox delivery waits for the cleanup acknowledgement. Runtime
+ends its worker, without opening the next step. A process that has run no turn yet has nothing to clean and gets no
+barrier: when a step boundary starts a new process (another model), its first barrier comes after its first turn.
+Before queue CI8 the engine asked the new process at once, while its helper was still starting (PowerShell compiling
+`worker-job.cs`, half a second idle, 3 to 7 s on a busy machine and more), so the fifteen-second acknowledgement limit
+counted the helper's start and halted the run. New inbox delivery waits for the cleanup acknowledgement. Runtime
 resumes, including a cancelled deploy's automatic resume, wait for that acknowledgement too; a later run change
 cancels the deferred request. A runtime exit after a reported step is not retried even if the review was already
 accepted while its exit notice was in flight. The next step starts a fresh runtime in the same session.

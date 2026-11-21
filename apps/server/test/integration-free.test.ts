@@ -18,7 +18,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { INTEGRATION_CONDITION, NEXUS_SESSION, ProjectStore, approveQueue, wrote, loadProjectState, readCapacity, routeAnswers, setStepLevel, updateSettings, type StepDef } from "@nexus/protocol";
 import { Capacity } from "../src/capacity.ts";
-import { Engine } from "../src/engine.ts";
+import { ClaudeSession } from "../src/claude.ts";
+import { Engine, type EngineOptions } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { LONGER, QUICK_ENGINE, holdWork, until as waitUntil } from "./wait.ts";
 
@@ -59,7 +60,22 @@ setTimeout(() => {
   };
 }
 
-function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean; jobs?: boolean } = {}) {
+/**
+ * The workers' processes as on a busy machine, where a new process's Windows job host takes longer to start than the
+ * cleanup limit (15 s, worker-process.ts): a cleanup asked of a process before its first turn fails as it would there,
+ * "worker cleanup timed out" (queue CI8). Later cleanups work as usual.
+ */
+const slowHosts: EngineOptions["spawn"] = (launch) => {
+  if (launch.runtime !== "claude") throw new Error("these tests run Claude Code's fake");
+  const proc = new ClaudeSession(launch.options);
+  const send = proc.send.bind(proc), cleanup = proc.cleanup.bind(proc);
+  let turned = false;
+  proc.send = (text, priority) => { turned = true; send(text, priority); };
+  proc.cleanup = () => (turned ? cleanup() : Promise.reject(new Error("worker cleanup timed out")));
+  return proc;
+};
+
+function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean; jobs?: boolean; slowHosts?: boolean } = {}) {
   const base = mkdtempSync(join(TMP, "nexus-free-"));
   const temp = join(base, "temp");
   mkdirSync(temp);
@@ -87,7 +103,7 @@ function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean; jobs?
   // Objects where a test ends a check mid-run (else its child keeps running).
   const server = () => {
     const cap = new Capacity({ testLock: join(mkdtempSync(join(TMP, "nexus-free-lock-")), "full-test.lock"), pollMs: 20, jobs: !!o.jobs });
-    const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store, free()); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, checkDrainWaitMs: 300, capacity: cap });
+    const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store, free()); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, checkDrainWaitMs: 300, capacity: cap, ...(o.slowHosts ? { spawn: slowHosts } : {}) });
     return { engine, cap };
   };
   let now = server();
@@ -154,12 +170,18 @@ test("a clean merge with green checks: the integration step is done and accepted
 
 test("a conflict the project lets a worker resolve: the worker opens the integration step, told what Nexus found", async () => {
   const hold = holdWork();
-  const x = setup([step("Q1", "commit"), step("Q2", "slow")], { resolve: true });
+  // The integration step runs on another model: its process is new, and its job host may still be starting (CI8).
+  const x = setup([step("Q1", "commit"), step("Q2", "slow")], { resolve: true, slowHosts: true });
   try {
     x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q1 done", () => x.queue().steps[0]!.status === "done");
     await x.until("Q2 at work", () => x.queue().steps[1]!.status === "running");
     x.onMain("Q1.txt", "main's own Q1\n"); // the file the queue's Q1 committed: a conflict
     hold.release();
+    // One wait for each stretch of the run, not one for all of it: each takes a few processes, and a busy machine
+    // stretches them all (queue CI8).
+    await x.until("Q2 done", () => x.queue().steps[1]!.status === "done");
+    await x.until("a worker at the integration step", () => x.openings().some((o) => o.step === "Q.integrate"));
     await x.until("the run finished", () => x.queue().run?.state === "finished");
     const opening = x.openings().find((o) => o.step === "Q.integrate");
     assert.ok(opening, "a worker opened the integration step");
@@ -194,6 +216,12 @@ test("a check failing after the merge: the worker takes up the integration step 
     x.onMain("main.txt", "from main\n");
     x.plan("unit", [0, 1, 1, 0]); // Q1's set passes; the integration's fails twice; the fix round's passes
     hold.release();
+    // One wait for each stretch of the run, not one for all of it: each takes a few processes, and a busy machine
+    // stretches them all (queue CI8).
+    const sets = () => x.store.readChecks("Q")?.steps["Q.integrate"]?.sets ?? [];
+    await x.until("Q1 done", () => x.queue().steps[0]!.status === "done");
+    await x.until("the integration's checks failed", () => sets()[0]?.state === "failed");
+    await x.until("the fix round's checks", () => sets().length === 2);
     await x.until("the run finished", () => x.queue().run?.state === "finished");
     const fix = x.received().find((m) => m.text.startsWith("[Nexus] The checks Nexus ran for step Q.integrate"));
     assert.ok(fix, "the worker got the check-fix round");

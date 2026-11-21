@@ -1707,7 +1707,7 @@ export class Engine implements Member {
     const runsOf = () => this.store.queueIds().filter((q) => this.store.readRun(q)?.session === session.id);
     // AgentHost keeps the runtime record (a turn's end counts in `turns`), the facts and the usage windows; these
     // handlers run after it.
-    return this.host.start(session, launch, {}, () => ({
+    const live = this.host.start(session, launch, {}, () => ({
       tag,
       activity: (a) => {
         if (a.kind === "turn_start" && this.switchWaits.has(session.id)) this.lateTurn(session.id);
@@ -1797,6 +1797,12 @@ export class Engine implements Member {
         this.changed();
       },
     }));
+    // A process that has run no turn has left nothing to clean: its first cleanup barrier comes after a turn (the
+    // turn's end clears this mark). Without it, a step boundary that starts a new process (a model change) asked the
+    // process to clean while its Windows job host was still starting, and the 15 s cleanup limit then counted the host's
+    // start, which on a busy machine took longer and halted the run (queue CI8).
+    this.cleaned.add(live.proc);
+    return live;
   }
 
   // ---------------------------------------------------------------- usage limits
