@@ -35,6 +35,7 @@ import { integrationContext, mergeBase, mergeConflicts, mergedText, pullBase, pu
 import { Coordinator, bringsBack, refusalText, waitingText, type Member } from "./coordinator.ts";
 import type { Capacity } from "./capacity.ts";
 import { CHECK_DRAIN_WAIT_MS, CheckRunner } from "./check-runs.ts";
+import type { SnapshotReader } from "./snapshots.ts";
 import { gitWritableRoots } from "./codex.ts";
 import {
   assertCanResume, assertCanStart, startedRun, stoppedMessage, toFinished, toHalted, toHeldForUpdate,
@@ -145,6 +146,8 @@ export interface EngineOptions {
    * `nexus step done` (src/check-runs.ts); without it (an engine of an older kind of test), the worker reports them.
    */
   capacity?: Capacity;
+  /** Reads the Windows volume shadow copies made while a failed check ran (src/snapshots.ts): the server's; tests leave it out or give a fake. */
+  snapshots?: SnapshotReader;
   /** A check's time limit (CHECK_LIMIT_MS) and how long an update's drain waits for running checks; tests make them short. */
   checkLimitMs?: number;
   checkDrainWaitMs?: number;
@@ -286,7 +289,7 @@ export class Engine implements Member {
         ended: (queue) => { if (this.stopped) return; this.advance(queue); this.changed(); },
         halt: (queue, reason) => { this.halt(queue, reason); this.changed(); },
         fixPreface: (queue, step) => this.fixPreface(queue, step),
-      }, { limitMs: options.checkLimitMs });
+      }, { limitMs: options.checkLimitMs, snapshots: options.snapshots });
     }
     this.recoverAfterRestart();
     // Chains from before the plan move into it (start.yaml's `after` becomes plan.yaml).

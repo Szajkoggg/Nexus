@@ -21,6 +21,7 @@ import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEven
 import { Engine } from "./engine.ts";
 import { Coordinator } from "./coordinator.ts";
 import { Capacity } from "./capacity.ts";
+import { readSnapshots } from "./snapshots.ts";
 import { lowerOwnedProcesses } from "./worker-process.ts";
 import { branchState, leftBehind, stepCommits } from "./gitinfo.ts";
 import { cleanUp, mergeBack } from "./mergeback.ts";
@@ -147,7 +148,7 @@ function refreshRegistry(): void {
     const store = model.store;
     // Measured: making the engine recovers the project's runs after a restart (queue SV1 found it reading the whole
     // state once per queue).
-    const engine = perf.measure(`engine start ${p.id}`, () => new Engine(store, () => changed(p.id), { coordinator, capacity, boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) || (merger?.atBoundary(q, step, state) ?? false) }));
+    const engine = perf.measure(`engine start ${p.id}`, () => new Engine(store, () => changed(p.id), { coordinator, capacity, snapshots: readSnapshots, boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) || (merger?.atBoundary(q, step, state) ?? false) }));
     merger = new Merger(store, { start: (q) => void engine.start(q), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining || lifecycle.busy, poke: () => changed(p.id) });
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).

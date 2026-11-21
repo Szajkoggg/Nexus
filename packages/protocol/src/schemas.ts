@@ -1411,6 +1411,14 @@ export const AwayFile = z.object({
 });
 export type AwayFile = z.infer<typeof AwayFile>;
 
+/**
+ * A Windows volume shadow copy made while a check ran (queue CI4): file writes on the volume stop until it is made, so
+ * tests waiting then can time out together. `at`: its start; `seconds`: how long it took (to the run's end when
+ * `unfinished`); `by`: the command line that asked for it.
+ */
+export const VolumeSnapshot = z.object({ at: Time, seconds: z.number().nonnegative(), by: z.string().optional(), unfinished: z.boolean().optional() });
+export type VolumeSnapshot = z.infer<typeof VolumeSnapshot>;
+
 /** One run of a check: the first, or the one run again after a failure (`queues/<id>/checks.yaml`). */
 const CheckAttempt = z.object({
   started_at: Time,
@@ -1428,6 +1436,8 @@ const CheckAttempt = z.object({
   timed_out: z.boolean().optional(),
   /** Ended by a restart, an update's drain or a stop: neither passed nor failed; the set runs again. */
   interrupted: z.boolean().optional(),
+  /** A failed run only, on Windows: the volume shadow copies made while it ran (none: the key is left out). */
+  snapshots: z.array(VolumeSnapshot).optional(),
 });
 export type CheckAttempt = z.infer<typeof CheckAttempt>;
 

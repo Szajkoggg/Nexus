@@ -23,6 +23,7 @@ import {
 import type { Capacity, Grant, HeavyProcess, Ticket } from "./capacity.ts";
 import { checkoutOf, checkoutStatus, git } from "./gitinfo.ts";
 import { lastPulled } from "./integration.ts";
+import { snapshotNote, type SnapshotReader } from "./snapshots.ts";
 import { recordSetup, setupStale } from "./worktree.ts";
 
 /** The worktree setup, as a check-fix round's text and a set's failure name it. */
@@ -103,12 +104,15 @@ export class CheckRunner {
   private readonly store: ProjectStore;
   private readonly capacity: Capacity;
   private readonly host: CheckHost;
+  private readonly snapshots?: SnapshotReader;
 
-  constructor(store: ProjectStore, capacity: Capacity, host: CheckHost, o: { limitMs?: number } = {}) {
+  /** `snapshots`: reads the volume shadow copies made while a failed check ran (the server's: src/snapshots.ts; none in tests unless given). */
+  constructor(store: ProjectStore, capacity: Capacity, host: CheckHost, o: { limitMs?: number; snapshots?: SnapshotReader } = {}) {
     this.store = store;
     this.capacity = capacity;
     this.host = host;
     this.limitMs = o.limitMs ?? CHECK_LIMIT_MS;
+    this.snapshots = o.snapshots;
     this.recover();
   }
 
@@ -308,6 +312,10 @@ export class CheckRunner {
       ...(result.timedOut ? { timed_out: true } : {}), ...(a.stopped ? { interrupted: true } : {}),
       ...(result.ok ? {} : { tail: tailOf(result.output), failed_tests: failedTests(result.output) }),
     };
+    if (!result.ok && !a.stopped) {
+      const snapshots = await this.snapshotsOf(attempt.started_at, ended.ended_at!);
+      if (snapshots.length) ended.snapshots = snapshots;
+    }
     if (base) { a.lastBase = { attempt: ended, output: result.output }; return result.ok; }
     this.update(queue, step, done, (s) => {
       const run = s.checks[index]!;
@@ -317,6 +325,12 @@ export class CheckRunner {
       else if (n > 1) run.ok = false;
     });
     return result.ok;
+  }
+
+  /** The shadow copies made while a failed run ran; none when there is no reader or it fails (the result stays as it is). */
+  private async snapshotsOf(from: string, to: string) {
+    if (!this.snapshots) return [];
+    try { return await this.snapshots(from, to); } catch { return []; }
   }
 
   /** Runs `command` under the grant in `cwd`, its output to `log`; the root's exit code, once its tree has ended. */
@@ -568,11 +582,15 @@ function failureText(store: ProjectStore, queue: string, set: CheckSet): string 
         ? `The worktree setup (${c.command}) ran first, because ${set.setup.reason}, and failed twice; the checks did not run.`
         : `Check "${c.name}" failed twice${last.timed_out ? " (ended at its time limit)" : ` (exit code ${last.exit_code ?? "none"})`}.`,
       last.failed_tests?.length ? `Failing tests:\n${last.failed_tests.map((t) => `- ${t}`).join("\n")}` : "",
+      snapshotNote(c.runs.flatMap((r) => r.snapshots ?? [])),
       `Full log: ${join(store.queueDir(queue), last.log)}`,
       last.tail ? `The end of its output:\n${last.tail}` : "",
     ].filter(Boolean).join("\n");
   }).join("\n\n");
 }
+
+/** The shadow copies of a check's failed runs, as a fix queue's occurrence adds them. */
+const machine = (c: CheckRun) => { const note = snapshotNote(c.runs.flatMap((r) => r.snapshots ?? [])); return note ? `\n  ${note}` : ""; };
 
 /**
  * The fix queue of an accepted failure (the user's decision of 2026-11-18): proposed at once, from the check-failure
@@ -585,7 +603,7 @@ function proposeFixQueue(store: ProjectStore, state: ProjectState, queue: string
   const last = check.runs.at(-1)!;
   const keys = last.failed_tests?.length ? last.failed_tests.map((t) => `- test: ${t}`) : [`- check: ${check.name}`];
   const how = d.decided?.verdict === "accept" ? `accepted by the orchestrator: ${d.decided.reason}` : `fails on the base commit ${d.base?.commit ?? "?"} too`;
-  const occurrence = `- ${now()}: queue ${queue}, step ${step} (round ${set.round}, check-fix round ${set.fix + 1}), commit ${set.commit ?? "?"}; ${how}. Log: ${join(store.queueDir(queue), last.log)}. The worker's evidence: ${d.evidence}${last.tail ? `\n  The end of its output: ${last.tail.split("\n").slice(-5).join(" | ")}` : ""}`;
+  const occurrence = `- ${now()}: queue ${queue}, step ${step} (round ${set.round}, check-fix round ${set.fix + 1}), commit ${set.commit ?? "?"}; ${how}. Log: ${join(store.queueDir(queue), last.log)}. The worker's evidence: ${d.evidence}${machine(check)}${last.tail ? `\n  The end of its output: ${last.tail.split("\n").slice(-5).join(" | ")}` : ""}`;
   const open = state.queues.find((x) => x.origin === "ci" && x.status !== "done" && x.status !== "cancelled" && keys.some((k) => (x.description ?? "").split("\n").includes(k)));
   if (open) {
     const q = store.readQueue(open.id);

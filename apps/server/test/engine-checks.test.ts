@@ -127,6 +127,26 @@ test("a check failing twice goes to the worker with the failing tests, the end o
   } finally { x.engine.shutdown(); x.cap.shutdown(); }
 });
 
+test("a Windows volume shadow copy made while a check failed is kept with its run and named in the fix round (queue CI4)", async () => {
+  const asked: [string, string][] = [];
+  const snapshot = { at: "2026-11-20T17:44:20.360Z", seconds: 32.5, by: "taskhostw.exe" };
+  const x = withChecks(["done"], ["unit"], { snapshots: async (from, to) => { asked.push([from, to]); return [snapshot]; } });
+  x.plan("unit", [1, 1, 0]);
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+    const [first, second] = x.sets();
+    const failed = first!.checks[0]!.runs;
+    assert.deepEqual(failed.map((r) => r.snapshots), [[snapshot], [snapshot]], "each failed run keeps the copies made while it ran");
+    assert.deepEqual(asked, failed.map((r) => [r.started_at, r.ended_at]), "looked up for the failed runs' own times only");
+    assert.equal(second!.checks[0]!.runs[0]!.snapshots, undefined, "a passing run is not looked up");
+    const [m] = fixMessages(x);
+    assert.match(m!.text, /Failing tests:\n- unit breaks\nWhile it ran, Windows made a volume shadow copy \(at 2026-11-20T17:44:20\.360Z, 32\.5 s, asked by taskhostw\.exe\)/);
+    assert.equal(m!.text.match(/volume shadow copy \(/g)!.length, 1, "the same copy named once");
+    assert.match(m!.text, /is the machine's \(docs\/design\/tests\.md, "Volume shadow copies stop the tests"\)/);
+  } finally { x.engine.shutdown(); x.cap.shutdown(); }
+});
+
 test("after the limit of check-fix rounds the run halts for the orchestrator; a Resume gives one more round", async () => {
   const x = withChecks(["done"], ["unit"]);
   updateSettings(x.store, { defaults: { check_fix_limit: 1 } });

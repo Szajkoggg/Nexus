@@ -305,3 +305,30 @@ busy-loop processes on the user's 16 logical cores and 4 to 6 copies of the test
   (only resumeCutOff clears it). The pattern fits an exception in the successor between the orchestrator's resume and
   the partners' (activate runs them in turn), which would also end it. The test now gives the successor a log of its
   own and, on a failure, prints its tail, the partner's chat and record, and the successor's crash.json (queue KM3).
+
+## Volume shadow copies stop the tests (queue CI4)
+
+Four engine tests of one full run (integration-free, lift, plan, question-barrier) failed in the same four seconds,
+each "timed out waiting for …" with its run's `updated_at` frozen; alone, and under `scripts/load-tests.mjs`, they
+pass. The cause was the machine: Windows made a volume shadow copy of C: (the scheduled task
+`\Microsoft\Windows\Setup\PITRTask`, Windows' Point-in-time restore, daily about 18:44), and while one is made, file
+writes on the volume stop. For those 32.5 s the whole suite (about 15 test files at once) wrote 3 files under
+`%TEMP%`, against 3 to 60 a second before and after. Every test then in a wait shorter than the stall timed out
+together: the fakes, the `nexus` CLI and the engine all write files. The same machine also makes copies for a Dell
+backup (`esentutl … SRUDB.dat /vss`, 01:00 and 12:00) and for Windows Update, and they took longer each day as the
+copies piled up: 1.5 s (2026-11-17), 8 to 12 s, 13 to 27 s, 32.5 s (2026-11-20). Two more full runs failed in a copy
+(11.4 s and 11.8 s). Load alone never stopped the tests together: under load they fail one by one, from slowness.
+
+Nexus cannot prevent a copy (turning off Point-in-time restore or removing old copies needs an administrator, and is
+the user's), and a longer wait would only hide it. It **recognizes** one instead: after a check's run fails on
+Windows, the check runner reads the event log for copies made meanwhile (src/snapshots.ts) and keeps them with the run
+(`snapshots` in checks.yaml, docs/protocol/checks.md, "Checks run by Nexus"); the check-fix round's text and an
+accepted failure's fix queue say so beside the failing tests ("While it ran, Windows made a volume shadow copy (at …,
+32.5 s, asked by taskhostw.exe): …"). A failure whose tests timed out within that time is the machine's: the worker
+disputes it, and nobody debugs the tests.
+
+How to see one by hand (no administrator needed): the Application log's VSS event 8231 (who asked: its second field
+is the command line), Microsoft-Windows-VolumeSnapshot-Driver/Operational event 126 (the copy begins; its second field
+is the shadow copy's id) and Microsoft-Windows-Ntfs/Operational event 4 mounting `\Device\HarddiskVolumeShadowCopyN`
+(it is made; its first field is the same id). The messages are in the system's language, so src/snapshots.ts reads
+the fields by position. A gap in the write times of the files under `%TEMP%\nexus-*` shows the stall itself.

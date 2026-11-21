@@ -102,7 +102,12 @@ steps:
 
 A run's `tail` is the output's last 80 lines, at most 6000 characters, and `failed_tests` the failing tests' names where
 the output's format is known (node:test's spec and TAP reporters), both only for a failed run **(P15)**. `exit_code`
-is null for a run that was ended (`timed_out`, or `interrupted` by a restart, a drain or a stop). The logs are
+is null for a run that was ended (`timed_out`, or `interrupted` by a restart, a drain or a stop). A failed run on
+Windows also has `snapshots` when Windows made a volume shadow copy while it ran (queue CI4; read from the event log
+after the run, src/snapshots.ts): `[{ at, seconds, by?, unfinished? }]`, each copy's start, how long it took (to the
+run's end when `unfinished`) and the command line that asked for it. File writes stop while one is made, so tests
+waiting then time out together; the check-fix round's text and an accepted failure's fix queue name the copies
+(docs/design/tests.md, "Volume shadow copies stop the tests"). The logs are
 `queues/<id>/checks/<step>/r<round>f<fix>-<n>-<name as a file name>.<run>.log` (a base run's: `…-base.1.log`), and
 stay with the queue.
 
