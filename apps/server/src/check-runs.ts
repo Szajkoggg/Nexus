@@ -582,15 +582,15 @@ function failureText(store: ProjectStore, queue: string, set: CheckSet): string 
         ? `The worktree setup (${c.command}) ran first, because ${set.setup.reason}, and failed twice; the checks did not run.`
         : `Check "${c.name}" failed twice${last.timed_out ? " (ended at its time limit)" : ` (exit code ${last.exit_code ?? "none"})`}.`,
       last.failed_tests?.length ? `Failing tests:\n${last.failed_tests.map((t) => `- ${t}`).join("\n")}` : "",
-      snapshotNote(c.runs.flatMap((r) => r.snapshots ?? [])),
+      copiesNote(c),
       `Full log: ${join(store.queueDir(queue), last.log)}`,
       last.tail ? `The end of its output:\n${last.tail}` : "",
     ].filter(Boolean).join("\n");
   }).join("\n\n");
 }
 
-/** The shadow copies of a check's failed runs, as a fix queue's occurrence adds them. */
-const machine = (c: CheckRun) => { const note = snapshotNote(c.runs.flatMap((r) => r.snapshots ?? [])); return note ? `\n  ${note}` : ""; };
+/** The volume shadow copies made while a check's failed runs ran, in words (empty without one). */
+const copiesNote = (c: CheckRun) => snapshotNote(c.runs.flatMap((r) => r.snapshots ?? []));
 
 /**
  * The fix queue of an accepted failure (the user's decision of 2026-11-18): proposed at once, from the check-failure
@@ -603,7 +603,8 @@ function proposeFixQueue(store: ProjectStore, state: ProjectState, queue: string
   const last = check.runs.at(-1)!;
   const keys = last.failed_tests?.length ? last.failed_tests.map((t) => `- test: ${t}`) : [`- check: ${check.name}`];
   const how = d.decided?.verdict === "accept" ? `accepted by the orchestrator: ${d.decided.reason}` : `fails on the base commit ${d.base?.commit ?? "?"} too`;
-  const occurrence = `- ${now()}: queue ${queue}, step ${step} (round ${set.round}, check-fix round ${set.fix + 1}), commit ${set.commit ?? "?"}; ${how}. Log: ${join(store.queueDir(queue), last.log)}. The worker's evidence: ${d.evidence}${machine(check)}${last.tail ? `\n  The end of its output: ${last.tail.split("\n").slice(-5).join(" | ")}` : ""}`;
+  const copies = copiesNote(check);
+  const occurrence = `- ${now()}: queue ${queue}, step ${step} (round ${set.round}, check-fix round ${set.fix + 1}), commit ${set.commit ?? "?"}; ${how}. Log: ${join(store.queueDir(queue), last.log)}. The worker's evidence: ${d.evidence}${copies ? `\n  ${copies}` : ""}${last.tail ? `\n  The end of its output: ${last.tail.split("\n").slice(-5).join(" | ")}` : ""}`;
   const open = state.queues.find((x) => x.origin === "ci" && x.status !== "done" && x.status !== "cancelled" && keys.some((k) => (x.description ?? "").split("\n").includes(k)));
   if (open) {
     const q = store.readQueue(open.id);
