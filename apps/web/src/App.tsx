@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectState, QueueStatus } from "@nexus/protocol";
 import { projectUrl, reloads, stream, useLive, useLiveRead, useQuery, writtenAt, type AttentionItem, type ProjectSummary, type QueueView } from "./api.ts";
-import { bump, noVersions, projectVersion, queueVersion, queuesVersion, settingsVersion } from "./query.ts";
+import { bump, bumpProject, noVersions, projectVersion, queueVersion, queuesVersion, settingsVersion } from "./query.ts";
 import { applyConversations, applyStateMessage } from "./liveViews.ts";
 import { QueueRow } from "./components/QueueRow.tsx";
 import { NewFromTemplate, RecurringList } from "./components/Recurring.tsx";
@@ -74,7 +74,7 @@ export function App() {
   // The project list's lines as the live stream's state messages bring them (docs/protocol/live.md), each newer than
   // the line the list was read with.
   const [summaries, setSummaries] = useState<Readonly<Record<string, { seq: number; summary: ProjectSummary }>>>({});
-  useEffect(() => { stream.gap = (p) => setVersions((v) => bump(v, { type: "state", project: p, seq: 0, reload: true })); }, []);
+  useEffect(() => { stream.gap = (p) => setVersions((v) => bumpProject(v, p)); }, []);
   const connected = useLive((m) => {
     // The live views apply the message first (query.ts, LiveView); the reads asked again in full move with the versions.
     stream.receive(m);
@@ -95,7 +95,7 @@ export function App() {
    * After the user's own write: the reads asked again in full are asked again (the project's, and what spans projects);
    * the live views get the write's changes from the stream.
    */
-  const reload = useCallback(() => { if (projectId) setVersions((v) => bump(v, { type: "state", project: projectId, seq: 0, reload: true })); }, [projectId]);
+  const reload = useCallback(() => { if (projectId) setVersions((v) => bumpProject(v, projectId)); }, [projectId]);
   /**
    * The same, resolving once the reads it asks have landed (query.ts, Reloads) and the page stands where the write left
    * the live stream (its answer's header): a control stays in progress until then.

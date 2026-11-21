@@ -30,6 +30,8 @@ const RELOAD_FLOOR = 64 * 1024;
 const LOG_LIMIT = 256 * 1024;
 
 interface Baseline { count: number; line: number }
+/** How far a read holds its log: its entries' count, and its last entry's line (-1: none). */
+const baseline = (r: LogRead): Baseline => ({ count: r.entries.length, line: r.lines.at(-1) ?? -1 });
 interface Project {
   seq: number;
   /** The state last published (the same object: nothing changed) and its texts. */
@@ -87,8 +89,7 @@ export class LiveStream {
 
   /** A reply read this log now: the views hold it up to here, and later lines go out as messages. */
   opened(id: string, session: string, kind: Exclude<LogKind, "pins">, read?: LogRead): void {
-    const r = read ?? this.src.log(id, session, kind);
-    this.of(id).logs.set(`${session} ${kind}`, { count: r.entries.length, line: r.lines.at(-1) ?? -1 });
+    this.of(id).logs.set(`${session} ${kind}`, baseline(read ?? this.src.log(id, session, kind)));
   }
 
   /**
@@ -146,7 +147,7 @@ export class LiveStream {
     // No view holds a log no reply read since this stream began: nothing to send.
     if (!base) return;
     const r = this.src.log(id, session, kind);
-    p.logs.set(key, { count: r.entries.length, line: r.lines.at(-1) ?? -1 });
+    p.logs.set(key, baseline(r));
     const head = `"session":${JSON.stringify(session)},"log":${JSON.stringify(kind)}`;
     // Read again from its start (shorter, or its lines no longer where they were): its views read it in full.
     if (r.entries.length < base.count || (base.count > 0 && r.lines[base.count - 1] !== base.line)) {
