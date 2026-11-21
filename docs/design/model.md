@@ -137,7 +137,8 @@ same object is returned; `generated_at` then moves only when the state did (the 
 reads on it).
 
 - **Read-only**: readers share one state object. A reader that changes it would change it for every other; the
-  derived state is frozen deeply (SM4), so such a reader fails at once (in the tests: none did).
+  derived state is frozen deeply (SM4), so such a reader fails at once (in SM4's tests none did; the live server met
+  one: "Its reads are read-only", below).
 - **Time**: what the derivation computes from the clock (the away mode's `awayNow`, the recurring queues' due times in
   `recurringOf`, the "at 14:00" texts of planned starts and skips) is as old as the derivation. Today the snapshot of
   `stateOf` is as old as the last change, and timers (`armAway`, the coordinator's wake, the engine's schedules) call
@@ -148,6 +149,30 @@ reads on it).
   about four fifths of a rebuild in the start's profile (15 s `existsSync`, 17 s YAML, 5 s reading of 45 s). SM2's gate
   counts it; if it shows in the measurement after SM4, the next step is a derivation per queue (below, beyond the
   decision).
+
+## Its reads are read-only
+
+The rule (queue MF): **what the model hands out is never changed** — the derived state (`model.current()`, and
+`loadProjectState` over a store reading through a model), every entry of a log read through the store
+(`readEvents`, `readInbox`, `readDelivered`, `readApplied`, … : the arrays are copies, the entries are the model's,
+including their `z.unknown()` fields such as `queue.drafted`'s `definition`), and a file's parsed value. All of it is
+shared by every reader until the next change, and frozen deeply, so a change throws a `TypeError` in the server
+(strict mode) instead of changing it for every other reader. The first such change reached the live server
+(`read_at` set on a frozen inbox entry during the derivation, fixed in b94f28d).
+
+How code gets an object of its own to change:
+
+- **The derivation** writes only to objects it made: a view is a spread of what it read with new arrays
+  (`{ ...m }` for an inbox entry, `notes.map((n) => ({ ...n }))`), never the read object itself. A frozen event may be
+  kept by reference (a step's timeline), never written to.
+- **The store's reads of whole files** (`readQueue`, `readSession`, `readGit`, `readChecks`, `readPlan`, …) go through
+  a zod parse, which builds fresh objects: their result is the caller's to change and write back.
+- **A caller that wants to change the state or a log entry** (a test bending a state into a case, a helper that
+  normalises a draft) copies first: `structuredClone(x)` for a whole tree, a spread for one level. An in-place
+  `.sort()`/`.reverse()` is a change too: sort a copy (`[...xs].sort(…)`).
+
+How the checks keep it: every test run reads through the model (docs/design/tests.md, "The tests read through the
+model (queue MF)").
 
 ## Rebuilding
 
@@ -387,7 +412,7 @@ templates (`recurringOf`, uncounted, as before); the review files, reports and c
 asked).
 
 **The evidence that the decisions read the same** (the queue's stop condition): `apps/server/test/model-reads.ts`, a
-preload (`npm run test:files -- --import ./apps/server/test/model-reads.ts <files>`) that makes every store of a test
+preload (since queue MF loaded by every test run: "Its reads are read-only") that makes every store of a test
 process read through a model of its folder, fed by the process's writes and by a watcher as `main.ts`'s, with
 `loadProjectState` over it the model's frozen state. The fake runtimes' tests of the engine (`engine*.test.ts`), the
 merger, merge back, the coordinator, the orchestrator (`orchestrator*.test.ts`, context care, the review helpers), the

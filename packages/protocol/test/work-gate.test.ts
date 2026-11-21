@@ -10,8 +10,11 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { ProjectModel, ProjectStore, loadProjectState, newId, releaseOrphanedSteps, resetWork, workCounts, type Event, type WorkCounts } from "../src/index.ts";
+import { ProjectModel, ProjectStore, loadProjectState, newId, releaseOrphanedSteps, resetWork, useProjectReaders, workCounts, type Event, type WorkCounts } from "../src/index.ts";
 import { NEXUS_SIZE, generateNexus, type SyntheticSize } from "./synthetic.ts";
+// This file measures the reads of the files and of the model: its plain stores read the files, not through the model the
+// test preload gives every other store (apps/server/test/model-reads.ts).
+useProjectReaders(undefined);
 
 process.env.NEXUS_HOME = mkdtempSync(join(tmpdir(), "nexus-gate-home-"));
 const temp = mkdtempSync(join(tmpdir(), "nexus-gate-"));

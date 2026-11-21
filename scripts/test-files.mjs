@@ -4,8 +4,9 @@
 //   npm run test:files -- <test file>... [--pattern TEXT] [--import MODULE]
 //   node scripts/test-files.mjs <test file>... [--pattern TEXT] [--import MODULE]
 //
-// --import loads a module before each file (node --import): ./apps/server/test/model-reads.ts runs the files' stores
-// through the server's model of the files (docs/design/model.md).
+// Every file's stores read through the server's model of the files, as in npm test (apps/server/test/model-reads.ts,
+// loaded before each file; docs/design/model.md, "Its reads are read-only"): a test or code that changes what the
+// model hands out fails here as in the server. --import loads another module before each file too (node --import).
 //
 // Each file runs as `node --test <file>` with the spec reporter. At the first failing test the run is stopped (its
 // own process and what it started), the failure is shown and the exit code is 1; when all pass, 0. The environment
@@ -15,6 +16,7 @@ import { parseArgs } from "node:util";
 
 const { values: o, positionals: files } = parseArgs({ allowPositionals: true, options: { pattern: { type: "string" }, import: { type: "string" } } });
 if (!files.length) { console.error("usage: npm run test:files -- <test file>... [--pattern TEXT]"); process.exit(2); }
+const MODEL_READS = new URL("../apps/server/test/model-reads.ts", import.meta.url).href;
 const env = { ...process.env };
 delete env.NEXUS_HANDOVER; delete env.NEXUS_DIR; delete env.NEXUS_SESSION;
 
@@ -27,7 +29,7 @@ function stop(child) {
 
 /** Runs one file; resolves with the first failing test's name, or undefined when all passed. */
 const run = (file) => new Promise((resolve) => {
-  const args = [...(o.import ? ["--import", o.import] : []), "--test", "--test-reporter=spec", ...(o.pattern ? [`--test-name-pattern=${o.pattern}`] : []), file];
+  const args = ["--import", MODEL_READS, ...(o.import ? ["--import", o.import] : []), "--test", "--test-reporter=spec", ...(o.pattern ? [`--test-name-pattern=${o.pattern}`] : []), file];
   const child = spawn(process.execPath, args, { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: process.platform !== "win32" });
   let failed, buffer = "", code;
   const read = (d) => {

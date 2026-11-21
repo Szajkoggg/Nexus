@@ -5,9 +5,12 @@ import assert from "node:assert/strict";
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectModel, ProjectStore, addNote, deleteNote, loadProjectState, resetWork, sendMessage, workCounts, writeAway, type Event, type ProjectState } from "../src/index.ts";
+import { ProjectModel, ProjectStore, addNote, deleteNote, loadProjectState, resetWork, sendMessage, useProjectReaders, workCounts, writeAway, type Event, type ProjectState } from "../src/index.ts";
 import { generateNexus } from "./synthetic.ts";
 
+// This file compares the model with the files themselves: its plain stores read the files, not through the model the
+// test preload gives every other store (apps/server/test/model-reads.ts).
+useProjectReaders(undefined);
 process.env.NEXUS_HOME = mkdtempSync(join(tmpdir(), "nexus-model-home-"));
 const temp = mkdtempSync(join(tmpdir(), "nexus-model-"));
 after(() => rmSync(temp, { recursive: true, force: true }));

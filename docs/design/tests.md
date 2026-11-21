@@ -349,3 +349,28 @@ plan.test.ts ran a real 3 s undo window and checked it after real sleeps; a test
 the queue started "within" the window, or its undo refused as "its time is over". The window is now on a `TestClock`
 (apps/server/test/test-clock.ts, the engine's `clock` option), moved by the test; a test whose orchestrator is told of
 decisions made since its session began moves the clock up to the real time first.
+
+## The tests read through the model (queue MF)
+
+The model's reads are read-only (docs/design/model.md, "Its reads are read-only"). Every test file's stores read
+through a model (`apps/server/test/model-reads.ts`, loaded by `npm test`, `test:times`, `test:files` and the load
+tool), so a change of what the model hands out fails a test as it would fail the server, in one run
+(`model-reads.test.ts` fails if the preload is not loaded).
+
+- **Other processes' writes are seen at the next read.** The server reads them through its watcher; a test reads at
+  once after a server it started answered, or after a `nexus` child ended, before any watcher could report (in the
+  first full run so, `guard.test.ts` read the project's old name after the server renamed it). So the preload's model
+  looks before each read whether what it holds changed on disk: the files and folders it read, by a stat (id, size,
+  time), the paths it probed, and every log's size; and before the state is read, all of them. Nothing is read again
+  unless it changed, and the state is still derived once per change and shared. A test needs no `wrote(path)` for a
+  file it writes itself outside the store. The watcher's own feeding is no longer what these tests show; the servers
+  the API tests start run the server's model as it is, fed by its watcher alone.
+- **A file that compares the model with the files themselves**, or counts the files' reads (`model.test.ts`,
+  `work-gate.test.ts`), calls `useProjectReaders(undefined)`: its plain stores read the files.
+
+MF1's survey (the full suite through the model, with every node process recording each write to a frozen object,
+caught or not, through an in-process inspector paused on every exception; and a review of `apps/server/src` and
+`packages/protocol/src`) found no other change in the code; two tests bent the state they read, and now copy it.
+Running the suite through the model by default did not make it slower: 734 s before, 634 s and 661 s after (the
+first before the preload looked at the files on disk), one `npm test` each on the same machine under its other load
+(`ℹ duration_ms`); the difference is within what that load moves a run by.
