@@ -345,7 +345,8 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
       for (const d of delivered.entries) if (d.kind === "note") noteDeliveries.set(d.id, d.at);
       sessions.set(id, {
         ...s, event_count: r.entries.length, live: store.readRuntime(id),
-        inbox: inbox.entries.map((m) => (handed.has(m.id) ? { ...m, read_at: handed.get(m.id) } : m)),
+        // Copies: the model's entries are frozen, and message.read sets read_at on the view's own.
+        inbox: inbox.entries.map((m) => (handed.has(m.id) ? { ...m, read_at: handed.get(m.id) } : { ...m })),
       });
       for (const e of r.entries) {
         if (e.session !== id) { warnings.push(`session ${id}: event ${e.id} claims session ${e.session}; ignored`); continue; }
@@ -669,7 +670,8 @@ function initQueue(q: QueueFile, notes: Note[], project: Pick<ProjectFile, "defa
         ...(s.id === integrationStepId(q.id) ? { integration: true as const } : {}),
         status: s.status ?? "pending",
         review_items: [], checks: [], metrics: [], timeline: [], messages: [], segments: [], sent_back: [], pictures: {},
-        notes: notes.filter((n) => n.step === s.id),
+        // Copies: the model's notes are frozen, and a delivery or note.read sets read_at on the view's own.
+        notes: notes.filter((n) => n.step === s.id).map((n) => ({ ...n })),
       };
     }),
   };

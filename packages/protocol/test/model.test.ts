@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectModel, ProjectStore, addNote, deleteNote, loadProjectState, resetWork, workCounts, writeAway, type Event, type ProjectState } from "../src/index.ts";
+import { ProjectModel, ProjectStore, addNote, deleteNote, loadProjectState, resetWork, sendMessage, workCounts, writeAway, type Event, type ProjectState } from "../src/index.ts";
 import { generateNexus } from "./synthetic.ts";
 
 process.env.NEXUS_HOME = mkdtempSync(join(tmpdir(), "nexus-model-home-"));
@@ -102,6 +102,23 @@ test("what the model hands out is read-only: a reader that changes it fails", ()
   const worker = p.files.sessionIds().find((s) => s.startsWith("w-"))!;
   const e = p.model.store.readEvents(worker).entries[0]!;
   assert.throws(() => { (e as { at: string }).at = "x"; }, TypeError);
+});
+
+test("a message or note read is derived over the model's frozen entries: the state marks its own copy", () => {
+  const p = project();
+  const worker = p.files.sessionIds().find((s) => s.startsWith("w-"))!;
+  const q = p.files.readSession(worker).queue!;
+  const step = p.files.readQueue(q).steps[0]!.id;
+  const message = sendMessage(p.files, worker, "Use the grassland settings too.", { queue: q, step });
+  const note = addNote(p.files, q, step, "look at the header");
+  p.model.current();
+  p.files.appendEvent(event(worker, { type: "message.read", message }));
+  p.files.appendEvent(event(worker, { type: "note.read", note }));
+  const st = p.model.current();
+  assert.ok(st.sessions.find((s) => s.id === worker)!.inbox.find((m) => m.id === message)!.read_at);
+  assert.ok(st.queues.find((x) => x.id === q)!.steps.find((s) => s.id === step)!.notes.find((n) => n.id === note)!.read_at);
+  assert.ok(Object.isFrozen(p.model.store.readInbox(worker).entries.find((m) => m.id === message)), "the model's entry stays as read");
+  same(p, "a message and a note read");
 });
 
 test("the state is derived once per change; an activity line changes nothing of it", () => {
