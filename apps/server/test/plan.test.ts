@@ -46,7 +46,9 @@ function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean 
   const say = (...args: string[]) => orchestrator!.say(`FAKE-NEXUS: ${JSON.stringify(args)}`);
   const hello = async () => { orchestrator!.say("Hello"); await until("the orchestrator's session", () => !!orchestrator!.session()); };
   const stop = () => { clearInterval(timer); orchestrator?.shutdown(); for (const e of engines) e.shutdown(); };
-  return { store, get engine() { return engine; }, clock, tick, queue, until, restart, said, say, hello, stop };
+  /** To the undo window's last moment, with a look of the engine's on either side: one more millisecond ends it. */
+  const windowEnd = () => { tick(); clock.advance(UNDO_MS - 1); tick(); };
+  return { store, get engine() { return engine; }, clock, windowEnd, queue, until, restart, said, say, hello, stop };
 }
 
 /** An external worker session, for events written by hand. */
@@ -207,7 +209,7 @@ test("the user's reorder: B after C makes those after B wait for B's predecessor
     assert.throws(() => x.engine.move("B", "B"), /cannot start after itself/);
     // To the front: nothing before it, so it starts, once the move can no longer be undone.
     assert.equal(x.engine.move("B", null).message, "queue B starts once the change can no longer be undone");
-    x.tick(); x.clock.advance(UNDO_MS - 1); x.tick();
+    x.windowEnd();
     assert.equal(x.queue("B").run, undefined, "not within the undo window");
     x.clock.advance(1);
     await x.until("B to finish", () => x.queue("B").run?.state === "finished", LONGER.run);
@@ -236,7 +238,7 @@ test("the user adds and removes one predecessor: set by them, the others as they
     x.engine.removePredecessor("C", "B");
     assert.equal(x.engine.removePredecessor("C", "D").message, "queue C no longer waits for D; it waits for no other queue: it starts as soon as it may");
     assert.deepEqual(x.store.readPlan("C")!.after, [], "still in the plan, with none before it");
-    x.tick(); x.clock.advance(UNDO_MS - 1); x.tick();
+    x.windowEnd();
     assert.equal(x.queue("C").run, undefined, "not within the undo window");
     x.clock.advance(1);
     await x.until("C to finish", () => x.queue("C").run?.state === "finished", LONGER.run);
@@ -313,7 +315,7 @@ test("the undo window holds across a restart: a queue the user freed starts once
     x.engine.plan("C", { after: ["A"], by: "user" });
     x.engine.removePredecessor("C", "A");
     const engine = x.restart();
-    x.tick(); x.clock.advance(UNDO_MS - 1); x.tick();
+    x.windowEnd();
     assert.equal(x.queue("C").run, undefined, "not within the window");
     x.clock.advance(1);
     assert.equal(engine, x.engine);
