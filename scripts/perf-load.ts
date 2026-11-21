@@ -6,7 +6,11 @@
 // waited per endpoint, and writes both as JSON.
 //
 //   node scripts/perf-load.ts [--minutes 3] [--port 4319] [--dashboards 2] [--running 2] [--activity-ms 400]
-//                             [--label <name>] [--out <dir>] [--keep]
+//                             [--label <name>] [--out <dir>] [--keep] [--page]
+//
+// --page opens the real dashboard (the instance serves apps/web/dist: build it first) in headless Edge at 1440 px on a
+// running queue's step, and counts the requests the page sends and the bytes they bring back, per minute of the run
+// (queue SD's measurement). Use it with --dashboards 0 so that only the page reads.
 //
 // Everything lives in a new folder in the system's temporary folder (NEXUS_HOME, the project, the server's log);
 // it is removed at the end unless --keep. Run it beside `npm test` to measure under the full suite.
@@ -21,7 +25,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 const { values: o } = parseArgs({ options: {
   minutes: { type: "string", default: "3" }, port: { type: "string", default: "4319" }, dashboards: { type: "string", default: "2" },
   running: { type: "string", default: "2" }, "activity-ms": { type: "string", default: "400" }, label: { type: "string", default: "load" },
-  out: { type: "string" }, keep: { type: "boolean", default: false },
+  out: { type: "string" }, keep: { type: "boolean", default: false }, page: { type: "boolean", default: false },
 } });
 const ROOT = resolve(fileURLToPath(import.meta.url), "../..");
 const PORT = Number(o.port);
@@ -189,6 +193,21 @@ async function main(): Promise<void> {
     });
     const dashboards = Array.from({ length: Number(o.dashboards) }, (_, i) => dashboard(i));
 
+    // The real dashboard (--page): every fetch counted in the page, by path, with the bytes of its answer.
+    const browser = o.page ? await (await import("./capture/edge.ts")).EdgeBrowser.launch(join(home, "browser")) : undefined;
+    if (browser) {
+      const counter = `(() => { const c = window.__reqs = { n: 0, bytes: 0, ws: 0, by: {} }; const f = window.fetch.bind(window);
+        window.fetch = async (input, init) => { const u = new URL(typeof input === "string" ? input : input.url, location.href);
+          const k = u.pathname.replace(/\\/(R\\d+|Q\\d+)(\\.\\d+)?/g, "/:id").replace(/\\/sessions\\/[^/]+/, "/sessions/:s").replace(/\\/conversations\\/[^/]+/, "/conversations/:c");
+          c.n++; c.by[k] = (c.by[k] ?? 0) + 1; const r = await f(input, init); r.clone().arrayBuffer().then((b) => { c.bytes += b.byteLength; }, () => {}); return r; };
+        const e0 = console.error.bind(console); c.errors = []; console.error = (...a) => { if (c.errors.length < 5) c.errors.push(a.map(String).join(" ").slice(0, 400)); e0(...a); }; window.addEventListener("error", (e) => { if (c.errors.length < 5) c.errors.push(String(e.message)); });
+        const W = window.WebSocket; window.WebSocket = class extends W { constructor(...a) { super(...a); this.addEventListener("message", (e) => { c.ws++; try { const m = JSON.parse(e.data); const k = "ws " + m.type + (m.log ? " " + m.log : "") + (m.reload ? " reload" : ""); c.by[k] = (c.by[k] ?? 0) + 1; } catch {} }); } }; })();`;
+      await browser.open(`${url}/#/big/${running[0]}/${running[0]}.1`, 1440, 900, counter);
+      await sleep(5000);
+      await browser.evaluate(`(() => { const c = window.__reqs; c.n = 0; c.bytes = 0; c.ws = 0; c.by = {}; return true; })()`);
+    }
+    const pageStart = Date.now();
+
     // The agents' activity, and the user accepting each step in review so the running queues go on.
     let appended = 0;
     const st = ProjectStore.forRoot(root);
@@ -200,11 +219,15 @@ async function main(): Promise<void> {
     let accepted = 0;
     while (Date.now() < until) {
       await sleep(2000);
+      if (!Number(o.dashboards)) latest = await get("state (script)", "/api/projects/big/state") as State | undefined;
       for (const q of latest?.queues.filter((x) => running.includes(x.id)) ?? []) {
         for (const s of q.steps.filter((x) => x.status === "review")) { await post(`/api/projects/big/queues/${q.id}/steps/${s.id}/accept`, {}); accepted++; }
       }
     }
     clearInterval(activity);
+    const page = browser ? await browser.evaluate<{ n: number; bytes: number; ws: number; by: Record<string, number> }>("window.__reqs") : undefined;
+    const pageMinutes = (Date.now() - pageStart) / 60_000;
+    await browser?.close();
     const perf = await (await fetch(`${url}/api/server/perf`)).json();
     stopping = true;
     for (const q of running) await post(`/api/projects/big/queues/${q}/run`, { action: "stop_at_once" });
@@ -213,7 +236,8 @@ async function main(): Promise<void> {
     const client = [...latency].map(([k, l]) => ({ endpoint: k, count: l.count, errors: l.errors, mean_ms: Math.round(l.total / l.count), p50_ms: Math.round(pct(l.all, 50)), p95_ms: Math.round(pct(l.all, 95)), max_ms: Math.round(l.max) }))
       .sort((a, b) => b.mean_ms * b.count - a.mean_ms * a.count);
     const done = latest?.queues.filter((x) => running.includes(x.id)).flatMap((q) => q.steps.filter((s) => s.status === "done").map((s) => s.id)) ?? [];
-    const result = { label: o.label, startup_ms: startup, minutes: Number(o.minutes), dashboards: Number(o.dashboards), running: RUNNING, notifications, activity_lines: appended, accepted, steps_done: done.length, server: perf, client };
+    const result = { label: o.label, startup_ms: startup, minutes: Number(o.minutes), dashboards: Number(o.dashboards), running: RUNNING, notifications, activity_lines: appended, accepted, steps_done: done.length, server: perf, client,
+      page: page && { minutes: pageMinutes, requests: page.n, requests_per_minute: Math.round(page.n / pageMinutes), mb_per_minute: +(page.bytes / 1e6 / pageMinutes).toFixed(1), messages_per_minute: Math.round(page.ws / pageMinutes), by: page.by } };
     const outDir = o.out ?? home;
     mkdirSync(outDir, { recursive: true });
     const file = join(outDir, `perf-${o.label}.json`);
@@ -222,12 +246,17 @@ async function main(): Promise<void> {
     writeFileSync(join(outDir, `perf-${o.label}.log`), perfLines.join("\n") + "\n");
     console.log(`\n${o.label}: ${o.minutes} min, ${o.dashboards} dashboard(s), ${RUNNING} running queue(s); ${notifications} notifications, ${appended} activity lines, ${accepted} steps accepted`);
     console.log(`event loop delay: p50 ${perf.loop.p50_ms} ms, p99 ${perf.loop.p99_ms} ms, max ${perf.loop.max_ms} ms; blocks over ${perf.block_ms} ms: ${perf.blocks.length}`);
+    if (result.page) {
+      console.log(`the page: ${result.page.requests_per_minute} requests a minute, ${result.page.mb_per_minute} MB a minute, ${result.page.messages_per_minute} socket messages a minute`);
+      for (const [k, n] of Object.entries(result.page.by).sort((a, b) => b[1] - a[1])) console.log(`  ${k.padEnd(48)} ${String(Math.round(n / result.page.minutes)).padStart(5)} a minute`);
+    }
     console.log("what the dashboards waited (endpoint, count, mean, p50, p95, max):");
     for (const c of client) console.log(`  ${c.endpoint.padEnd(14)} ${String(c.count).padStart(5)}  ${c.mean_ms} / ${c.p50_ms} / ${c.p95_ms} / ${c.max_ms} ms${c.errors ? `  (${c.errors} failed)` : ""}`);
     console.log("server: measured operations by total time (count, mean, max):");
     for (const s of perf.spans.slice(0, 14)) console.log(`  ${s.what}  ${s.count}x  ${s.mean_ms} / ${s.max_ms} ms`);
     console.log("server: the longest blocks:");
     for (const b of [...perf.blocks].sort((a: { ms: number }, b: { ms: number }) => b.ms - a.ms).slice(0, 8)) console.log(`  ${b.ms} ms: ${b.during.map((s: { what: string; ms: number }) => `${s.what} ${Math.round(s.ms)}`).join("; ") || "nothing measured"}`);
+    if (page && (page as { errors?: string[] }).errors?.length) console.log(`the page's errors: ${(page as { errors?: string[] }).errors!.join(" | ")}`);
     console.log(`written: ${file}`);
   } finally {
     stopping = true;
