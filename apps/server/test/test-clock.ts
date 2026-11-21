@@ -5,10 +5,12 @@ import type { Clock } from "../src/scheduler.ts";
 /** A clock that moves only when told; its timers fire in order as it passes them. */
 export class TestClock implements Clock {
   t = Date.now();
-  private timers: { at: number; fn: () => void }[] = [];
+  private timers: { at: number; ms: number; fn: () => void }[] = [];
   now() { return this.t; }
-  setTimeout(fn: () => void, ms: number) { const h = { at: this.t + ms, fn }; this.timers.push(h); return h; }
+  setTimeout(fn: () => void, ms: number) { const h = { at: this.t + ms, ms, fn }; this.timers.push(h); return h; }
   clearTimeout(h: unknown) { this.timers = this.timers.filter((x) => x !== h); }
+  /** The delays of the timers armed now. */
+  pending() { return this.timers.map((x) => x.ms); }
   advance(ms: number) {
     const end = this.t + ms;
     for (;;) {

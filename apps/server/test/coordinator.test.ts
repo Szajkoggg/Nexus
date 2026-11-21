@@ -6,32 +6,12 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_MAX_RUNNING, ensureGlobalSettings, loadProjectState, readGlobalSettings, updateGlobalSettings } from "@nexus/protocol";
-import type { Clock } from "../src/engine.ts";
 import { Coordinator } from "../src/coordinator.ts";
 import { doneByHand, going, world } from "./coordinator-world.ts";
+import { TestClock } from "./test-clock.ts";
 import { LONGER, holdWork } from "./wait.ts";
 
 const MIN = 60_000;
-
-/** A clock that moves only when told; its timers fire in order as it passes them (as in schedules.test.ts). */
-class TestClock implements Clock {
-  t = Date.now();
-  private timers: { at: number; fn: () => void }[] = [];
-  now() { return this.t; }
-  setTimeout(fn: () => void, ms: number) { const h = { at: this.t + ms, fn }; this.timers.push(h); return h; }
-  clearTimeout(h: unknown) { this.timers = this.timers.filter((x) => x !== h); }
-  advance(ms: number) {
-    const end = this.t + ms;
-    for (;;) {
-      const next = this.timers.filter((x) => x.at <= end).sort((a, b) => a.at - b.at)[0];
-      if (!next) break;
-      this.timers = this.timers.filter((x) => x !== next);
-      this.t = next.at;
-      next.fn();
-    }
-    this.t = end;
-  }
-}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

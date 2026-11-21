@@ -10,7 +10,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, loadProjectState, routeAnswers } from "@nexus/protocol";
-import { Engine, type Clock } from "../src/engine.ts";
+import { Engine } from "../src/engine.ts";
+import { TestClock } from "./test-clock.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { until as waitUntil, LONGER } from "./wait.ts";
 
@@ -18,26 +19,6 @@ process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-c
 
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-
-/** A clock that moves only when told; its timers fire in order as it passes them. */
-class TestClock implements Clock {
-  t = Date.now();
-  private timers: { at: number; fn: () => void }[] = [];
-  now() { return this.t; }
-  setTimeout(fn: () => void, ms: number) { const h = { at: this.t + ms, fn }; this.timers.push(h); return h; }
-  clearTimeout(h: unknown) { this.timers = this.timers.filter((x) => x !== h); }
-  advance(ms: number) {
-    const end = this.t + ms;
-    for (;;) {
-      const next = this.timers.filter((x) => x.at <= end).sort((a, b) => a.at - b.at)[0];
-      if (!next) break;
-      this.timers = this.timers.filter((x) => x !== next);
-      this.t = next.at;
-      next.fn();
-    }
-    this.t = end;
-  }
-}
 
 /** A template whose one step does what `what` says to the fake ("done", "stop"). */
 const template = (id: string, extra = "") => `template:

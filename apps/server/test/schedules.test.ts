@@ -8,7 +8,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, applyDraft, approveQueue, formatClock, loadProjectState, routeAnswers, writeUsage, type StepDef } from "@nexus/protocol";
-import { Engine, MAX_TIMER_MS, type Clock } from "../src/engine.ts";
+import { Engine, MAX_TIMER_MS } from "../src/engine.ts";
+import { TestClock } from "./test-clock.ts";
 import { MISSED_MS } from "../src/scheduler.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
@@ -17,28 +18,6 @@ import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
-
-/** A clock that moves only when told; its timers fire in order as it passes them. */
-class TestClock implements Clock {
-  t = Date.now();
-  private timers: { at: number; ms: number; fn: () => void }[] = [];
-  now() { return this.t; }
-  setTimeout(fn: () => void, ms: number) { const h = { at: this.t + ms, ms, fn }; this.timers.push(h); return h; }
-  clearTimeout(h: unknown) { this.timers = this.timers.filter((x) => x !== h); }
-  /** The delays of the timers armed now. */
-  pending() { return this.timers.map((x) => x.ms); }
-  advance(ms: number) {
-    const end = this.t + ms;
-    for (;;) {
-      const next = this.timers.filter((x) => x.at <= end).sort((a, b) => a.at - b.at)[0];
-      if (!next) break;
-      this.timers = this.timers.filter((x) => x !== next);
-      this.t = next.at;
-      next.fn();
-    }
-    this.t = end;
-  }
-}
 
 function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "nexus-schedule-"));
