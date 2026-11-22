@@ -305,11 +305,12 @@ is still what the last line left, `idle` after a drained turn's end. Every calle
   handled later, leaves the session's runtime record to the new one: AgentHost writes `exited` only when no other
   process runs the session (before, the late exit of a process let go, as at `restartAfterTurn`, could mark a running
   one's record exited).
-- **Where the window opens.** On Windows a worker runs in its job host (`worker-job.cs`), which ends the job's
-  descendants when the runtime exits and only then reports the exit: stdout has ended by then, and a worker's window
-  lasts a few ticks. The orchestrator, conversations and review helpers run as plain child processes: a descendant
-  that outlives the runtime (a command Codex started) holds stdout, and the window, open for the full second; so do
-  workers on other systems. The test runs its worker without the job host for that reason.
+- **Where the window opens.** On Windows every agent runs in a job host (`worker-job.cs`): a worker for its
+  processes, and since queue HG every role for its agent job (`AgentOptions.agentRole`). The job host ends the job's
+  descendants when the runtime exits and only then reports the exit: stdout has ended by then, and the window lasts a
+  few ticks. On other systems agents run as plain child processes: a descendant that outlives the runtime (a command
+  Codex started) holds stdout, and the window, open for the full second. The test runs its processes without the job
+  host for that reason.
 - **The test's helpers.** `CodexOptions.exitDrainMs` (as `lateTurnMs` is Claude's) lengthens the window, so that the
   fake's held stdout ends it, not the machine's timing. The fake (`fake-behaviour.ts`, `exitHeld`: `FAKE: noopexit1`,
   `FAKE-EXIT-HELD`) exits with its stdout held by a descendant for `FAKE_CODEX_HOLD_STDOUT_MS`; with

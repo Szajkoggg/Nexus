@@ -25,14 +25,14 @@ const DRAIN_MS = 60_000;
 /** How long the fake's descendant holds stdout after it wrote the turn's end. */
 const HOLD_MS = 3000;
 
-/** Makes Codex processes that keep their stdout's drain open, recorded in `made`, without the Windows job host. */
+/** Makes Codex processes that keep their stdout's drain open, recorded in `made`, without a Windows job host. */
 function codexMaker(made: CodexSession[]) {
   return (launch: Launch): CodexSession => {
     assert.equal(launch.runtime, "codex");
-    // A worker runs in a Windows job host (worker-job.cs), which ends the job's descendants with the runtime, and its
-    // stdout ends with them: on Windows a worker's window closes at once. Without it, as on other systems (and as the
-    // orchestrator and conversations run everywhere), the descendant holds the pipe and the window stays open.
-    const p = new CodexSession({ ...(launch.options as CodexOptions), ownProcesses: false, exitDrainMs: DRAIN_MS });
+    // On Windows every agent runs in a job host (worker-job.cs; a worker for its processes, any role for its agent job,
+    // queue HG), which ends the job's descendants with the runtime, and its stdout ends with them: the window closes at
+    // once. Without it, as on other systems, the descendant holds the pipe and the window stays open.
+    const p = new CodexSession({ ...(launch.options as CodexOptions), ownProcesses: false, agentRole: undefined, exitDrainMs: DRAIN_MS });
     made.push(p);
     return p;
   };
