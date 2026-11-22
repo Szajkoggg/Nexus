@@ -98,6 +98,11 @@ function httpCode(status: unknown): string | undefined {
 export interface ClaudeOptions {
   /** Only AgentHost sets this, for worker sessions. */
   ownProcesses?: boolean;
+  /**
+   * Only AgentHost sets this: the session's role. Its process then runs in a job of its own on Windows, so the server
+   * can tell its connections from the user's (worker-process.ts agentOwning; docs/design/security.md).
+   */
+  agentRole?: string;
   cwd: string;
   /** Claude's own session id (a UUID). New sessions are created with it; existing ones resumed. */
   uuid: string;
@@ -222,6 +227,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
       cwd: this.options.cwd,
       env: agentEnv(this.options.env),
       owned: this.options.ownProcesses,
+      agent: this.options.agentRole,
     });
     this.proc = child;
     child.on("spawn", () => { if (child === this.proc && child.pid) this.emit("facts", { pid: child.pid }); });

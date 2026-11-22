@@ -1,12 +1,18 @@
-// A worker's Windows job host, with the same streams the runtime adapters already consume. Other agent roles
-// keep Node's ordinary child process. The control frames never enter a runtime's JSON stream (docs/protocol/runtimes.md, "Windows worker process host (PT)").
+// A Windows job host, with the same streams the runtime adapters already consume: a worker's (its processes are
+// ended at a step's boundary), a check's, and every other agent's (the orchestrator's, a thinking partner's, a review
+// helper's), whose job only marks its processes as an agent's for the server's write guard (queue HG). The control
+// frames never enter a runtime's JSON stream (docs/protocol/runtimes.md, "Windows worker process host (PT)").
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { constants, setPriority } from "node:os";
 import { PassThrough, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
-interface SpawnOptions { cwd: string; env: NodeJS.ProcessEnv; owned?: boolean }
+/**
+ * `owned`: a worker's or a check's process, below normal priority when the server asks for it (lowerOwnedProcesses).
+ * `agent`: an agent session's role; on Windows its process runs in a job the server asks about (agentOwning).
+ */
+interface SpawnOptions { cwd: string; env: NodeJS.ProcessEnv; owned?: boolean; agent?: string }
 export interface RuntimeChild extends EventEmitter {
   readonly stdin: Writable;
   readonly stdout: PassThrough | ChildProcessWithoutNullStreams["stdout"];
@@ -21,7 +27,7 @@ function quote(value: string): string { return '"' + value.replace(/(\\*)"/g, '$
 const encode = (text: string) => Buffer.from(text, "utf8").toString("base64");
 
 export function spawnRuntimeChild(bin: string, args: string[], options: SpawnOptions): RuntimeChild {
-  if (options.owned && process.platform === "win32") return new WorkerProcess(bin, args, options);
+  if ((options.owned || options.agent) && process.platform === "win32") return new WorkerProcess(bin, args, options);
   const child = spawn(bin, args, { cwd: options.cwd, env: options.env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
   if (options.owned) belowNormal(child.pid);
   return child;
@@ -47,6 +53,41 @@ export function belowNormal(pid: number | undefined): void {
   try { setPriority(pid, constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* ended already, or not allowed */ }
 }
 
+/** The agents' job hosts still running, each with its session's role. */
+const agentJobs = new Set<WorkerProcess>();
+
+/** How long the write guard waits for a job host's answer before it lets the request through (and logs it). */
+const OWNER_ANSWER_MS = 3000;
+
+/** What agentOwning answers for a command of Codex's elevated sandbox found in no agent's job. */
+const CODEX_SANDBOX = "codex-sandbox";
+
+/** A job host's answer: a process of its job owns the connection, a command of Codex's sandbox does, or neither. */
+type Ownership = "job" | "sandbox" | "none";
+/** The job host's digits for an Ownership (worker-job.cs Owns); any other is "none". */
+const OWNERSHIP: Readonly<Record<string, Ownership>> = { "1": "job", "2": "sandbox" };
+
+/**
+ * Which agent's job, if any, owns the client end of a loopback connection to this server, named by its two ports (the
+ * client's own and the server's): the role of the agent session (queue HG, docs/design/security.md). A command run as
+ * an account of Codex's elevated sandbox (the CodexSandboxUsers group) is an agent's in any case: CODEX_SANDBOX, when
+ * it is in no agent's job. Asks every agent's job host at once. A host that does not answer in time counts as not
+ * owning it, and is logged: a failed lookup must never lock the user out. Off Windows there are no jobs, and the answer
+ * is always none.
+ */
+export async function agentOwning(clientPort: number, serverPort: number): Promise<string | undefined> {
+  const hosts = [...agentJobs];
+  if (!hosts.length) return undefined;
+  const answers = await Promise.all(hosts.map((h) => h.owns(clientPort, serverPort).then(
+    (owns) => ({ owns, agent: h.agent }),
+    (err: Error) => {
+      console.error(`write guard: an agent's job host did not answer (${err.message}); the request is let through`);
+      return { owns: "none" as Ownership, agent: h.agent };
+    },
+  )));
+  return answers.find((a) => a.owns === "job")?.agent ?? (answers.some((a) => a.owns === "sandbox") ? CODEX_SANDBOX : undefined);
+}
+
 class WorkerProcess extends EventEmitter implements RuntimeChild {
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
@@ -60,11 +101,16 @@ class WorkerProcess extends EventEmitter implements RuntimeChild {
   private killing?: NodeJS.Timeout;
   private next = 0;
   private readonly pending = new Map<number, { resolve: () => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
+  private readonly asking = new Map<number, { resolve: (owns: Ownership) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
+  /** The agent session's role, for an agent's job (SpawnOptions.agent). */
+  readonly agent?: string;
 
   constructor(bin: string, args: string[], options: SpawnOptions) {
     super();
+    this.agent = options.agent;
+    if (this.agent) agentJobs.add(this);
     this.host = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fileURLToPath(new URL("./worker-job.ps1", import.meta.url))], {
-      cwd: options.cwd, env: { ...options.env, [JOB_PRIORITY]: lowered ? "1" : undefined }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+      cwd: options.cwd, env: { ...options.env, [JOB_PRIORITY]: lowered && options.owned ? "1" : undefined }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
     this.host.stdin.on("error", () => {});
     this.stdin = new Writable({
@@ -81,6 +127,7 @@ class WorkerProcess extends EventEmitter implements RuntimeChild {
     this.host.on("error", (error) => this.emit("error", error));
     this.host.on("close", (code) => {
       this.exited = true;
+      agentJobs.delete(this);
       clearTimeout(this.closing); clearTimeout(this.killing);
       this.fail(new Error("worker job host exited"));
       this.stdout.end(); this.stderr.end();
@@ -109,9 +156,23 @@ class WorkerProcess extends EventEmitter implements RuntimeChild {
     });
   }
 
+  /** Who owns the client end of the loopback connection between the two ports, as this job host sees it. */
+  owns(clientPort: number, serverPort: number): Promise<Ownership> {
+    if (this.exited) return Promise.resolve("none");
+    const id = ++this.next;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.asking.delete(id); reject(new Error(`no answer in ${OWNER_ANSWER_MS} ms`)); }, OWNER_ANSWER_MS);
+      this.asking.set(id, { resolve, reject, timer });
+      this.write(`T ${id} ${clientPort} ${serverPort}`);
+    });
+  }
+
   private fail(error: Error): void {
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(error); }
     this.pending.clear();
+    // A job that is gone owns no connection.
+    for (const a of this.asking.values()) { clearTimeout(a.timer); a.resolve("none"); }
+    this.asking.clear();
   }
 
   private read(chunk: string): void {
@@ -126,6 +187,12 @@ class WorkerProcess extends EventEmitter implements RuntimeChild {
         case "O": this.stdout.write(Buffer.from(value, "base64")); break;
         case "E": this.stderr.write(Buffer.from(value, "base64")); break;
         case "X": this.result = Number(value); break;
+        case "T": {
+          const [id, owns] = value.split(" ");
+          const a = this.asking.get(Number(id));
+          if (a) { clearTimeout(a.timer); this.asking.delete(Number(id)); a.resolve(OWNERSHIP[owns!] ?? "none"); }
+          break;
+        }
         case "C": {
           const p = this.pending.get(Number(value));
           if (p) { clearTimeout(p.timer); this.pending.delete(Number(value)); p.resolve(); }

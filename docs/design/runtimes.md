@@ -114,6 +114,8 @@ Part of [the design](../DESIGN.md).
     with a free shell on this machine (Codex workers, Claude Code workers, an orchestrator on Codex) can do the user's
     dashboard actions over HTTP; the orchestrator on Claude Code cannot (it runs only `nexus` and read-only git). The
     user decided: the gap is closed by a queue of its own, and the orchestrator is not switched to Codex until it is.
+    Closed in queue HG: the server refuses writes from a process in an agent's job, or running as a Codex sandbox
+    account ([Security on this machine](security.md#built-in-hg2)).
   - Built in OC2: `CodexOptions.permissions` (a profile in place of `sandbox` and `writableRoots`), the orchestrator's
     launch by `orchestrator.runtime`, its Codex briefing without helpers (it does their work itself, by their own
     checklists in short), and a fresh session at a runtime switch (no conversation moves between runtimes; the old

@@ -21,7 +21,7 @@ import { Engine } from "./engine.ts";
 import { Coordinator } from "./coordinator.ts";
 import { Capacity } from "./capacity.ts";
 import { readSnapshots } from "./snapshots.ts";
-import { lowerOwnedProcesses } from "./worker-process.ts";
+import { agentOwning, lowerOwnedProcesses } from "./worker-process.ts";
 import { branchState, leftBehind, stepCommits } from "./gitinfo.ts";
 import { cleanUp, mergeBack } from "./mergeback.ts";
 import { Merger } from "./merger.ts";
@@ -422,6 +422,23 @@ app.post("/login", async (c) => {
  * to the user alone).
  */
 const CLI_WRITES = new Set(["/api/server/update", "/api/server/cancel", "/api/server/plan", "/api/server/cancel-plan", "/api/server/away"]);
+/** What `nexus server` sends for an orchestrator the user asked (`away` is the user's alone). */
+const ORCHESTRATOR_WRITES = new Set(["/api/server/update", "/api/server/cancel", "/api/server/plan", "/api/server/cancel-plan"]);
+/**
+ * The agents' own processes (queue HG, docs/design/security.md): any program on this machine can send a browser's
+ * headers, so a write (and the read that hands out the access token) is also refused when the connection comes from a
+ * process in an agent's job. Only the orchestrator's job may send the `nexus server` writes above. Off Windows, and
+ * when a job host does not answer, the checks below stay the only guard.
+ */
+app.use("/api/*", async (c, next) => {
+  const read = c.req.method === "GET" || c.req.method === "HEAD";
+  if (read && c.req.path !== "/api/remote") return next();
+  const socket = c.env.incoming.socket;
+  if (socket.remotePort === undefined || socket.localPort === undefined) return next();
+  const agent = await agentOwning(socket.remotePort, socket.localPort);
+  if (agent === undefined || (agent === "orchestrator" && !read && ORCHESTRATOR_WRITES.has(c.req.path))) return next();
+  return c.json({ error: `an agent's process (${agent}) does not do the user's actions; agents use the nexus CLI` }, 403);
+});
 app.use("/api/*", async (c, next) => {
   if (c.req.method === "GET" || c.req.method === "HEAD") return next();
   const origin = c.req.header("origin");

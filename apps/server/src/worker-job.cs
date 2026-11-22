@@ -7,6 +7,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 
@@ -28,6 +29,11 @@ public static class NexusWorkerJob
     [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int kind);
     [DllImport("kernel32.dll")] static extern bool SetStdHandle(int kind, IntPtr handle);
     [DllImport("kernel32.dll")] static extern void ExitProcess(uint code);
+    [DllImport("wtsapi32.dll", SetLastError = true)] static extern bool WTSEnumerateProcessesEx(IntPtr server, ref int level, int session, out IntPtr info, out int count);
+    [DllImport("wtsapi32.dll")] static extern bool WTSFreeMemoryEx(int type, IntPtr memory, int count);
+    [DllImport("netapi32.dll", CharSet = CharSet.Unicode)] static extern int NetLocalGroupGetMembers(string server, string group, int level, out IntPtr buffer, int max, out int read, out int total, IntPtr resume);
+    [DllImport("netapi32.dll")] static extern int NetApiBufferFree(IntPtr buffer);
+    [DllImport("iphlpapi.dll", SetLastError = true)] static extern uint GetExtendedTcpTable(IntPtr table, ref int size, bool sorted, int family, int tableClass, uint reserved);
 
     [StructLayout(LayoutKind.Sequential)] struct BasicLimits {
         public long PerProcessUserTime, PerJobUserTime;
@@ -124,6 +130,91 @@ public static class NexusWorkerJob
         }
     }
 
+    static ushort Port(uint raw) { return (ushort)(((raw & 0xff) << 8) | ((raw >> 8) & 0xff)); } // network byte order
+
+    // The process that owns a loopback TCP connection's client end, from the connection's two ports (queue HG): the
+    // client's own port and the server's. Zero when no such connection is in the table (or it could not be read).
+    static uint Owner(int family, ushort client, ushort server) {
+        int size = 0;
+        for (int tries = 0; tries < 8; tries++) {
+            IntPtr data = size > 0 ? Marshal.AllocHGlobal(size) : IntPtr.Zero;
+            try {
+                uint result = GetExtendedTcpTable(data, ref size, false, family, 4, 0); // TCP_TABLE_OWNER_PID_CONNECTIONS
+                if (result == 122) continue; // ERROR_INSUFFICIENT_BUFFER: size now says how much
+                if (result != 0) return 0;
+                int count = Marshal.ReadInt32(data);
+                // MIB_TCPROW_OWNER_PID: state, local address, local port, remote address, remote port, pid (24 bytes).
+                // MIB_TCP6ROW_OWNER_PID: local address (16), scope, local port, remote address (16), scope, remote port,
+                // state, pid (56 bytes).
+                int row = family == 2 ? 24 : 56, local = family == 2 ? 8 : 20, remote = family == 2 ? 16 : 44, pid = family == 2 ? 20 : 52;
+                for (int i = 0; i < count; i++) {
+                    IntPtr at = data + 4 + i * row;
+                    if (Port((uint)Marshal.ReadInt32(at, local)) == client && Port((uint)Marshal.ReadInt32(at, remote)) == server && Loopback(family, at))
+                        return (uint)Marshal.ReadInt32(at, pid);
+                }
+                return 0;
+            } finally { if (data != IntPtr.Zero) Marshal.FreeHGlobal(data); }
+        }
+        return 0;
+    }
+
+    static bool Loopback(int family, IntPtr row) {
+        if (family == 2) return (Marshal.ReadInt32(row, 4) & 0xff) == 127; // 127.0.0.0/8, first byte in memory
+        var address = new byte[16];
+        Marshal.Copy(row, address, 0, 16);
+        for (int i = 0; i < 10; i++) if (address[i] != 0) return false;
+        if (address[10] == 0xff && address[11] == 0xff) return address[12] == 127; // ::ffff:127.0.0.0/104
+        for (int i = 10; i < 15; i++) if (address[i] != 0) return false;
+        return address[15] == 1; // ::1
+    }
+
+    [StructLayout(LayoutKind.Sequential)] struct ProcessInfo {
+        public uint Session, Pid;
+        public IntPtr Name, Sid;
+        public uint Threads, Handles, Pagefile, PeakPagefile, WorkingSet, PeakWorkingSet;
+        public long UserTime, KernelTime;
+    }
+
+    // The account a process runs as, read from the session list (WTS): a process of another account cannot be opened
+    // from here, but the list names every process's account.
+    static SecurityIdentifier Account(uint pid) {
+        int level = 1;
+        IntPtr info; int count;
+        if (!WTSEnumerateProcessesEx(IntPtr.Zero, ref level, -2, out info, out count)) return null; // every session
+        try {
+            int size = Marshal.SizeOf(typeof(ProcessInfo));
+            for (int i = 0; i < count; i++) {
+                var p = (ProcessInfo)Marshal.PtrToStructure(info + i * size, typeof(ProcessInfo));
+                if (p.Pid == pid) return p.Sid == IntPtr.Zero ? null : new SecurityIdentifier(p.Sid);
+            }
+            return null;
+        } finally { WTSFreeMemoryEx(2, info, count); } // WTSTypeProcessInfoLevel1
+    }
+
+    // The accounts Codex's elevated Windows sandbox runs commands as (the local group CodexSandboxUsers). Such a
+    // command is an agent's whichever job it is in: it may be started outside the job of the Codex that asked for it.
+    static bool CodexSandbox(SecurityIdentifier account) {
+        IntPtr buffer; int read, total;
+        if (NetLocalGroupGetMembers(null, "CodexSandboxUsers", 0, out buffer, -1, out read, out total, IntPtr.Zero) != 0) return false; // no such group
+        try {
+            for (int i = 0; i < read; i++) {
+                if (new SecurityIdentifier(Marshal.ReadIntPtr(buffer, i * IntPtr.Size)).Equals(account)) return true;
+            }
+            return false;
+        } finally { NetApiBufferFree(buffer); }
+    }
+
+    // Who owns the client end of the connection (queue HG, docs/design/security.md): 1 a process of this job, 2 a
+    // command of Codex's sandbox (an agent's, but not known to be this job's), 0 neither.
+    static int Owns(ushort client, ushort server) {
+        uint owner = Owner(2, client, server);
+        if (owner == 0) owner = Owner(23, client, server);
+        if (owner == 0) return 0;
+        if (Members().Contains(owner)) return 1;
+        SecurityIdentifier account = Account(owner);
+        return account != null && CodexSandbox(account) ? 2 : 0;
+    }
+
     static Thread Pump(StreamReader reader, string prefix) {
         var thread = new Thread(() => {
             try { string line; while ((line = reader.ReadLine()) != null) Send(prefix + Encode(line + "\n")); }
@@ -210,6 +301,16 @@ public static class NexusWorkerJob
         string command;
         while ((command = Console.ReadLine()) != null) {
             if (command.StartsWith("W ") || command == "E") writes.Add(command);
+            else if (command.StartsWith("T ")) {
+                // "T <id> <client port> <server port>": answered off this reader, so a cleanup in progress does not
+                // hold the server's write guard back.
+                string[] parts = command.Split(' ');
+                ThreadPool.QueueUserWorkItem(_ => {
+                    int owns = 0;
+                    try { owns = Owns(ushort.Parse(parts[2]), ushort.Parse(parts[3])); } catch (Exception) { }
+                    Send("T " + parts[1] + " " + owns);
+                });
+            }
             else if (command == "K") Clean(false);
             else if (command.StartsWith("C ")) {
                 try { Clean(true); Send(command); }

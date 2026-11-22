@@ -20,7 +20,8 @@ Hello.
   "config": {
     "web_search": "disabled"
   },
-  "withoutUserTools": true
+  "withoutUserTools": true,
+  "agentRole": "orchestrator"
 }
 == its briefing (developer instructions)
 You are the orchestrator of the project "Pilot" in Nexus, the user's dashboard for AI-driven work. The user talks with you in the dashboard's chat; reply in the language they write in. Everything you write into files or queues is in English.
