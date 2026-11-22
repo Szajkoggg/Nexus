@@ -76,7 +76,9 @@ test("--all: every queue and session with whole cards, as a fresh orchestrator s
   assert.deepEqual(sessions(all), [...workers].sort());
   const cards = all.split("\n").filter((l) => l.startsWith("  knows: "));
   assert.equal(cards.length, workers.length);
-  for (const c of cards) assert.ok(c.length > 300 && !c.endsWith("…"), `a card as before (its text up to 300 characters): ${c}`);
+  // Whole: a card text longer than 300 characters shows to its end (LONG ends in END).
+  assert.ok(LONG.length > 300);
+  for (const c of cards) assert.ok(c.length > 300 && c.endsWith(" END") && !c.includes("…"), `a whole card: ${c}`);
   assert.ok(all.startsWith(`project P (p)\n${orchestratorOverview(loadProjectState(store))}\n\nmachine WS`), "the overview the server seeds a fresh session with, then the machine");
   assert.match(all, WAITING);
   assert.match(all, MACHINE);

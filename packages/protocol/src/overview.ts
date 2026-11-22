@@ -173,7 +173,7 @@ Worker sessions (${opts.queue === undefined ? workers.length : `${shown.length} 
     const busy = busyWith(w);
     out.push(`- ${w.id} "${w.title ?? ""}" ${w.runtime}${w.launched_by === "nexus" ? "" : " (external)"}, ${w.live?.state ?? "not live"}, ${w.live?.model ?? w.model ?? "model ?"}, ${context(w.live?.context_tokens, w.live?.context_window)}${busy ? `, running queue ${busy.id}` : ", free"}`);
     if (!w.context) continue;
-    const card = `  knows: ${w.context.topics.join(", ") || "-"}; ${w.context.text.replace(/\s+/g, " ").slice(0, 300)}`;
+    const card = `  knows: ${w.context.topics.join(", ") || "-"}; ${w.context.text.replace(/\s+/g, " ")}`;
     out.push(all || card.length <= CARD_CHARS ? card : `${card.slice(0, CARD_CHARS - 1)}…`);
   }
   const attention = state.attention.filter((a) => a.kind !== "question" && ofQueue(a.queue));

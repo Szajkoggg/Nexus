@@ -115,7 +115,7 @@ reports it. Two rules keep the decisions' results as they are:
 
 - **Files only this server writes are always current** (write-through): every YAML file of a queue, `runtime.json`,
   inbox, deliveries, applied, activity, chat, refusals, turns. Another process writes only an agent's own
-  `events.jsonl`, the review files, and by hand the user's CLI (`nexus queue import`, `nexus note`, a session file,
+  `events.jsonl`, the review files, and by hand the user's CLI (`nexus import`, `nexus note`, a session file,
   the registry).
 - **Before a decision reads, the model syncs the logs other processes append to now**: the `events.jsonl` of every
   session with a live process in this server's hosts (workers, orchestrator, partners, helpers), and of a session whose
