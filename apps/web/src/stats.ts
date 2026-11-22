@@ -17,6 +17,11 @@ export function rangeSince(range: Range, today = new Date()): string | undefined
   const n = RANGE_DAYS[range];
   return n === undefined ? undefined : dayKey(new Date(today.getFullYear(), today.getMonth(), today.getDate() - (n - 1)));
 }
+/** The range's start as an ISO time (its first day's start, local); undefined: all. */
+export function rangeSinceIso(range: Range, today = new Date()): string | undefined {
+  const day = rangeSince(range, today);
+  return day && dayOf(day).toISOString();
+}
 
 /** What the view asks for: the report's address with the range, grouping, project and tag filter. */
 export function statsUrl(o: { range: Range; by: "model" | "effort"; project?: string; filter: StatFilter }, today = new Date()): string {

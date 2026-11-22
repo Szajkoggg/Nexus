@@ -8,7 +8,7 @@ import { useQuery, type ProjectSummary } from "../api.ts";
 import { usePage } from "../page.ts";
 import { formatDate, formatDay, formatWeekday, t, type Key } from "../i18n.ts";
 import {
-  RANGES, compareRows, compareScales, dayOf, daysUrl, estimate, headline, rangeSince, statsUrl, windowPanels,
+  RANGES, compareRows, compareScales, dayOf, daysUrl, estimate, headline, rangeSinceIso, statsUrl, windowPanels,
   type CompareRow, type Range, type WindowPanel,
 } from "../stats.ts";
 import { AxisCell, BarCell, ChartCard, DataTable, DotCell, Scatter, Segmented, TimeChart, type ScatterPoint } from "./charts.tsx";
@@ -91,7 +91,7 @@ export function StatsView({ projects, phone }: { projects: ProjectSummary[]; pho
 
       <div className="mt-5" />
       <Heading title={t("speed.title")} note={t("speed.titleNote")} phone={phone} />
-      <ServerSpeed since={rangeSince(range) && dayOf(rangeSince(range)!).toISOString()} version={version} phone={phone} />
+      <ServerSpeed since={rangeSinceIso(range)} version={version} phone={phone} />
     </div>
   );
 }
