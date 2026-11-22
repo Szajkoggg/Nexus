@@ -64,6 +64,8 @@ const CODEX_SANDBOX = "codex-sandbox";
 
 /** A job host's answer: a process of its job owns the connection, a command of Codex's sandbox does, or neither. */
 type Ownership = "job" | "sandbox" | "none";
+/** The job host's digits for an Ownership (worker-job.cs Owns); any other is "none". */
+const OWNERSHIP: Readonly<Record<string, Ownership>> = { "1": "job", "2": "sandbox" };
 
 /**
  * Which agent's job, if any, owns the client end of a loopback connection to this server, named by its two ports (the
@@ -188,7 +190,7 @@ class WorkerProcess extends EventEmitter implements RuntimeChild {
         case "T": {
           const [id, owns] = value.split(" ");
           const a = this.asking.get(Number(id));
-          if (a) { clearTimeout(a.timer); this.asking.delete(Number(id)); a.resolve(owns === "1" ? "job" : owns === "2" ? "sandbox" : "none"); }
+          if (a) { clearTimeout(a.timer); this.asking.delete(Number(id)); a.resolve(OWNERSHIP[owns!] ?? "none"); }
           break;
         }
         case "C": {
