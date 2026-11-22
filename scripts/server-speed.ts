@@ -119,7 +119,7 @@ async function measure(scale: number, tests: boolean): Promise<ServerSpeedConfig
       ["activity", `${p}/sessions/${pick.session}/activity?queue=${pick.queue}&step=${pick.step}`],
     ];
     const from = new Date().toISOString();
-    const times = new Map<string, { all: number[]; errors: number }>();
+    const times = new Map(reads.map(([what]) => [what, { all: [] as number[], errors: 0 }]));
     // A first round not counted: each read's first answer is made from cold (its caches, the model's first reads).
     for (let r = -1; r < ROUNDS; r++) {
       for (const [what, path] of reads) {
@@ -127,12 +127,11 @@ async function measure(scale: number, tests: boolean): Promise<ServerSpeedConfig
         let ok = false;
         try { const res = await fetch(`${url}${path}`); await res.arrayBuffer(); ok = res.ok; } catch { /* counted */ }
         if (r < 0) continue;
-        const x = times.get(what) ?? { all: [], errors: 0 };
+        const x = times.get(what)!;
         x.all.push(performance.now() - t); if (!ok) x.errors++;
-        times.set(what, x);
       }
     }
-    const requests = reads.map(([what]) => { const x = times.get(what)!; return { what, count: x.all.length, errors: x.errors, p50_ms: r1(pct(x.all, 50)), p95_ms: r1(pct(x.all, 95)), max_ms: r1(Math.max(...x.all)) }; });
+    const requests = [...times].map(([what, x]) => ({ what, count: x.all.length, errors: x.errors, p50_ms: r1(pct(x.all, 50)), p95_ms: r1(pct(x.all, 95)), max_ms: r1(Math.max(...x.all)) }));
 
     // A change: a step's progress appended to its worker's events, until the dashboards hear of the new state.
     const changes: number[] = [];

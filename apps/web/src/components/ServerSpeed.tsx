@@ -7,7 +7,7 @@
 import { useMemo, useState } from "react";
 import { SPEED_MEASURES, speedPanels, speedValue, type ServerSpeedRun, type SpeedMeasure, type SpeedPanel, type SpeedPoint } from "@nexus/protocol/benchmarks";
 import { useQuery } from "../api.ts";
-import { formatDateTime, formatDay, formatNumber, formatWeekday, t, type Key } from "../i18n.ts";
+import { formatDateTime, formatDay, formatNumber, formatWeekday, t } from "../i18n.ts";
 import { niceAxis } from "../metrics.ts";
 import { ChartCard, DataTable, Segmented, TimeChart } from "./charts.tsx";
 import { chartOrTable } from "./Stats.tsx";
@@ -20,9 +20,6 @@ interface Perf {
   blocks: { at: string; ms: number }[];
 }
 
-const MEASURE_LABEL: Record<SpeedMeasure, Key> = { reads: "speed.measure.reads", change: "speed.measure.change", startup: "speed.measure.startup", loop: "speed.measure.loop" };
-const MEASURE_COL: Record<SpeedMeasure, Key> = { reads: "speed.col.reads", change: "speed.col.change", startup: "speed.col.startup", loop: "speed.col.loop" };
-const MEASURE_NOTE: Record<SpeedMeasure, Key> = { reads: "speed.note.reads", change: "speed.note.change", startup: "speed.note.startup", loop: "speed.note.loop" };
 const ms = (v: number) => v >= 1000 ? `${formatNumber(Math.round(v / 100) / 10)} s` : `${formatNumber(Math.round(v))} ms`;
 const panelTitle = (p: Pick<SpeedPanel, "scale" | "tests">) => t(p.tests ? "speed.panel.tests" : "speed.panel.quiet", { scale: formatNumber(p.scale) });
 
@@ -36,7 +33,7 @@ export function ServerSpeed({ since, version, phone }: { since?: string; version
       {perf && <Live perf={perf} phone={phone} />}
       <div className={`mb-3 mt-4 flex items-center gap-2 ${phone ? "scroll-thin overflow-x-auto pb-1" : "flex-wrap"}`}>
         <span className="shrink-0 whitespace-nowrap text-xs text-fg-3">{t("speed.benchmark")}</span>
-        <Segmented label={t("speed.benchmark")} value={measure} onChange={setMeasure} options={SPEED_MEASURES.map((m) => ({ value: m, label: t(MEASURE_LABEL[m]) }))} />
+        <Segmented label={t("speed.benchmark")} value={measure} onChange={setMeasure} options={SPEED_MEASURES.map((m) => ({ value: m, label: t(`speed.measure.${m}`) }))} />
       </div>
       {runs && !runs.length && (
         <p className="rounded-xl border border-line bg-surface px-4 py-6 text-center text-sm text-fg-3">
@@ -87,16 +84,16 @@ function SpeedCard({ panel: p, measure }: { panel: SpeedPanel; measure: SpeedMea
   const axis = niceAxis(0, Math.max(1, ...p.points.map((x) => x.value)));
   const xLabels: [number, string][] = (n > 2 ? [0, Math.floor((n - 1) / 2), n - 1] : n === 2 ? [0, 1] : n ? [0] : []).map((i) => [i, formatDay(new Date(p.points[i]!.at))]);
   const commit = (x: SpeedPoint) => x.commit ? `${x.commit}${x.dirty ? "*" : ""}` : "–";
-  const tip = (x: SpeedPoint) => [ms(x.value), t(MEASURE_NOTE[measure]), [commit(x), x.label].filter(Boolean).join(" · "), formatDateTime(x.at)];
+  const tip = (x: SpeedPoint) => [ms(x.value), t(`speed.note.${measure}`), [commit(x), x.label].filter(Boolean).join(" · "), formatDateTime(x.at)];
   const last = p.points.at(-1);
   return (
-    <ChartCard title={panelTitle(p)} caption={t(MEASURE_NOTE[measure])} initial="chart" views={chartOrTable()}>
+    <ChartCard title={panelTitle(p)} caption={t(`speed.note.${measure}`)} initial="chart" views={chartOrTable()}>
       {(view) => !n
         ? <div className="grid h-32 place-items-center rounded-lg border border-dashed border-line-strong text-xs text-fg-3">{t("speed.noRuns")}</div>
         : view === "chart"
           ? <TimeChart kind="line" dots min={axis.min} max={axis.max} ticks={axis.ticks} format={ms} xLabels={xLabels}
               end={last && ms(last.value)} points={p.points.map((x) => ({ value: x.value, tip: tip(x) }))} />
-          : <DataTable head={[t("stats.col.day"), t("speed.col.commit"), ...SPEED_MEASURES.map((m) => t(MEASURE_COL[m]))]}
+          : <DataTable head={[t("stats.col.day"), t("speed.col.commit"), ...SPEED_MEASURES.map((m) => t(`speed.col.${m}`))]}
               rows={[...p.points].reverse().map((x) => [formatWeekday(new Date(x.at)), commit(x), ...SPEED_MEASURES.map((m) => ms(speedValue(x.config, m)))])} />}
     </ChartCard>
   );
