@@ -77,3 +77,8 @@ keeps the token.
 **Recommended: A.** It changes nothing the user does, closes exactly what the switch to Codex waits for, and leaves the
 free-shell workers no stronger than their file access already makes them. C can follow later if the threat grows
 beyond the agents Nexus runs.
+
+### The decision
+
+The user chose A (2026-11-22, answering HG1's question): "A: a szerver felismeri az agentjei folyamatait (job
+object)" (A: the server recognises its agents' processes, by job object). HG2 builds it; B and C are not built.
