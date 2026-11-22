@@ -110,7 +110,7 @@ export interface Reader {
   dirs(dir: string): string[];
   names(dir: string): string[];
   /** The file's modification time in ms, undefined when it is missing (a model keeps it until the file changes). */
-  modified?(file: string): number | undefined;
+  modified(file: string): number | undefined;
   state?(): ProjectState;
 }
 const fileReader: Reader = {
@@ -542,8 +542,7 @@ export class ProjectStore {
    * leaves a log alone that was not written since, without reading it (queue AQ).
    */
   logModified(sessionId: string, log: "activity" | "refusals"): number | undefined {
-    const file = join(this.sessionDir(sessionId), `${log}.jsonl`);
-    return this.reader.modified ? this.reader.modified(file) : fileReader.modified!(file);
+    return this.reader.modified(join(this.sessionDir(sessionId), `${log}.jsonl`));
   }
   readRefusals(sessionId: string): JsonlRead<Refusal> { return this.reader.jsonl(join(this.sessionDir(sessionId), "refusals.jsonl"), Refusal, false); }
   appendRefusal(r: Refusal): void { appendJsonl(join(this.sessionDir(r.session), "refusals.jsonl"), Refusal.parse(r)); }
