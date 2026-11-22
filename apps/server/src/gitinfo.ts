@@ -281,16 +281,16 @@ export async function branchState(store: ProjectStore, q: QueueView): Promise<Br
 /** Uncommitted changes in a checkout are not necessarily the stopped step's: said wherever they are shown. */
 export const UNCOMMITTED_NOTE = "in the checkout, not necessarily this step's";
 
-/**
- * What a stopped queue's stopped step left behind; undefined when the queue is not stopped at a step. Only reads, its
- * git without holding the loop: an action that decides by it reads it first, then decides and writes in one go
- * (src/stopwork.ts).
- */
 /** When the queue's stop came: the stopped step's latest queue.stop (an imported stop has none). */
 export function stopAt(q: QueueView): string | undefined {
   return q.steps.find((s) => s.id === q.stop_step)?.timeline.findLast((e) => e.type === "queue.stop")?.at;
 }
 
+/**
+ * What a stopped queue's stopped step left behind; undefined when the queue is not stopped at a step. Only reads, its
+ * git without holding the loop: an action that decides by it reads it first, then decides and writes in one go
+ * (src/stopwork.ts).
+ */
 export async function leftBehind(store: ProjectStore, q: QueueView): Promise<LeftBehind | undefined> {
   if (q.status !== "stopped" || !q.stop_step) return undefined;
   // The stop this read is for, taken before the git reads are awaited: a lift decides only on it (queue LH).

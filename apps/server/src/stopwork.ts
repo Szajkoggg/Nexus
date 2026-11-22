@@ -17,8 +17,6 @@ export async function readStoppedWork(store: ProjectStore, queueId: string): Pro
   return q ? leftBehind(store, q) : undefined;
 }
 
-
-
 /** A Discard recorded for the queue's present stop. */
 export function discardRecorded(q: QueueView): StatusChange | undefined {
   const since = stopAt(q) ?? "";
