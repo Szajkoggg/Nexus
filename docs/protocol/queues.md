@@ -78,6 +78,7 @@ changes:                               # status changes made through Nexus; writ
     to: approved
     reason: "the art is missing: W4 needs the cliff textures"   # the stop's own reason, as it was derived
     revision: 3                        # the revision the change was made on
+    # continued_in: [FL4, FL5]         # a skip's mark: where the step's work went on (steps, QX/QX2, queues; see below)
   - at: 2026-11-13T09:40:00Z
     kind: work                         # the user's choice about a stopped step's work (see "The work a stopped step left")
     by: user_continue
@@ -219,11 +220,13 @@ the derived state and records it as an entry `by: orchestrator` with the request
 | Request | Allowed when | Entry, and what derivation does |
 |---|---|---|
 | `--step S skipped` | S is not the closing refactoring step; S is `pending`, `stopped` or `failed`, or `running` while no live run (`running`, `pausing`, `usage_wait`, `retry_wait`) has it open, and the queue is not done or cancelled | `kind: status`, `step`, `from` (S's status), `to: skipped`: S becomes `skipped` with the reason; when every step is then done, skipped or failed the queue is `done`. A stop is not lifted by it |
+| `--step S skipped --continued-in R,…` | as above; or S is `skipped` already (also in a done or cancelled queue): then only the mark is set. Each reference names a step of the queue (`FL4`), a step of another queue (`QX/QX2`) or a queue (`QX`) of the project, any status, and not S | as above, with `continued_in` (the references, trimmed, without repeats); from `skipped` to `skipped` for the mark alone. S's view carries `continued` (`in`, `at`, `by`, `reason`) from its latest such entry while it stays skipped (docs/design/continued.md) |
 | `finished` | the queue's run is `halted` and every step is done or skipped (the closing refactoring step too) | `kind: run`, `from: halted`, `to: finished`; the server also writes `run.yaml` `finished` |
 | `cancelled` | the queue is not done or cancelled and its run is not `running`, `pausing`, `usage_wait` or `retry_wait` | `kind: status`, `from` (the queue's status), `to: cancelled`: the queue is `cancelled` with the reason; a later stop leaves it so. The user gets a push notification; nothing goes into the waiting list |
 | `propose-lift` | the queue is `stopped` | `kind: proposal`, `from: stopped`, `to: lift proposed`: the queue's view carries `lift_proposal` (`at`, `reason`) until a lift, a later `queue.stop` or a later approval |
 
-Refused, with the reason: `done` (work done elsewhere is skipped, with the reason saying where), approving, lifting
+Refused, with the reason: `done` (a step whose own work is done while the rest goes on elsewhere, or whose work another
+step or queue did, is skipped with `--continued-in` naming where), `--continued-in` with any status but `skipped`, approving, lifting
 a stop (`lift`, `approved`, `running` or `pending` for a queue), reopening a finished step (`pending`, `running`),
 skipping a step at work, and any other status. The engine reads a step's status again before it opens a step, so
 skipping a pending step of a running queue takes effect: the step is never opened. A cancelled queue is neither

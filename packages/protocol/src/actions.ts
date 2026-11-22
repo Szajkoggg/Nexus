@@ -630,7 +630,9 @@ export function closingToSkipAtApproval(store: ProjectStore, queue: string): Que
  * The orchestrator's housekeeping (`nexus queue set`, event `status.set`), recorded as an entry in the queue's
  * `changes`. Allowed: a pending, stopped or failed step to `skipped`; a halted run of a queue whose steps are all done
  * or skipped to `finished`; a queue whose run is not going to `cancelled`; and `propose-lift` on a stopped queue.
- * Consent stays the user's: marking work done, approving, lifting a stop, reopening a finished step.
+ * A skip may say where the step's work went on (`continued_in`, docs/design/continued.md), also on a step skipped
+ * already (an entry from `skipped` to `skipped`). Consent stays the user's: marking work done, approving, lifting a
+ * stop, reopening a finished step.
  */
 /**
  * A run of an older revision than `revision` (the queue's current one, or the one just approved): a run without the
@@ -684,7 +686,7 @@ export function releaseOrphanedSteps(store: ProjectStore, queueId: string, o: { 
   return open.map(({ s }) => s.id);
 }
 
-export function orchestratorStatusChange(store: ProjectStore, input: { queue: string; step?: string; to: string; reason: string }): string {
+export function orchestratorStatusChange(store: ProjectStore, input: { queue: string; step?: string; to: string; reason: string; continued_in?: string[] }): string {
   const to = input.to.trim().toLowerCase();
   const reason = nonEmpty(input.reason, "the reason");
   const q = queueOf(store, input.queue);
@@ -693,7 +695,11 @@ export function orchestratorStatusChange(store: ProjectStore, input: { queue: st
   if (input.step && !step) throw new ActionError(`queue ${q.id} has no step ${input.step} (has ${view.steps.map((s) => s.id).join(", ")})`, 404);
   const where = step ? `step ${q.id}/${step.id}` : `queue ${q.id}`;
 
-  if (to === "done") throw new ActionError("the orchestrator never marks a step done: work done elsewhere is skipped, with the reason saying where it was done");
+  if (to === "done") {
+    throw new ActionError("the orchestrator never marks a step done: a step whose own work is done while the rest goes on elsewhere, or whose work another step or queue did, is skipped with --continued-in naming where (nexus queue set QUEUE --step STEP skipped --continued-in FL4,FL5 --reason \"...\")");
+  }
+  const continued = input.continued_in?.length ? continuedRefs(input.continued_in) : undefined;
+  if (continued && to !== "skipped") throw new ActionError("--continued-in goes with skipped: it says where a skipped step's work went on");
   if (to === "approved" || to === "approve") throw new ActionError("approving is the user's, in the dashboard");
   if (["lift", "lifted", "resume", "continue"].includes(to) || (!step && ["approved", "running", "pending"].includes(to))) {
     throw new ActionError("only the user lifts a stop (by approving a new revision, or with Continue); propose it with: nexus queue set QUEUE propose-lift --reason \"...\"");
@@ -711,16 +717,22 @@ export function orchestratorStatusChange(store: ProjectStore, input: { queue: st
       if (!step) throw new ActionError("skipping is for a step: nexus queue set QUEUE --step STEP skipped --reason \"...\"");
       if (step.closing) throw new ActionError(`${where} is the queue's closing refactoring step: it is not skipped; the step itself may find that nothing is worth refactoring, and says why`, 409);
       if (step.integration) throw new ActionError(`${where} is the queue's integration step: it is not skipped; it merges the base into the queue's branch and runs the checks, so the queue's work can go back into the base`, 409);
+      if (continued) checkContinuedRefs(store, q.id, step.id, continued);
+      // Marking a step skipped already changes no status: also in a finished queue (FL2 and FL3 after the fact).
+      if (continued && step.status === "skipped") {
+        record({ kind: "status", step: step.id, from: "skipped", to: "skipped", reason, continued_in: continued });
+        return `${where} (skipped) is marked continued in ${continued.join(", ")}`;
+      }
+      if (step.status === "skipped") throw new ActionError(`${where} is skipped already (--continued-in marks where its work went on)`, 409);
       if (view.status === "done" || view.status === "cancelled") throw new ActionError(`queue ${q.id} is ${view.status}`, 409);
       // A running step no live run holds (one a revision change left behind) is not at work: it may be skipped.
       const orphaned = step.status === "running" && !heldByLiveRun(store.readRun(q.id), step.id);
       if (!["pending", "stopped", "failed"].includes(step.status) && !orphaned) {
-        throw new ActionError(step.status === "done" || step.status === "skipped"
-          ? `${where} is ${step.status} already`
+        throw new ActionError(step.status === "done" ? `${where} is done already`
           : `${where} is ${step.status}: a step at work is not skipped (pause or stop the run first)`, 409);
       }
-      record({ kind: "status", step: step.id, from: step.status, to: "skipped", reason });
-      return `${where} skipped (was ${step.status})`;
+      record({ kind: "status", step: step.id, from: step.status, to: "skipped", reason, ...(continued ? { continued_in: continued } : {}) });
+      return `${where} skipped (was ${step.status})${continued ? `, continued in ${continued.join(", ")}` : ""}`;
     }
     case "finished": {
       if (step) throw new ActionError("finished is for a queue's halted run, not for a step");
@@ -749,6 +761,35 @@ export function orchestratorStatusChange(store: ProjectStore, input: { queue: st
     }
     default:
       throw new ActionError(`${to} is not a status the orchestrator sets: a step can be skipped; a queue cancelled, its halted run finished, or a lift proposed (propose-lift)`);
+  }
+}
+
+/** `--continued-in`'s references, trimmed and without repeats; each `STEP`, `QUEUE/STEP` or `QUEUE`. */
+function continuedRefs(refs: readonly string[]): string[] {
+  const out = [...new Set(refs.map((r) => r.trim()).filter(Boolean))];
+  const bad = out.filter((r) => !/^[^/\s]+(\/[^/\s]+)?$/.test(r));
+  if (bad.length) throw new ActionError(`--continued-in takes steps (FL4), steps of another queue (QX/QX2) or queues (QX), comma-separated; not: ${bad.join(", ")}`);
+  if (!out.length) throw new ActionError("--continued-in names no step or queue");
+  return out;
+}
+
+/**
+ * Each reference of a skip's mark names a step of the queue, a step of another queue or a queue of the project
+ * (pending or proposed is fine: the work is planned there), and not the step itself.
+ */
+function checkContinuedRefs(store: ProjectStore, queue: string, step: string, refs: readonly string[]): void {
+  const queues = loadProjectState(store).queues;
+  const own = queues.find((x) => x.id === queue)!;
+  for (const r of refs) {
+    const [a, b] = r.split("/") as [string, string | undefined];
+    if (b === undefined ? (a === step) : (a === queue && b === step)) throw new ActionError(`--continued-in names the step itself (${r})`);
+    if (b !== undefined) {
+      const other = queues.find((x) => x.id === a);
+      if (!other) throw new ActionError(`--continued-in: no queue ${a} in this project`, 404);
+      if (!other.steps.some((x) => x.id === b)) throw new ActionError(`--continued-in: queue ${a} has no step ${b} (has ${other.steps.map((x) => x.id).join(", ")})`, 404);
+    } else if (!own.steps.some((x) => x.id === a) && !queues.some((x) => x.id === a)) {
+      throw new ActionError(`--continued-in: ${a} is neither a step of queue ${queue} nor a queue of this project`, 404);
+    }
   }
 }
 

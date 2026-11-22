@@ -64,12 +64,13 @@ export function usageLine(u: DigestUsage): string {
 export type Tone = "ok" | "stop" | "danger" | "warn" | "muted";
 
 /** A line's outcome in a word or two, and its colour: "done", "stopped at W4c", "queue done", "2 refused actions", "retried twice". */
-export function outcome(e: Pick<DigestEvent, "kind" | "step" | "count">): { word: string; tone: Tone } {
+export function outcome(e: Pick<DigestEvent, "kind" | "step" | "count" | "continued_in">): { word: string; tone: Tone } {
   const n = e.count ?? 1;
   switch (e.kind) {
     case "done": return { word: t("digest.outcome.done"), tone: "ok" };
     case "failed": return { word: t("digest.outcome.failed"), tone: "danger" };
     case "stopped": return { word: e.step ? t("digest.outcome.stoppedAt", { step: e.step }) : t("digest.outcome.stopped"), tone: "stop" };
+    case "continued": return { word: t("digest.outcome.continued", { refs: (e.continued_in ?? []).join(", ") }), tone: "ok" };
     case "queue_done": return { word: t("digest.outcome.queueDone"), tone: "ok" };
     case "queue_cancelled": return { word: t("digest.outcome.queueCancelled"), tone: "muted" };
     case "refused": return { word: t("digest.outcome.refused", { count: n }), tone: "danger" };

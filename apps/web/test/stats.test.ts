@@ -11,7 +11,7 @@ const today = new Date(2026, 10, 15, 14, 30);
 function group(key: string, over: Partial<StatGroup> = {}): StatGroup {
   return {
     key, steps: 10, runtimes: ["claude"], few: false, decided: 8, first_accepted: 6, first_rate: 0.75, avg_rounds: 1.25,
-    stops: 1, failures: 0, median_ms: 30 * 60_000, p25_ms: 20 * 60_000, p75_ms: 45 * 60_000,
+    stops: 1, failures: 0, continued: 0, median_ms: 30 * 60_000, p25_ms: 20 * 60_000, p75_ms: 45 * 60_000,
     usage: {}, usage_steps: {}, usage_missing: 0, fallback: 0, ...over,
   };
 }

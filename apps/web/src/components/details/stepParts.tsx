@@ -2,7 +2,7 @@
 // waits for the user's review, another otherwise).
 import { useState } from "react";
 import { latestChecks, stepChecks, type CheckView } from "@nexus/protocol/steps";
-import { act, enc, fileUrl, useQuery, type QueueView, type SessionView, type StepView } from "../../api.ts";
+import { act, enc, fileUrl, useQuery, type ProjectState, type QueueView, type SessionView, type StepView } from "../../api.ts";
 import { describe, isImage, type stepPictures } from "../../details.ts";
 import { draftKey } from "../../drafts.ts";
 import { fileHref } from "../../hash.ts";
@@ -13,7 +13,7 @@ import { pendingProvisional, ProvisionalActions } from "../Levels.tsx";
 import { RetryNote } from "../Run.tsx";
 import { StopReason } from "../Stop.tsx";
 import { StepTags } from "../Tags.tsx";
-import { Composer, Expandable, Markdown, Section, TimeAgo } from "../ui.tsx";
+import { Composer, Expandable, Markdown, Section, StatusBadge, TimeAgo } from "../ui.tsx";
 import { StepCommits } from "./git.tsx";
 import { Fold, PictureBadges } from "./review.tsx";
 import { usePage } from "../../page.ts";
@@ -102,14 +102,16 @@ export function CheckRunBox({ project, queue, step }: InQueue & { project: strin
 
 /** The summary, the stop's reason, and the progress while it runs. */
 export function Summary({ queue, step }: InQueue) {
-  if (!step.summary && !step.reason && !step.progress) return null;
+  // A step continued elsewhere has its reason in its own box (ContinuedBox), not as a stop's.
+  const reason = step.continued ? undefined : step.reason;
+  if (!step.summary && !reason && !step.progress) return null;
   return (
     <div className="mt-4 rounded-lg bg-surface-2 p-3 text-sm">
       {step.summary && <p><span className="text-fg-3">{t("details.summary")} </span>{step.summary}</p>}
-      {step.reason && step.status !== "rejected" && (
+      {reason && step.status !== "rejected" && (
         <div className="text-stop"><span className="text-fg-3">{t("details.reason")} </span>
           {/* The stop's condition behind "more", when this step's stop has it apart. */}
-          <StopReason reason={step.reason} condition={queue.status === "stopped" && queue.stop_step === step.id ? queue.stop?.condition : undefined} className="inline" />
+          <StopReason reason={reason} condition={queue.status === "stopped" && queue.stop_step === step.id ? queue.stop?.condition : undefined} className="inline" />
         </div>
       )}
       {step.progress && step.status === "running" && (
@@ -173,6 +175,42 @@ export function MessageAgent({ project, queue, step, session }: Writes & { sessi
 }
 
 /** The state recorded on the step by hand (nexus queue set). */
+/**
+ * A step skipped as continued elsewhere (docs/design/continued.md): its own work is done, and where it went on, each a
+ * link with its title and status; the mark's reason, and that it was no review (the step stays unaccepted).
+ */
+export function ContinuedBox({ project, queue, step }: InQueue & { project: ProjectState }) {
+  const c = step.continued;
+  if (!c) return null;
+  const target = (ref: string) => {
+    const [a, b] = ref.split("/") as [string, string | undefined];
+    const own = b === undefined ? queue.steps.find((s) => s.id === a) : undefined;
+    if (own) return { queue: queue.id, step: own.id, title: own.title, status: own.status };
+    const q = project.queues.find((x) => x.id === a);
+    const s = b !== undefined ? q?.steps.find((x) => x.id === b) : undefined;
+    return { queue: a, step: b, title: s?.title ?? (b === undefined ? q?.title : undefined), status: s?.status ?? (b === undefined ? q?.status : undefined) };
+  };
+  return (
+    <div className="mb-5 rounded-lg border border-ok/35 bg-ok/5 px-4 py-3 text-sm">
+      <p className="text-fg">{t("continued.box")}</p>
+      <ul className="mt-1.5 space-y-1">
+        {c.in.map((ref) => {
+          const x = target(ref);
+          return (
+            <li key={ref} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <button onClick={() => nav.item(project.project.id, x.queue, x.step)} className="font-mono text-xs text-accent hover:underline">{ref}</button>
+              {x.title && <span className="text-fg">{x.title}</span>}
+              {x.status && <StatusBadge status={x.status} />}
+            </li>
+          );
+        })}
+      </ul>
+      {c.reason && <p className="mt-2 text-xs text-fg-2">{c.reason}</p>}
+      <p className="mt-1 text-xs text-fg-3">{t(c.by === "orchestrator" ? "continued.byOrchestrator" : "continued.byNexus")} · <TimeAgo at={c.at} /> · {t("continued.notReview")}</p>
+    </div>
+  );
+}
+
 export function StatusNote({ step }: StepProps) {
   if (!step.status_note) return null;
   return (

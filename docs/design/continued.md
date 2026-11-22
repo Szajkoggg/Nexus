@@ -2,8 +2,9 @@
 
 Asked by the user on 2026-11-18: a step whose work was done, but whose fix went on in later steps or another queue,
 reads "skipped", which says "not done". Designed in UF1 (mockup `docs/ux/mockups/25c-step-list-done-elsewhere.html`:
-the step list and the digest, and with `?panel=detail` the step), to be built in UF2 once the user has decided, since
-the recommendation changes a file format and a command (UF's stop condition).
+the step list and the digest, and with `?panel=detail` the step). The recommendation changes a file format and a
+command (UF's stop condition), so the user decided at UF1's review: B, accepted on 2026-11-22, built in UF2 (the
+protocol in docs/protocol/queues.md, "queue.yaml", the orchestrator's housekeeping table).
 
 ## The case
 

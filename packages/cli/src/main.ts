@@ -110,10 +110,12 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus review ask-user <queue> <step> <why>                      (orchestrator only) hand the review to the user
   nexus review provisional <queue> <step> [--note <text>]        (orchestrator only) level 3: accept provisionally;
                                       the run goes on, the user confirms it or asks a fix on their return
-  nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift --reason <text>   (orchestrator only)
-                                      housekeeping: skip a pending, stopped or failed step; close a halted run of a
-                                      queue whose steps are all done or skipped; cancel a queue that is not running;
-                                      propose that the user lift a stop. Done, approving and lifting are the user's
+  nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift [--continued-in <refs>] --reason <text>
+                                      (orchestrator only) housekeeping: skip a pending, stopped or failed step; close a
+                                      halted run of a queue whose steps are all done or skipped; cancel a queue that is
+                                      not running; propose that the user lift a stop. Done, approving and lifting are the
+                                      user's. --continued-in FL4,FL5 (steps, QX/QX2, queues) with skipped: the step's own
+                                      work is done and went on there, or they did it; also on a step skipped already
   nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>... | --next | --at "YYYY-MM-DD HH:MM" | --at usage-reset]   (orchestrator only; start --after: into the plan, when those queues are done (repeat it for each); --next: into the plan with none before it; --at: at that local time, or when the runtime's usage window resets)
   nexus run <queue> cancel-start --reason <text>   (orchestrator only: takes the queue out of the plan; not one the user put in)
   nexus plan propose <queue> [--after <queue>]... --reason <text>   (orchestrator only) propose to the user a new list of
@@ -182,7 +184,7 @@ const { values: o, positionals: args } = parseArgs({
     project: { type: "string" }, since: { type: "string" }, by: { type: "string" },
     unit: { type: "string" }, show: { type: "string" }, target: { type: "string" }, "warn-above": { type: "string" }, "warn-below": { type: "string" },
     set: { type: "string", multiple: true }, template: { type: "string" }, every: { type: "string" }, "after-queues": { type: "string" },
-    maintenance: { type: "string" }, findings: { type: "string" }, why: { type: "string" },
+    maintenance: { type: "string" }, findings: { type: "string" }, why: { type: "string" }, "continued-in": { type: "string" },
     help: { type: "boolean", short: "h" }, full: { type: "boolean" }, all: { type: "boolean" }, reviews: { type: "boolean" }, switches: { type: "boolean" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
@@ -694,7 +696,8 @@ const commands: Record<string, () => void | Promise<void>> = {
       for (const step of q.steps) {
         const unread = step.notes.filter((n) => !n.read_at && n.to !== "orchestrator");
         const own = stepValuesText(step);
-        console.log(`  ${step.id.padEnd(5)} ${step.status.padEnd(8)} ${step.title}${helperText(step)}${own ? `  [on ${own}]` : ""}${unread.length ? `  (${unread.length} unread note${unread.length > 1 ? "s" : ""})` : ""}`);
+        const status = step.continued ? `${step.status} → ${step.continued.in.join(", ")}` : step.status;
+        console.log(`  ${step.id.padEnd(5)} ${status.padEnd(8)} ${step.title}${helperText(step)}${own ? `  [on ${own}]` : ""}${unread.length ? `  (${unread.length} unread note${unread.length > 1 ? "s" : ""})` : ""}`);
         const tags = tagsText(step.tags);
         if (tags) console.log(`        tags: ${tags}`);
         // The checks Nexus runs: where they are, and a fix round apart from the review rounds.
@@ -944,7 +947,9 @@ const commands: Record<string, () => void | Promise<void>> = {
       const queue = need(args[2], "<queue>");
       const to = need(args[3], "skipped|finished|cancelled|propose-lift");
       // The server checks it against the queue's state and gives the reason when it refuses.
-      const e = emit(st, s, { type: "status.set", queue, step: o.step, to, reason: need(o.reason, "--reason") });
+      const continued = list(o["continued-in"]);
+      if (o["continued-in"] !== undefined && !continued.length) throw new UsageError("--continued-in names where the step's work went on: FL4,FL5 (steps), QX/QX2, QX");
+      const e = emit(st, s, { type: "status.set", queue, step: o.step, to, reason: need(o.reason, "--reason"), ...(continued.length ? { continued_in: continued } : {}) });
       report(waitApplied(st, s.id, e.id));
       return;
     }

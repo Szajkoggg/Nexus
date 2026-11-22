@@ -212,7 +212,8 @@ orchestrator are told; nothing stays held. Nothing moves while an update, a depl
 
 What keeps it waiting that the user should know of is recorded in `git.yaml` `merge.waiting` (once per reason, and
 again when held runs went on: `released`, their queues): the user's waiting list has an item of kind `merge` with the
-reason (and, with `released`, "; the run of queue M, held at its step's end for this merge back, goes on"), and the
+reason (and, with `released`, "; the run of queue M, held at its step's end for this merge back, goes on") and
+`merge` (`into`: the base branch, `branch`: the queue's, when it names one) for the Merge back on its card, and the
 orchestrator is told the same (`notify:mergewait:…`); a merge back Nexus did is told to it too
 (`notify:merged:…`). While something waits it is looked at again every 30
 seconds, since git can change what holds it without a file of the project changing. Nothing is pushed: the base goes

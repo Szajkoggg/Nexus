@@ -99,8 +99,9 @@ name, description and effort levels; the dashboard offers only these.
 `GET /api/digest?since=<ISO 8601>` is the morning digest across every registered project (`packages/protocol/src/digest.ts`):
 `{ since, events, running, usage }`. `since` is the time asked for (an unreadable or missing one means the last 24 hours).
 `events`, newest first and at most 200, is what happened after it, each `{ at, project, project_name, kind, queue?,
-step?, text, count?, report? }`: `done` and `failed` (a `step.done` or `step.failed` event, with its summary or
-reason), `stopped` (a `queue.stop`, with its reason), `queue_done` and `queue_cancelled` (a queue whose status is done
+step?, text, count?, report?, continued_in? }`: `done` and `failed` (a `step.done` or `step.failed` event, with its summary or
+reason), `stopped` (a `queue.stop`, with its reason), `continued` (a skipped step's mark made after the time, at the
+mark's time: `continued_in` where its work went on, `text` the mark's reason; docs/design/continued.md), `queue_done` and `queue_cancelled` (a queue whose status is done
 or cancelled and whose last step finished, else whose run ended, after the time; `text` its title, `report` the path
 of its report, for the file endpoint), `refused` (refusals, one line per queue and step with `count`, `text` the tool
 and input of the latest) and `retried` (activity entries of kind `retry`, one line per step with `count`, `text` the

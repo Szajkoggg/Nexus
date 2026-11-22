@@ -41,6 +41,8 @@ export interface StepStat {
   /** Accepted (done); accepted in its first round; decided (accepted, rejected or failed). */
   accepted: boolean; first: boolean; decided: boolean;
   stops: number; failures: number;
+  /** Skipped with a mark: its own work is done and went on elsewhere (docs/design/continued.md); still not accepted. */
+  continued: boolean;
   /** The sum of its worker turns' durations (its own work, never the wait for a review); none without turns. */
   work_ms?: number;
   turns: number;
@@ -107,6 +109,7 @@ export function stepStats(projects: readonly Pick<ProjectState, "project" | "que
       rounds, accepted, first: accepted && rounds <= 1, decided: accepted || st.status === "rejected" || st.status === "failed",
       stops: st.timeline.filter((e) => e.type === "queue.stop").length,
       failures: st.timeline.filter((e) => e.type === "step.failed").length,
+      continued: !!st.continued,
       work_ms: durations.length ? durations.reduce((a, b) => a + b, 0) : undefined,
       turns: own.length, fallback: own.some((x) => !!x.t.fallback), usage, usage_missing: missing,
       session_from: switched ? "switch" : opened && opened === before ? "same" : "other",
@@ -137,6 +140,8 @@ export interface StatGroup {
   /** The average rounds of the steps reported done at least once. */
   avg_rounds?: number;
   stops: number; failures: number;
+  /** Of its steps that stopped, how many were skipped as continued elsewhere: a stop by design, not a step lost. */
+  continued: number;
   /** Working time of its accepted steps: the median and the quartiles (by size, how the planned size came out). */
   median_ms?: number; p25_ms?: number; p75_ms?: number;
   /** Estimated use by window, summed; an estimate, and the turns without one. */
@@ -227,6 +232,7 @@ function groupOf(key: string, xs: readonly StepStat[], by: StatDimension, across
     first_rate: decided ? first / decided : undefined,
     avg_rounds: done.length ? done.reduce((a, s) => a + s.rounds, 0) / done.length : undefined,
     stops: xs.reduce((a, s) => a + s.stops, 0), failures: xs.reduce((a, s) => a + s.failures, 0),
+    continued: xs.filter((s) => s.continued && s.stops > 0).length,
     median_ms: quantile(times, 0.5), p25_ms: quantile(times, 0.25), p75_ms: quantile(times, 0.75),
     usage, usage_steps: usageSteps, usage_missing: xs.reduce((a, s) => a + s.usage_missing, 0), fallback: xs.filter((s) => s.fallback).length,
   };

@@ -365,7 +365,9 @@ waiting item opens the integration step, whose box says "Merge back on the queue
 a way there; the one Merge into main… is in the queue panel's Worktree section (`WorktreeActions` in
 `apps/web/src/components/details/git.tsx`). Designed in UF1 (mockups `docs/ux/mockups/25a-integration-step.html`,
 `docs/ux/mockups/25b-waiting-merging-back.html`, compared with captures of `scripts/capture/seed-merge-wait.ts`), built
-in UF2. One recommendation each:
+in UF2: `useMergeBack` in `apps/web/src/components/details/git.tsx` gives the button's question and action to the queue
+panel, the integration box and the waiting card (`MergeRow` in `apps/web/src/components/Attention.tsx`); where it is
+offered, `mergeBackInto` in `apps/web/src/details.ts`. One recommendation each:
 
 - **On the integration step**: the box (`IntegrationBox`) gets **Merge into main…** under the merge back's state,
   wherever the queue panel offers it (a base branch to name, not merged yet, the queue done, not a survey run). It
@@ -376,8 +378,9 @@ in UF2. One recommendation each:
   the button says it. With `merge_back` on, "Nexus merges it back by itself once nothing holds it" stays, and so does
   the button (a run again past the limit waits for the user's Merge back).
 - **From any step to its queue**: the panel's first line (the queue's id and title) becomes a link that opens the
-  queue's panel, for every step and on the phone too; Back returns to the step (a layer, docs/design/dashboard.md,
-  "Back closes the topmost layer"). Recommended over a link in the integration box alone: the user looks for the
+  queue's panel, for every step and on the phone too. Built (UF2) as every switch within the drawer is: the queue
+  replaces the step in place, so Back closes the drawer rather than returning to the step ("Back closes the topmost
+  layer": switching within a kind replaces the entry), the same as a step opened from the queue's list. Recommended over a link in the integration box alone: the user looks for the
   queue from other steps as well, and the first line is where a breadcrumb is expected.
 - **On the waiting item**: a card of kind `merge` gets its way on as a stopped queue's card has Continue: **Merge into
   main…** and **Open** (Open goes to the integration step, as a tap on the card does today). The question opens in the

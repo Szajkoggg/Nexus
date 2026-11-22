@@ -13,8 +13,11 @@ export function currentIndex(steps: readonly { id: string; status: string }[], c
 }
 
 export interface Folded<T> {
-  /** The finished run before the step that matters, folded into one line: its first and last step and its counts. */
-  before?: { from: string; to: string; count: number; done: number; skipped: number };
+  /**
+   * The finished run before the step that matters, folded into one line: its first and last step and its counts
+   * (`continued`: skipped with the mark that its work went on elsewhere; `skipped` the others).
+   */
+  before?: { from: string; to: string; count: number; done: number; skipped: number; continued: number };
   /** The steps shown, one line each. */
   shown: T[];
   /** The steps after the shown ones, folded into one line ("+ W6, W7"). */
@@ -27,7 +30,7 @@ export interface Folded<T> {
  * nothing, so it is shown instead. `open` unfolds either part (the user tapped it). With every step finished, the
  * whole queue is the finished run.
  */
-export function foldSteps<T extends { id: string; status: string }>(
+export function foldSteps<T extends { id: string; status: string; continued?: unknown }>(
   steps: readonly T[], current?: string, open: { before?: boolean; after?: boolean } = {}, following = 3,
 ): Folded<T> {
   const c = currentIndex(steps, current);
@@ -43,12 +46,29 @@ export function foldSteps<T extends { id: string; status: string }>(
       before: {
         from: steps[0]!.id, to: steps[k - 1]!.id, count: k,
         done: steps.slice(0, k).filter((s) => s.status === "done").length,
-        skipped: steps.slice(0, k).filter((s) => s.status === "skipped").length,
+        skipped: steps.slice(0, k).filter((s) => s.status === "skipped" && !s.continued).length,
+        continued: steps.slice(0, k).filter((s) => s.status === "skipped" && !!s.continued).length,
       },
     } : {}),
     shown: steps.slice(start, foldAfter ? end : steps.length),
     ...(foldAfter ? { after: rest.map((s) => s.id) } : {}),
   };
+}
+
+/**
+ * Where a step's work went on, short (docs/design/continued.md): its references as given, three or more steps of the
+ * queue in a row as a range ("FL6 – FL8"). `steps`: the queue's step ids in order.
+ */
+export function continuedShort(refs: readonly string[], steps: readonly string[]): string {
+  const out: string[] = [];
+  for (let i = 0; i < refs.length;) {
+    const at = steps.indexOf(refs[i]!);
+    let j = i + 1;
+    while (at >= 0 && j < refs.length && steps.indexOf(refs[j]!) === at + (j - i)) j++;
+    out.push(j - i >= 3 ? `${refs[i]} – ${refs[j - 1]}` : refs.slice(i, j).join(", "));
+    i = j;
+  }
+  return out.join(", ");
 }
 
 /** The desktop's two columns, filled down the left first: the first half (rounded up) on the left. */

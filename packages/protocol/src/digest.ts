@@ -1,13 +1,13 @@
 // The morning digest (UX proposals, 16): what happened in the projects since the user last looked, newest first:
-// steps done or failed, queues stopped, done or cancelled (with their report), refused actions and retries. The
-// server serves it across projects (GET /api/digest?since=); this part is pure and unit tested.
+// steps done or failed, steps continued elsewhere, queues stopped, done or cancelled (with their report), refused
+// actions and retries. The server serves it across projects (GET /api/digest?since=); this part is pure and unit tested.
 import type { Activity, Event, Refusal, TurnRecord } from "./schemas.ts";
 import type { ProjectState, QueueView } from "./state.ts";
 import { holdsRunStep } from "./status-rules.ts";
 import { CLOCK_AHEAD_MS } from "./clock.ts";
 import type { ProjectStore } from "./store.ts";
 
-type DigestKind = "done" | "failed" | "stopped" | "queue_done" | "queue_cancelled" | "refused" | "retried";
+type DigestKind = "done" | "failed" | "stopped" | "continued" | "queue_done" | "queue_cancelled" | "refused" | "retried";
 
 export interface DigestEvent {
   at: string;
@@ -22,6 +22,8 @@ export interface DigestEvent {
   count?: number;
   /** A finished queue's report: its path in the project, for the file endpoint. */
   report?: string;
+  /** `continued`: where the skipped step's work went on (its mark, docs/design/continued.md). */
+  continued_in?: string[];
 }
 
 /** A queue at work now, for "running now · SF3, 40 min in". */
@@ -77,6 +79,12 @@ export function projectDigest(input: ProjectDigestInput, since: string): DigestE
     if (e.type === "step.done") out.push({ ...base, at: e.at, kind: "done", queue: e.queue, step: e.step, text: e.summary });
     else if (e.type === "step.failed") out.push({ ...base, at: e.at, kind: "failed", queue: e.queue, step: e.step, text: e.reason });
     else if (e.type === "queue.stop") out.push({ ...base, at: e.at, kind: "stopped", queue: e.queue, ...(e.step ? { step: e.step } : {}), text: e.reason });
+  }
+
+  // A skipped step marked as continued elsewhere: its mark, at the mark's time (the stop before it is its own line).
+  for (const q of state.queues) for (const st of q.steps) {
+    const c = st.continued;
+    if (c && after(c.at, since)) out.push({ ...base, at: c.at, kind: "continued", queue: q.id, step: st.id, text: c.reason ?? "", continued_in: c.in });
   }
 
   // A queue that finished: when its last step finished, else its run ended, else its latest event.

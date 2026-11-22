@@ -33,6 +33,8 @@ const TONES: Record<string, Tone> = {
   rejected: { dot: "bg-danger", text: "text-danger" },
   done: { dot: "bg-ok", text: "text-ok" },
   skipped: { dot: "bg-fg-3", text: "text-fg-3" },
+  // Skipped with the mark that its own work is done and went on elsewhere (docs/design/continued.md): a ring.
+  continued: { dot: "border-[1.5px] border-ok", text: "text-ok/80" },
   cancelled: { dot: "bg-fg-3", text: "text-fg-3" },
 };
 export const toneOf = (status: string): Tone => TONES[status] ?? TONES.pending!;
@@ -40,7 +42,7 @@ export const toneOf = (status: string): Tone => TONES[status] ?? TONES.pending!;
 const STATE_WORDS: Record<string, Key> = {
   pending: "state.pending", draft: "state.draft", proposed: "state.proposed", approved: "state.approved", running: "state.running",
   waiting: "state.waiting", review: "state.review", paused: "state.paused", stopped: "state.stopped", failed: "state.failed",
-  rejected: "state.rejected", done: "state.done", skipped: "state.skipped", cancelled: "state.cancelled",
+  rejected: "state.rejected", done: "state.done", skipped: "state.skipped", continued: "state.continued", cancelled: "state.cancelled",
   checking: "state.checksRunning", queued: "state.checksQueued",
 };
 /** A queue's or step's status as a word in the interface language; one the dashboard does not know, as it is. */

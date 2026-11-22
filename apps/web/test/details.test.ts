@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Event, QueueView, StepView } from "@nexus/protocol";
 import {
-  answerText, approvalHistory, approvalWord, canWithdrawApproval, describe, integrationState, isImage, queueOver, questionState, shownPicture, showsWorktreeActions,
+  answerText, approvalHistory, approvalWord, canWithdrawApproval, describe, integrationState, isImage, mergeBackInto, mergeBackPath, queueOver, questionState, shownPicture,
+  showsWorktreeActions,
   stepLayout, stepPictures,
 } from "../src/details.ts";
 
@@ -105,6 +106,22 @@ test("worktree actions only for a queue's own worktree once it is finished, merg
   assert.equal(showsWorktreeActions(q({ worktree: undefined }), "C:/Code/App"), false);
   assert.equal(showsWorktreeActions(q({ status: "running" }), "C:/Code/App"), false);
   assert.equal(showsWorktreeActions(q({ status: "running", git: { merged: { at: "x" } } }), "C:/Code/App"), true);
+});
+
+test("Merge back is offered wherever the queue panel offers it, always into the base branch, by the same action", () => {
+  const base = { ref: "main", sha: "abc", at: "x" };
+  const q = (over: object) => ({ worktree: "C:/Code/App.worktrees/W", status: "done", git: { base }, ...over }) as unknown as QueueView;
+  assert.equal(mergeBackInto(q({}), "C:/Code/App"), "main");
+  assert.equal(mergeBackInto(q({ git: { base, merge: { waiting: { reason: "the checkout of main has uncommitted changes", since: "x" } } } }), "C:/Code/App"), "main",
+    "a merge back the server would refuse now is offered all the same: the server says why");
+  assert.equal(mergeBackInto(q({ git: { base, merged: { at: "x", into: "main" } } }), "C:/Code/App"), undefined, "merged");
+  assert.equal(mergeBackInto(q({ git: { base, cleaned: { at: "x" } } }), "C:/Code/App"), undefined, "cleaned up");
+  assert.equal(mergeBackInto(q({ maintenance: "survey" }), "C:/Code/App"), undefined, "a survey run leaves no commit");
+  assert.equal(mergeBackInto(q({ git: { base: { ...base, branch: false } } }), "C:/Code/App"), undefined, "a base that is no branch");
+  assert.equal(mergeBackInto(q({ status: "running" }), "C:/Code/App"), undefined, "not finished");
+  assert.equal(mergeBackInto(q({ worktree: "C:/Code/App" }), "C:/Code/App"), undefined, "the project's own checkout");
+  assert.equal(mergeBackPath("W"), "/queues/W/merge", "the queue panel's action (POST /api/projects/:id/queues/:queue/merge)");
+  assert.equal(mergeBackPath("a b"), "/queues/a%20b/merge");
 });
 
 test("an integration step's merge back: merged only since the step finished, else waiting and how often run again", () => {

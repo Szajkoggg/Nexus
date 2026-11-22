@@ -805,7 +805,7 @@ ${n.text}` });
     }
     if (e.type === "static_analysis.declined") return this.engine.declineStaticAnalysis(e.reason, e.session);
     if (e.type === "status.set") {
-      const message = orchestratorStatusChange(this.store, { queue: e.queue, step: e.step, to: e.to, reason: e.reason });
+      const message = orchestratorStatusChange(this.store, { queue: e.queue, step: e.step, to: e.to, reason: e.reason, continued_in: e.continued_in });
       // A cancel reaches the user as a push notification, like other notifications; nothing waits in their list.
       if (e.to.trim().toLowerCase() === "cancelled") {
         const p = this.store.readProject();

@@ -19,6 +19,7 @@ import { Activity } from "../Run.tsx";
 import { stepMetrics } from "../../metrics.ts";
 import { StepTags } from "../Tags.tsx";
 import { PanelBody, PanelHeader, Section, StatusBadge, StepTimes, stepLabel } from "../ui.tsx";
+import { continuedShort } from "../../steplist.ts";
 import { checkTone } from "../../checks.ts";
 import { ImageViewer } from "../Viewer.tsx";
 import { IntegrationBox, PushLine, StepCommits } from "./git.tsx";
@@ -27,7 +28,7 @@ import { Changes } from "./QueueDetail.tsx";
 import { Question, QuestionSheet } from "./questions.tsx";
 import { PictureActions, Rejected, ReviewBar } from "./review.tsx";
 import {
-  CheckRunBox, GoalAcceptance, Material, MessageAgent, Messages, Notes, ProvisionalBox, RetryLine, ReviewNotes, ReviewPictures, SentBack, StatusNote, StepChecks, StepMetrics,
+  CheckRunBox, ContinuedBox, GoalAcceptance, Material, MessageAgent, Messages, Notes, ProvisionalBox, RetryLine, ReviewNotes, ReviewPictures, SentBack, StatusNote, StepChecks, StepMetrics,
   Summary, Timeline,
 } from "./stepParts.tsx";
 
@@ -76,7 +77,7 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
   // Its own session, or the run's while the run is at this step.
   const activitySession = step.session ?? (queue.run?.step === step.id ? queue.run.session : undefined);
   const activity = activitySession && <Activity project={id} session={activitySession} queue={queue.id} step={step.id} />;
-  const integration = step.integration ? <IntegrationBox project={project} queue={queue} step={step} /> : null;
+  const integration = step.integration ? <IntegrationBox project={project} queue={queue} step={step} /> : <ContinuedBox project={project} queue={queue} step={step} />;
   // Its metrics whose latest value is beyond the threshold: said in the header too, so a review sees it at once.
   const warned = stepMetrics(step.metrics).filter((m) => m.warn).length;
   const accepted = acceptedWord(step);
@@ -104,13 +105,18 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
     <>
       <PanelHeader
         wrap={!phone}
-        where={phone
-          ? <>{project.project.name} · {queue.id} · <span className="text-fg">{step.id}</span> {step.title}</>
-          : <><span className="font-mono">{queue.id}</span> · {queue.title}</>}
+        where={/* The queue's line opens the queue's panel, from every step (docs/design/dashboard.md, "Merge back where it waits"). */
+          <button onClick={() => nav.item(id, queue.id)} title={t("details.toQueue", { queue: queue.id })} className={`max-w-full text-left hover:text-accent ${phone ? "truncate" : ""}`}>
+            {phone
+              ? <>{project.project.name} · {queue.id} · <span className="text-fg">{step.id}</span> {step.title}</>
+              : <><span className="font-mono">{queue.id}</span> · {queue.title} <span aria-hidden="true">›</span></>}
+          </button>}
         of={of} bare={questionFirst}
         title={<><span className="mr-2 font-mono text-fg-3">{step.id}</span>{step.title}</>}
         status={<>
-          <StatusBadge status={pendingProvisional(step) ? "review" : checkTone(step)} label={stepLabel(step) ?? provisionalWord(step)} />
+          {step.continued
+            ? <StatusBadge status="continued" label={t("state.continuedIn", { refs: continuedShort(step.continued.in, queue.steps.map((s) => s.id)) })} />
+            : <StatusBadge status={pendingProvisional(step) ? "review" : checkTone(step)} label={stepLabel(step) ?? provisionalWord(step)} />}
           {/* Until its review is over the user may change the step's level, also after approval (no new approval). */}
           {levelChangeable(step) && !readOnly
             ? <LevelPicker project={id} queue={queue.id} step={step} away={project.away} />

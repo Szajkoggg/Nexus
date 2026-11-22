@@ -105,7 +105,8 @@ user-message behaviour remain.
   step that is not waiting for the orchestrator's review. The orchestrator's overview marks a step accepted
   provisionally: waiting for the user's confirmation, confirmed, or with the fix the user asked. `send-back` waits for the server's result and prints it ("sent back to its
   worker as round N", or that the step goes to the user beyond the limit).
-- `nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift --reason …` sends `status.set`
+- `nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift [--continued-in <refs>] --reason …` sends `status.set`
+  (with `continued_in`, the comma-separated references, for a skip that says where the step's work went on)
   and prints the server's result: housekeeping (see ["Housekeeping by the orchestrator"](queues.md#queueyaml) under `queue.yaml`). A worker
   session is refused by the CLI.
 - With `notify` on, the server tells the orchestrator (starting it if needed) when a worker asks a question, when the

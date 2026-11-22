@@ -151,7 +151,7 @@ Queues (${queues.length - done.length} open; finished: ${finished})`);
     out.push(`- ${q.id} [${q.status}] ${q.title}: revision ${q.revision}, ${q.approved ? "approved" : "not approved"}${run}`);
     // A revision waiting for approval comes first: nothing runs and no planned start fires until the user approves it.
     if (!q.approved) out.push(`  needs approval (revision ${q.revision})${(q.start && !q.start.failed) || openPlan(q) ? ": its planned start below waits for it" : ""}`);
-    out.push(`  steps: ${q.steps.map((x) => `${x.id} ${x.status} (level ${x.level}${x.level_from === "user" ? ", set by the user" : ""})${provisionalText(x)}${helperText(x)}${x.closing && x.status === "skipped" ? ` (${closingSkipped(q)})` : ""}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}${x.tags.kind || x.tags.size ? ` {${[x.tags.kind, x.tags.size].filter(Boolean).join(" ")}}` : ""}`).join(", ")}`);
+    out.push(`  steps: ${q.steps.map((x) => `${x.id} ${x.status}${x.continued ? ` → ${x.continued.in.join(", ")}` : ""} (level ${x.level}${x.level_from === "user" ? ", set by the user" : ""})${provisionalText(x)}${helperText(x)}${x.closing && x.status === "skipped" ? ` (${closingSkipped(q)})` : ""}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}${x.tags.kind || x.tags.size ? ` {${[x.tags.kind, x.tags.size].filter(Boolean).join(" ")}}` : ""}`).join(", ")}`);
     if (q.status_reason && q.status !== "running") out.push(`  why: ${q.status_reason.replace(/\s+/g, " ").slice(0, 300)}`);
     for (const line of stopLines(q)) out.push(line);
     for (const line of planLines(q)) out.push(line);

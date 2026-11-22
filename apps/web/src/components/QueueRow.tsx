@@ -11,7 +11,7 @@ import { retryLine } from "@nexus/protocol/times";
 import { isOpenQuestion, runGoing, waitsForUserReview } from "@nexus/protocol/status-rules";
 import { stepValuesText } from "@nexus/protocol/steps";
 import { queueStatus, type Tone } from "../queueStatus.ts";
-import { currentIndex, foldSteps, twoColumns } from "../steplist.ts";
+import { continuedShort, currentIndex, foldSteps, twoColumns } from "../steplist.ts";
 import { usePhone } from "../phone.ts";
 import { QueueStopReason, STOP_BUTTON, StopActions, stopVersion } from "./Stop.tsx";
 import { LevelMark, pendingProvisional } from "./Levels.tsx";
@@ -27,7 +27,7 @@ export const TONE: Record<Tone, [string, string]> = {
 
 /** A step's segment of the progress line, and the tint of the step that matters, by its status. */
 const SEGMENT: Record<string, string> = {
-  done: "bg-ok", skipped: "bg-fg-3", running: "bg-accent", waiting: "bg-warn", review: "bg-review", stopped: "bg-stop",
+  done: "bg-ok", skipped: "bg-fg-3", continued: "seg-continued", running: "bg-accent", waiting: "bg-warn", review: "bg-review", stopped: "bg-stop",
   failed: "bg-danger", rejected: "bg-danger", pending: "bg-surface-3", paused: "bg-fg-2", checking: "bg-accent", queued: "bg-accent/40",
 };
 const TINT: Record<string, string> = {
@@ -41,7 +41,7 @@ const TINT: Record<string, string> = {
  * waiting for the machine read `queued` (checks.ts).
  */
 const shownStatus = (step: StepView, queue: QueueView) =>
-  (step.status === "running" || step.status === "checking") && !runGoing(queue.run) ? "paused" : checkTone(step);
+  (step.status === "running" || step.status === "checking") && !runGoing(queue.run) ? "paused" : step.continued ? "continued" : checkTone(step);
 
 const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "");
 
@@ -107,7 +107,8 @@ export function QueueRow({ project, queue, pushAccepted, onQueue, onStep, onChan
                 <span className="h-2 w-2 shrink-0 rounded-full bg-ok" />
                 <span className="font-mono text-ok">{fold.before.from} – {fold.before.to}</span>
                 <span className="text-fg-2">
-                  {[fold.before.done && t("queue.foldDone", { count: fold.before.done }), fold.before.skipped && t("queue.foldSkipped", { count: fold.before.skipped })].filter(Boolean).join(", ")} ▸
+                  {[fold.before.done && t("queue.foldDone", { count: fold.before.done }), fold.before.skipped && t("queue.foldSkipped", { count: fold.before.skipped }),
+                    fold.before.continued && t("queue.foldContinued", { count: fold.before.continued })].filter(Boolean).join(", ")} ▸
                 </span>
               </button>
             )}
@@ -135,7 +136,9 @@ function stepLook(step: StepView, queue: QueueView, current: boolean) {
   const tone = toneOf(status);
   // A provisional acceptance waiting for the user reads so, in the review colour (the step is done, the user still decides).
   const provisional = pendingProvisional(step);
-  const word = (status === "paused" ? undefined : stepLabel(step)) ?? (provisional ? t("provisional.word") : statusWord(status));
+  // A step continued elsewhere says where: "→ FL4, FL5" (its tooltip names them all).
+  const word = step.continued ? `→ ${continuedShort(step.continued.in, queue.steps.map((s) => s.id))}`
+    : (status === "paused" ? undefined : stepLabel(step)) ?? (provisional ? t("provisional.word") : statusWord(status));
   const unread = step.notes.filter((n) => !n.read_at).length;
   // Where it ran and why, when its runtime's usage ran out: the latest switch (on its fallback, or back).
   const switched = stepSwitches(queue, step.id).at(-1);
@@ -162,10 +165,11 @@ export function StepRow({ step, queue, onStep }: { step: StepView; queue: QueueV
       <span className={`h-2 w-2 rounded-full ${tone.dot}`} />
       <span className="truncate font-mono text-xs text-fg-3" title={step.id}>{stepMark(step)}</span>
       <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-        <span className={`truncate ${step.status === "skipped" ? "text-fg-2" : "text-fg"}`}>{step.title}</span>
+        <span className={`truncate ${step.status === "skipped" && !step.continued ? "text-fg-2" : "text-fg"}`}>{step.title}</span>
         <KeptTag step={step} />
       </span>
-      <span className="flex items-center gap-2">{meta}<span className={`whitespace-nowrap text-xs ${provisional ? "text-review" : step.status === "done" ? "text-fg-3" : tone.text}`}>{word}</span></span>
+      <span className="flex items-center gap-2">{meta}<span className={`whitespace-nowrap text-xs ${provisional ? "text-review" : step.status === "done" ? "text-fg-3" : tone.text}`}
+        title={step.continued ? t("state.continuedIn", { refs: step.continued.in.join(", ") }) : undefined}>{word}</span></span>
     </button>
   );
 }

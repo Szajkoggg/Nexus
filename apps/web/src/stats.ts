@@ -65,6 +65,8 @@ export interface CompareRow {
   /** Turns without an estimate: the use shown leaves them out. */
   missing: number;
   fallback: number; stops: number; failures: number;
+  /** Of the stopped steps, how many continued elsewhere (StatGroup.continued). */
+  continued: number;
 }
 
 const minutes = (ms: number | undefined) => (ms === undefined ? undefined : ms / 60_000);
@@ -77,6 +79,7 @@ function compareRow(g: StatGroup): CompareRow {
     rounds: g.avg_rounds,
     median: minutes(g.median_ms), p25: minutes(g.p25_ms), p75: minutes(g.p75_ms),
     uses: weeklyUse(g), missing: g.usage_missing, fallback: g.fallback, stops: g.stops, failures: g.failures,
+    continued: g.continued,
   };
 }
 

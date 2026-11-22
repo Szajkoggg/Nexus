@@ -63,7 +63,7 @@ re-reads the system time once a minute), so the server, a `nexus` call and git m
 | `review.provisional` | `queue`, `step`, `text?` | Orchestrator only (the loader ignores the user's too): a step of review level 3 waiting for its review is accepted provisionally, `text` what the user should look at; the run goes on (see ["Provisional acceptances"](review.md#review)) |
 | `review.confirmed` | `queue`, `step` | User only: confirms a provisional acceptance |
 | `review.fix_asked` | `queue`, `step`, `text` | User only: Fix it on a provisional acceptance; the orchestrator drafts a revision with a step that fixes it |
-| `status.set` | `queue`, `step?`, `to` (`skipped`, `finished`, `cancelled`, `propose-lift`), `reason` | Orchestrator only: housekeeping; the server checks it and records an entry in the queue's `changes` (see `queue.yaml`). A worker's is ignored by derivation, and the server applies only the orchestrator's own requests |
+| `status.set` | `queue`, `step?`, `to` (`skipped`, `finished`, `cancelled`, `propose-lift`), `reason`, `continued_in?` (with `skipped`: where the step's work went on) | Orchestrator only: housekeeping; the server checks it and records an entry in the queue's `changes` (see `queue.yaml`). A worker's is ignored by derivation, and the server applies only the orchestrator's own requests |
 | `ideas.covered` | `refs` (note references, at least one) | Thinking partners only (`nexus covers`): the Decided entries a hand-over passes on; the ideas overview reads them as handed over (see ["Conversations"](conversations.md#conversations)). Another session's is ignored with a warning |
 | `log` | `level`, `text` | Anything else worth keeping |
 

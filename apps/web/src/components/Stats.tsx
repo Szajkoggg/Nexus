@@ -17,6 +17,9 @@ const RANGE_LABEL: Record<Range, Key> = { "7d": "stats.range.7d", "30d": "stats.
 const FACET_LABEL: Record<(typeof STAT_FILTERS)[number], Key> = { kind: "stats.facet.kind", activity: "stats.facet.activity", area: "stats.facet.area", size: "stats.facet.size", origin: "stats.facet.origin" };
 
 const pct = (v: number) => `${Math.round(v)} %`;
+/** A row's stops, and how many of its stopped steps continued elsewhere (a stop by design, not a step lost). */
+const stopsCell = (r: Pick<CompareRow, "stops" | "continued">) =>
+  r.continued ? <span title={t("stats.stopsContinued", { count: r.continued })}>{r.stops} <span className="text-ok/80">· {r.continued} →</span></span> : r.stops;
 const mins = (v: number) => (v > 0 && v < 1 ? t("stats.underMinute") : t("stats.minutes", { n: Math.round(v) }));
 const runtimeName = (r: string) => (r === "claude" ? "Claude Code" : r === "codex" ? "Codex" : r);
 
@@ -189,7 +192,7 @@ function Comparison({ report, phone, by }: { report: StatsReport; phone: boolean
             rows={rows.map((r) => [label(r) + (r.few ? ` (${t("stats.few")})` : ""), r.steps, r.rate === undefined ? "–" : `${pct(r.rate)} (${r.first}/${r.decided})`,
               r.rounds === undefined ? "–" : r.rounds.toFixed(2), r.median === undefined ? "–" : mins(r.median),
               r.p25 === undefined ? "–" : `${Math.round(r.p25)}–${Math.round(r.p75!)}`, r.uses.map((u) => `${runtimeName(u.runtime)} ${estimate(u.perStep)}`).join(", ") || "–",
-              r.stops, r.failures, r.fallback])} />}
+              stopsCell(r), r.failures, r.fallback])} />}
     </ChartCard>
   );
 }
@@ -283,7 +286,7 @@ function ScatterView({ rows, scales, phone, label }: { rows: CompareRow[]; scale
           yTicks={[lowest, (lowest + 100) / 2, 100]} xFormat={(v) => mins(v)} yFormat={pct} xTitle={t("stats.scatterX")} yTitle={t("stats.scatterY")} />
       </div>
       <DataTable head={[t("stats.col.group"), t("stats.col.steps"), t("stats.col.rounds"), t("stats.col.use"), t("stats.col.stops"), t("stats.col.failures"), "↺"]}
-        rows={rows.map((r) => [label(r) + (r.few ? ` · ${t("stats.few")}` : ""), r.steps, r.rounds?.toFixed(2) ?? "–", r.uses.map((u) => estimate(u.perStep)).join(", ") || "–", r.stops, r.failures, r.fallback])} />
+        rows={rows.map((r) => [label(r) + (r.few ? ` · ${t("stats.few")}` : ""), r.steps, r.rounds?.toFixed(2) ?? "–", r.uses.map((u) => estimate(u.perStep)).join(", ") || "–", stopsCell(r), r.failures, r.fallback])} />
     </div>
   );
 }

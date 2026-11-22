@@ -69,6 +69,11 @@ export interface AttentionItem {
   plan?: { proposal?: { after: string[]; reason: string; current: string[] }; predecessor?: string; cause?: "stopped" | "cancelled" | "missing" };
   /** Kind `tags`: the proposal waiting for the user's decision. */
   tags?: TagProposal;
+  /**
+   * Kind `merge`: what the user's Merge back moves (the waiting card asks it where no queue is at hand): the queue's
+   * branch (absent: unnamed) into its base branch. Absent when the base is no branch (nothing to merge into).
+   */
+  merge?: { into: string; branch?: string };
 }
 export interface StepView extends StepDef {
   status: StepStatus;
@@ -84,6 +89,11 @@ export interface StepView extends StepDef {
    * step that did (`back`): the latest record of its queue's run (run.yaml `fallbacks`) for this step.
    */
   usage_switch?: NonNullable<RunFile["fallbacks"]>[number];
+  /**
+   * A skipped step's mark (docs/design/continued.md): where its work went on (`in`: `FL4`, `QX/QX2`, `QX`), when, by
+   * whom and why; from its latest `changes` entry with `continued_in`, gone once its status changes again.
+   */
+  continued?: { in: string[]; at: string; by: StatusChange["by"]; reason?: string };
   /**
    * The queue's closing refactoring step (closing.ts): Nexus keeps it after the queue's own steps, with a reserved id
    * and the standard text; it is not in queue.yaml.
@@ -398,6 +408,8 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
     apply(e, queues, sessions, questions, warnings, project, delivered, away);
   }
   for (; next < changes.length; next++) applyChange(changes[next]!.item.q, changes[next]!.item.c);
+  // A skip's mark holds while the step stays skipped (an event, a send-back, may open it again).
+  for (const q of queues.values()) for (const st of q.steps) if (st.continued && st.status !== "skipped") st.continued = undefined;
   // The checks Nexus ran: a step.done whose checks have not passed is no review yet (checks.ts).
   for (const q of queues.values()) for (const st of q.steps) applyCheckSets(q, st, project.defaults.check_fix_limit);
   // What the workers reported doing, as the names read now; where the run opened a step on its fallback.
@@ -621,7 +633,11 @@ function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsF
     // On the integration step, whose page says how the merge back stands.
     if (q.git?.merge?.waiting && q.status !== "cancelled") {
       const w = q.git.merge.waiting;
-      out.push({ kind: "merge", queue: q.id, step: q.steps.find((s) => s.integration)?.id, text: w.reason + releasedText(w.released), at: w.since });
+      const into = q.git.base?.branch !== false ? q.git.base?.ref : undefined;
+      out.push({
+        kind: "merge", queue: q.id, step: q.steps.find((s) => s.integration)?.id, text: w.reason + releasedText(w.released), at: w.since,
+        ...(into ? { merge: { into, ...(q.branch ? { branch: q.branch } : {}) } } : {}),
+      });
     }
     // A done survey run's worktree Nexus could not remove (src/merger.ts): until it is cleaned up.
     if (q.git?.cleanup?.waiting && !q.git.cleaned) out.push({ kind: "cleanup", queue: q.id, text: q.git.cleanup.waiting.reason, at: q.git.cleanup.waiting.since });
@@ -1067,6 +1083,7 @@ function applyChange(q: QueueView, c: StatusChange): void {
           return;
         }
         st.status = c.to as StepStatus; st.reason = c.reason;
+        st.continued = c.to === "skipped" && c.continued_in ? { in: c.continued_in, at: c.at, by: c.by, ...(c.reason ? { reason: c.reason } : {}) } : undefined;
       } else if (c.to === "cancelled") {
         q.status = "cancelled"; q.status_reason = c.reason;
         return;

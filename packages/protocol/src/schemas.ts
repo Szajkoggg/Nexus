@@ -574,7 +574,8 @@ const Withdrawal = z.object({
  * the entries in time order among the events.
  * - `lift`: the user lifted the queue's stop (`by`: approving a new revision, or Continue); the queue becomes approved
  *   and its stopped steps pending again; stops before it no longer count.
- * - `status`: the orchestrator's housekeeping: a step to `skipped`, or the queue to `cancelled`.
+ * - `status`: the orchestrator's housekeeping: a step to `skipped`, or the queue to `cancelled`. A skip may say where the
+ *   step's work went on (`continued_in`); an entry from `skipped` to `skipped` only sets that mark on a skipped step.
  * - `run`: the orchestrator closed a halted run of a queue whose steps are all done or skipped (`finished`).
  * - `proposal`: the orchestrator proposes that the user lift the stop; cleared by a lift, a later stop or an approval.
  * - `status` by `nexus`: a step left open (`running` or `waiting`) by a run a revision change set aside goes back to
@@ -594,6 +595,11 @@ export const StatusChange = z.object({
   revision: z.number().int().positive().optional(),
   /** `work`: the commits of the stopped step the user's choice (`to`: kept or discarded) was about. */
   commits: z.array(z.string()).optional(),
+  /**
+   * A skip's mark (docs/design/continued.md): the step's own work is done and went on elsewhere, or another step or
+   * queue did it. Each is a step of the same queue (`FL4`), a step of another queue (`QX/QX2`) or a queue (`QX`).
+   */
+  continued_in: z.array(z.string().min(1)).min(1).optional(),
 });
 export type StatusChange = z.infer<typeof StatusChange>;
 
@@ -845,9 +851,13 @@ export const Event = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("queue.drafted"), queue: Id, definition: z.unknown() }),
   /**
    * An orchestrator's housekeeping (`nexus queue set`): `to` is `skipped` (with `step`), `finished` (the queue's halted
-   * run), `cancelled` or `propose-lift`. The server checks it and records it in the queue's `changes`.
+   * run), `cancelled` or `propose-lift`. The server checks it and records it in the queue's `changes`. A skip's
+   * `continued_in` says where the step's work went on (StatusChange).
    */
-  z.object({ ...base, type: z.literal("status.set"), queue: Id, step: Id.optional(), to: z.string().min(1), reason: z.string().min(1) }),
+  z.object({
+    ...base, type: z.literal("status.set"), queue: Id, step: Id.optional(), to: z.string().min(1), reason: z.string().min(1),
+    continued_in: z.array(z.string().min(1)).min(1).optional(),
+  }),
   /** An orchestrator asks the engine to act on a queue's run; `use_session` continues an existing session. */
   z.object({
     ...base, type: z.literal("session.request"),
