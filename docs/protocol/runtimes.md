@@ -159,7 +159,10 @@ the queue, `switchLines` in `packages/protocol/src/overview.ts`) show every swit
    the switch comes before that moment is over (`settled`); the old session's activity says it waits ("Nexus waits a
    moment before step …"). If such a turn starts meanwhile, Nexus ends it at its start
    (the old process ends as at a restart, its activity says why), so the old session works no turn beside the new one,
-   and the entries sent into that last turn go to the new session's first turn with the unread ones (`carried`).
+   and the entries sent into that last turn go to the new session's first turn with the unread ones (`carried`); they
+   are kept in `run.yaml` as `carry` until the switch, so a server ending in between does not lose them (queue LH).
+   While it waits, nothing but a stop is delivered to the old session: a message for it stays unread and goes to the
+   new session's first turn (before queue LH it started a turn there, which was ended as a late turn, and was lost).
 1. It looks for a fresh summary: a `context.summary` from that session at or after its latest `step.started` of the
    step that ended. If there is none, it asks once with a turn ("… write your context summary with `nexus context`
    …, then end your turn") and records `summary_asked` in `run.yaml`; after that turn it goes on with or without one.

@@ -7,9 +7,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, approveQueue, loadProjectState, routeAnswers, sendMessage, type StepDef } from "@nexus/protocol";
+import { ProjectStore, approveQueue, loadProjectState, onWrite, routeAnswers, sendMessage, type StepDef } from "@nexus/protocol";
 import { Engine, type Clock } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
@@ -41,13 +41,16 @@ function setup(behaviours: string[], opts: { fill: number; window?: number; care
     stop_conditions: [], checks: [], steps, approvals: [], withdrawals: [], history: [],
   });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); if (!opts.hold) acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...(opts.clock ? { clock: opts.clock } : {}), lateTurnMs: opts.lateTurnMs });
+  const make = (): Engine => new Engine(store, () => { routeAnswers(store); if (!opts.hold) acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...(opts.clock ? { clock: opts.clock } : {}), lateTurnMs: opts.lateTurnMs });
+  let engine = make();
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const received = (): Received[] => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Received) : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
   const done = () => { engine.shutdown(); delete process.env.FAKE_CONTEXT_FILL; delete process.env.FAKE_CONTEXT_WINDOW; delete process.env.FAKE_NO_SUMMARY; };
   const accept = () => { acceptReviews(store); engine.onChange(loadProjectState(store)); };
-  return { store, engine, queue, received, until, done, accept };
+  /** The next server on the same files (the old one shut down first, as by an update). */
+  const restart = () => { engine.shutdown(); engine = make(); };
+  return { store, get engine() { return engine; }, queue, received, until, done, accept, restart };
 }
 
 const asks = (r: Received[]) => r.filter((m) => m.text.includes("write your context summary"));
@@ -215,6 +218,74 @@ test("claude: a message sent into the step's last turn that the runtime runs as 
     const beside = store.readActivity(old).entries.filter((e) => e.at >= freshStart && ["turn_start", "text", "tool", "turn_end"].includes(e.kind) && !/^Nexus /.test(e.text));
     assert.deepEqual(beside.map((e) => `${e.kind}: ${e.text}`), [], "the old session worked no turn beside the fresh one");
   } finally { done(); delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_GATE; }
+});
+
+test("claude: a message for the old session while the switch waits goes to the fresh session, not as a turn of the old one Nexus then ends (queue LH, finding 11)", async () => {
+  // FAKE_LATE_NEXT=inside: the message sent into the step's last turn is read in it, and no late turn follows; the
+  // process settles for lateTurnMs, and the switch waits for that. A second message in that moment was delivered as a
+  // new turn of the idle old process: its start counted as a late turn, the process was ended, and the message, already
+  // recorded as delivered, reached neither session.
+  process.env.FAKE_LATE_NEXT = "inside";
+  const { store, engine, queue, received, until, done, accept } = setup(["summary", "done"], { fill: 0.8, lateTurnMs: 3000 });
+  try {
+    engine.start("Q", { runtime: "claude" });
+    await until("Q1 in review in its turn", () => queue().steps[0]!.status === "review" && loadProjectState(store).sessions.find((s) => s.id === queue().run!.session)?.live?.state === "working", LONGER.step);
+    accept();
+    delete process.env.FAKE_LATE_NEXT; // for the fresh session's process
+    const old = queue().run!.session;
+    sendMessage(store, old, "Use the grassland settings.", { queue: "Q", step: "Q1" });
+    engine.onChange(loadProjectState(store));
+    await until("the switch to wait", () => store.readActivity(old).entries.some((e) => /^Nexus waits a moment before step Q2/.test(e.text)), LONGER.step);
+    sendMessage(store, old, "Also keep the river.", { queue: "Q", step: "Q1" });
+    engine.onChange(loadProjectState(store));
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+    const fresh = queue().steps[1]!.session!;
+    assert.notEqual(fresh, old);
+    assert.ok(!received().some((m) => m.session === old && m.text.includes("keep the river")), "not sent to the old session");
+    const opening = received().find((m) => m.session === fresh)!;
+    assert.match(opening.text, /step Q2 \(2 of 2\)[\s\S]*Also keep the river\./, "it goes to the fresh session");
+    assert.ok(!opening.text.includes("grassland"), "the message read in the last turn is not given again");
+  } finally { done(); delete process.env.FAKE_LATE_NEXT; }
+});
+
+test("claude: a server that ends after Nexus ended a late turn, before the switch: the next server still gives the message to the fresh session (queue LH, finding 11)", async () => {
+  // As the F3 test above, but the server ends right as Nexus ends the late turn (its activity line written): what that
+  // turn had taken in (recorded as delivered to the old session) was kept in memory only.
+  process.env.FAKE_LATE_NEXT = "1";
+  const x = setup(["summary", "done"], { fill: 0.8, lateTurnMs: 4 * LONGER.run });
+  const gate = join(dirname(process.env.FAKE_LOG!), "late-gate");
+  process.env.FAKE_LATE_GATE = gate;
+  let unhook = () => {};
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q1 in review in its turn", () => x.queue().steps[0]!.status === "review" && loadProjectState(x.store).sessions.find((s) => s.id === x.queue().run!.session)?.live?.state === "working", LONGER.step);
+    x.accept();
+    delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_GATE;
+    const old = x.queue().run!.session;
+    sendMessage(x.store, old, "Use the grassland settings.", { queue: "Q", step: "Q1" });
+    x.engine.onChange(loadProjectState(x.store));
+    await x.until("the message sent into the turn", () => x.received().some((m) => m.session === old && m.text.includes("grassland") && m.priority === "next"));
+    await x.until("the switch to wait", () => x.store.readActivity(old).entries.some((e) => /^Nexus waits a moment before step Q2/.test(e.text)), LONGER.step);
+    // The server ends as the late turn is ended: synchronously, at the activity line's write.
+    const activity = join(x.store.sessionDir(old), "activity.jsonl");
+    let ended = false;
+    unhook = onWrite((f) => {
+      if (ended || resolve(f) !== resolve(activity) || !x.store.readActivity(old).entries.some((e) => e.text.startsWith("Nexus ends the turn the runtime started by itself"))) return;
+      ended = true;
+      x.engine.shutdown();
+    });
+    writeFileSync(gate, "");
+    await x.until("the server ended at the late turn", () => ended, LONGER.step);
+    unhook();
+    await new Promise((r) => setTimeout(r, 500));
+    x.restart();
+    x.engine.resume("Q"); // the restart paused the run
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+    const fresh = x.queue().steps[1]!.session!;
+    assert.notEqual(fresh, old);
+    const opening = x.received().find((m) => m.session === fresh)!;
+    assert.match(opening.text, /step Q2 \(2 of 2\)[\s\S]*Use the grassland settings\./, "the message goes to the fresh session");
+  } finally { unhook(); x.done(); delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_GATE; }
 });
 
 const HOUR = 60 * 60_000;

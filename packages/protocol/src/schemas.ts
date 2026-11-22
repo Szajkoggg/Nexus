@@ -1268,6 +1268,13 @@ export const RunFile = z.object({
   /** The step whose end Nexus asked the session to write its context summary for, before a fresh session (asked once). */
   summary_asked: Id.optional(),
   /**
+   * Inbox entries (ids) of the run's session that a turn the runtime started by itself at a step's end had taken in,
+   * a turn Nexus ended to switch sessions (queue LF, F3): recorded as delivered to the old session but never worked on
+   * there, they go to the fresh session's first turn. Kept here (queue LH), so a server that ends before the switch
+   * does not lose them; removed by the switch.
+   */
+  carry: z.array(Id).optional(),
+  /**
    * Each time the run went on in a fresh session, oldest first. `why`: `context` (context care: the old session's
    * context was full; older records without `why` are this), `runtime` (the step runs on another runtime), `refactor`
    * (the closing refactoring step, which reads the queue's work with fresh eyes) or `usage` (in the middle of a step:

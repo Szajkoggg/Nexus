@@ -218,12 +218,11 @@ export class Engine implements Member {
    * A late turn at a session switch (queue LF, F3). `injected`: the inbox entries sent into a session's running turn
    * (`next`); at the turn's end they become `lastInjected`, which the runtime read in that turn unless it runs them as a
    * turn of its own (AgentProcess.settling). `switchWaits`: sessions whose switch at a step boundary waits for that
-   * moment to pass. `carryOver`: entries of a late turn Nexus ended, for the fresh session's first turn.
+   * moment to pass. The entries of a late turn Nexus ended, for the fresh session's first turn, are the run's `carry`.
    */
   private readonly injected = new Map<string, SessionView["inbox"]>();
   private readonly lastInjected = new Map<string, SessionView["inbox"]>();
   private readonly switchWaits = new Set<string>();
-  private readonly carryOver = new Map<string, SessionView["inbox"]>();
   /** A user's immediate stop is waiting for the old process to exit before Resume can open another. */
   private readonly stopping = new Set<string>();
   /** A boundary is not crossed until the worker's descendants have gone. Reset after every turn. */
@@ -1220,7 +1219,7 @@ export class Engine implements Member {
     const { fresh, unread } = this.forkSession(run, q, old, live, want);
     const because = `${reason}, so the step goes on on ${RUNTIME_NAME[want.runtime]}`;
     this.writeRun(queueId, {
-      ...run, session: fresh.id, summary_asked: undefined,
+      ...run, session: fresh.id, summary_asked: undefined, carry: undefined,
       switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: step.id, why: "usage", summary: "fallback" }],
     });
     this.store.appendActivity(old.id, { at: now(), kind: "turn_end", text: `Nexus goes on with step ${step.id} in a fresh session (${fresh.id}): ${because}`, queue: queueId, step: step.id });
@@ -1241,7 +1240,7 @@ export class Engine implements Member {
     const { fresh, unread } = this.forkSession(run, q, old, live, want);
     const because = switchReason(why, next.id, want.runtime, old.runtime as "claude" | "codex", context, idle);
     this.writeRun(queueId, {
-      ...run, session: fresh.id, summary_asked: undefined,
+      ...run, session: fresh.id, summary_asked: undefined, carry: undefined,
       switches: [...(run.switches ?? []), { at: now(), from: old.id, to: fresh.id, step: next.id, why, fill: context?.fill, ...(context ? { tokens: context.tokens } : {}), ...(idle !== undefined ? { idle_minutes: idle } : {}), summary: source }],
     });
     this.store.appendActivity(old.id, { at: now(), kind: "turn_end", text: `Nexus goes on in a fresh session (${fresh.id}): ${because}`, queue: queueId, step: done?.id ?? next.id });
@@ -1277,10 +1276,11 @@ export class Engine implements Member {
     };
     this.store.writeSession(fresh);
     this.store.writeSession({ ...oldFile, continued_by: fresh.id });
-    const inbox = (loadProjectState(this.store).sessions.find((x) => x.id === old.id)?.inbox ?? []).filter((m) => !m.read_at);
-    // What a late turn Nexus ended had taken in (lateTurn): delivered to the old session, but never worked on there.
-    const late = (this.carryOver.get(old.id) ?? []).filter((m) => !inbox.some((x) => x.id === m.id));
-    this.carryOver.delete(old.id);
+    const all = loadProjectState(this.store).sessions.find((x) => x.id === old.id)?.inbox ?? [];
+    const inbox = all.filter((m) => !m.read_at);
+    // What a late turn Nexus ended had taken in (lateTurn, the run's `carry`): delivered to the old session, but never
+    // worked on there. The caller's run write drops `carry`.
+    const late = all.filter((m) => run.carry?.includes(m.id) && !inbox.some((x) => x.id === m.id));
     this.switchWaits.delete(old.id);
     const unread = [...inbox, ...late];
     this.ending.add(old.id);
@@ -1450,7 +1450,10 @@ export class Engine implements Member {
     // A process Nexus is ending gets nothing more (a session taken over had its unread entries carried across).
     if (l.proc.state === "exited" || this.ending.has(l.session) || this.cleaning.has(l.proc)) return;
     const s = state.sessions.find((x) => x.id === l.session);
-    const unread = (s?.inbox ?? []).filter((m) => !m.read_at);
+    // While a switch waits for the old session's settling (switchWaits), only a stop reaches it: anything else would
+    // start a turn there, taken for a late turn and ended with its process (queue LH); unread, it goes to the fresh
+    // session's first turn with the rest of the inbox (switchSession).
+    const unread = (s?.inbox ?? []).filter((m) => !m.read_at && (m.type === "stop" || !this.switchWaits.has(l.session)));
     if (!unread.length) return;
     if (l.proc.state === "working") for (const m of unread) if (m.type === "answer") this.liveAnswerIds.add(m.id);
     const owners = state.queues.filter(q => q.run?.session === l.session && q.run.state !== "finished");
@@ -1691,7 +1694,11 @@ export class Engine implements Member {
     if (!live) return;
     const late = this.lastInjected.get(session) ?? [];
     this.lastInjected.delete(session);
-    this.carryOver.set(session, [...(this.carryOver.get(session) ?? []), ...late]);
+    // Kept in the run's file (queue LH): a server that ends before the switch still gives them to the fresh session.
+    for (const id of this.store.queueIds()) {
+      const run = this.store.readRun(id);
+      if (run?.session === session && run.state !== "finished") this.writeRun(id, { ...run, carry: [...new Set([...(run.carry ?? []), ...late.map((m) => m.id)])] });
+    }
     this.store.appendActivity(session, { at: now(), kind: "turn_end", text: `Nexus ends the turn the runtime started by itself at the step's end: the session goes on in a fresh one, which gets ${late.length === 1 ? "the message" : "the messages"} sent into its last turn` });
     this.restarting.add(session);
     this.ending.add(session);
