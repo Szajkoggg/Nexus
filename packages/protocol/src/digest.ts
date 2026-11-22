@@ -4,6 +4,8 @@
 import type { Activity, Event, Refusal, TurnRecord } from "./schemas.ts";
 import type { ProjectState, QueueView } from "./state.ts";
 import { holdsRunStep } from "./status-rules.ts";
+import { CLOCK_AHEAD_MS } from "./clock.ts";
+import type { ProjectStore } from "./store.ts";
 
 type DigestKind = "done" | "failed" | "stopped" | "queue_done" | "queue_cancelled" | "refused" | "retried";
 
@@ -40,6 +42,25 @@ export interface ProjectDigestInput {
   events: readonly Event[];
   refusals: readonly Refusal[];
   activity: readonly Activity[];
+}
+
+/**
+ * The digest's reads of one project after `since`: every session's events (the state's input, in memory), and the
+ * refusals and retries of the sessions whose logs were written since (queue AQ). A log last written before `since`
+ * holds no line after it (a line's time is at most CLOCK_AHEAD_MS ahead of the clock that wrote it): it is not read,
+ * so the digest no longer opens every activity log of the project, nor keeps them in the model.
+ */
+export function digestInput(store: ProjectStore, state: ProjectState, since: string): ProjectDigestInput {
+  const from = Date.parse(since) - CLOCK_AHEAD_MS;
+  const ids = store.sessionIds();
+  const recent = <T extends { at: string }>(xs: T[]) => xs.filter((x) => x.at > since);
+  const written = (s: string, log: "activity" | "refusals") => (store.logModified(s, log) ?? 0) >= from;
+  return {
+    state,
+    events: ids.flatMap((s) => recent(store.readEvents(s).entries)),
+    refusals: ids.flatMap((s) => (written(s, "refusals") ? recent(store.readRefusals(s).entries) : [])),
+    activity: ids.flatMap((s) => (written(s, "activity") ? recent(store.readActivity(s).entries.filter((a) => a.kind === "retry")) : [])),
+  };
 }
 
 const after = (at: string | undefined, since: string) => !!at && Date.parse(at) > Date.parse(since);

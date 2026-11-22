@@ -235,6 +235,11 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   /** Its place in the line of the merge train (train.ts): it waits for its turn to integrate into its base. */
   train?: TrainPlace;
   updated?: string;    // time of the latest event about this queue
+  /**
+   * Only in the state the dashboard reads (archive.ts, shownState): the queue is closed and waits for nothing, and comes
+   * as its summary; its details are read from GET /api/projects/:id/queues/:queue when it is opened.
+   */
+  archived?: true;
 }
 /**
  * A planned start as the dashboard shows it. `waiting`: why it has not started yet (the queue it waits for is still

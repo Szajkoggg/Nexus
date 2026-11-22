@@ -55,7 +55,8 @@ loaded).
 What a closed queue keeps at hand (the decision's archiving): its files' parsed values and its events stay (the state
 is a fold over all events, and lists and statistics need its steps, dates, costs and summaries); its detailed logs
 (activity, chat beyond the last entries) are an index only, and read from the file when opened. The model's size grows
-with the events and the indexes, not with the logs' text.
+with the events and the indexes, not with the logs' text. Built in queue AQ ([archive.md](archive.md)): no summary file;
+the dashboard's state holds a closed queue as its summary, and the logs no one reads are let go.
 
 ## How the watcher feeds it
 
@@ -342,7 +343,8 @@ What differs from the plan above, and why:
 - **A log once opened is kept whole**, not as an index with its last entries: the activity's queue and step filter and
   the digest's retries need every entry, and a ranged read of the file would be a second way of reading it. A log no
   reader asked for is not read at all (most of a closed queue's); the memory of the opened ones (the digest opens every
-  activity log) is the next thing to bound, with the archiving.
+  activity log) is the next thing to bound, with the archiving. Bounded in queue AQ: a log only no one asked for in two
+  minutes is let go, and the digest opens only the logs written since its time ([archive.md](archive.md)).
 - **The volatile logs** are the events of the sessions whose runtime record is not `exited` (the model reads them
   itself; the agent hosts are not asked), read on at each read of the state.
 - **Still from the files**: the orchestrator view's switch records (its earlier sessions' applied and events, read by

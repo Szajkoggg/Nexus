@@ -669,6 +669,7 @@ node scripts/load-tests.mjs --burners 12 --copies 4 --rounds 5 apps/server/test/
 node scripts/perf-load.ts --minutes 3   # the server under a live-like load on a dev instance (port 4319); beside npm test too
 node scripts/perf-load.ts --minutes 2 --dashboards 0 --page   # the real dashboard in headless Edge: its requests a minute (build the web first)
 node scripts/synthetic-nexus.ts <empty folder> --scale 4   # a synthetic .nexus shaped like Nexus's own (fixed seed), with its counts
+node --expose-gc scripts/state-memory.ts <folder>/.nexus --age   # its start, the dashboard's state size, the heap (queue AQ)
 nexus server perf   # what the server measured of itself: event loop delay, requests by route, blocks over 200 ms
 ```
 

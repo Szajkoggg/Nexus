@@ -1,6 +1,6 @@
 // Reading and writing a project's .nexus/ directory and the Nexus registry.
 // Rules (docs/protocol/files.md, "Rules"): one writer per file, JSONL is append-only, YAML is replaced atomically.
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -109,6 +109,8 @@ export interface Reader {
   jsonl<S extends z.ZodType>(file: string, schema: S, observe: boolean): JsonlRead<z.infer<S>>;
   dirs(dir: string): string[];
   names(dir: string): string[];
+  /** The file's modification time in ms, undefined when it is missing (a model keeps it until the file changes). */
+  modified?(file: string): number | undefined;
   state?(): ProjectState;
 }
 const fileReader: Reader = {
@@ -117,6 +119,7 @@ const fileReader: Reader = {
   jsonl: (file, schema, o) => { const r = readJsonl(file, schema); if (o) for (const e of r.entries as { at?: string }[]) observe(e.at); return r; },
   dirs: (dir) => subdirs(dir),
   names: (dir) => list(dir),
+  modified: (file) => { try { return statSync(file).mtimeMs; } catch { return undefined; } },
 };
 /** How NEXUS_HOME's settings, away mode and turns are read (the server sets a model of them: model.ts). */
 let home: Reader = fileReader;
@@ -534,6 +537,14 @@ export class ProjectStore {
 
   readActivity(sessionId: string): JsonlRead<Activity> { return this.reader.jsonl(join(this.sessionDir(sessionId), "activity.jsonl"), Activity, false); }
   appendActivity(sessionId: string, a: Activity): void { appendJsonl(join(this.sessionDir(sessionId), "activity.jsonl"), Activity.parse(a)); }
+  /**
+   * When a session's log was last written (ms), undefined when it has none: a reader of its recent lines (the digest)
+   * leaves a log alone that was not written since, without reading it (queue AQ).
+   */
+  logModified(sessionId: string, log: "activity" | "refusals"): number | undefined {
+    const file = join(this.sessionDir(sessionId), `${log}.jsonl`);
+    return this.reader.modified ? this.reader.modified(file) : fileReader.modified!(file);
+  }
   readRefusals(sessionId: string): JsonlRead<Refusal> { return this.reader.jsonl(join(this.sessionDir(sessionId), "refusals.jsonl"), Refusal, false); }
   appendRefusal(r: Refusal): void { appendJsonl(join(this.sessionDir(r.session), "refusals.jsonl"), Refusal.parse(r)); }
 

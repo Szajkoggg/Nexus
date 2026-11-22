@@ -52,6 +52,11 @@ function openRead(file: string): number {
 
 /** The bytes before a log's position compared on each read (a file rewritten under it is read again whole). */
 const GUARD = 64;
+/**
+ * How long a log only (activity, chat, refusals) is kept after it was last asked for (queue AQ): then it is let go, and
+ * read again from its file when asked (docs/design/archive.md). Its index, a position, goes with it.
+ */
+const LOG_IDLE_MS = 2 * 60_000;
 
 interface Log {
   file: string;
@@ -68,6 +73,8 @@ interface Log {
   /** Times read that this process's clock did not take up yet (too far ahead): offered again on each read. */
   ahead: string[];
   dirty: boolean;
+  /** When it was last asked for (Date.now()): a log only no one asked for in LOG_IDLE_MS is let go (release). */
+  asked: number;
 }
 type Parsed = { ok: true; value: unknown } | { ok: false; error: unknown };
 /** A log as before its first read: nothing read, from no file. */
@@ -96,7 +103,12 @@ export class FileCache implements Reader {
   private readonly present = new Map<string, boolean>();
   private readonly listings = new Map<string, { dirs: string[]; names: string[] } | null>();
   private readonly logs = new Map<string, Log>();
+  /** Files' modification times (ms; null: missing), asked by `modified` and forgotten at the file's change. */
+  private readonly times = new Map<string, number | null>();
   private readonly unhook: () => void;
+  /** How long a log only is kept unasked (LOG_IDLE_MS; a test shortens it), and when the logs were last looked over. */
+  logIdleMs = LOG_IDLE_MS;
+  private swept = Date.now();
 
   private readonly logOnly: (key: string) => boolean;
   /** The state derived from these files, when a model owns the cache (Reader.state). */
@@ -138,6 +150,7 @@ export class FileCache implements Reader {
     if (k.endsWith(".tmp") || k.endsWith(".lock")) return;
     this.parsedFiles.delete(k);
     this.present.delete(k);
+    this.times.delete(k);
     const log = this.logs.get(k);
     if (log) log.dirty = true;
     const other = this.linked(k);
@@ -152,7 +165,7 @@ export class FileCache implements Reader {
     }
     // A folder gone: everything kept under it (one still there keeps it: what changed in it is reported for itself).
     const under = `${k}/`;
-    const maps = [this.parsedFiles, this.present, this.listings, this.logs] as Map<string, unknown>[];
+    const maps = [this.parsedFiles, this.present, this.listings, this.logs, this.times] as Map<string, unknown>[];
     const holds = (m: Map<string, unknown>) => { for (const key of m.keys()) if (key.startsWith(under)) return true; return false; };
     if (maps.some(holds) && !existsSync(path)) {
       for (const m of maps) for (const key of m.keys()) if (key.startsWith(under)) m.delete(key);
@@ -162,8 +175,40 @@ export class FileCache implements Reader {
 
   /** Everything forgotten: read again from the files when asked. */
   clear(): void {
-    this.parsedFiles.clear(); this.present.clear(); this.listings.clear(); this.logs.clear();
+    this.parsedFiles.clear(); this.present.clear(); this.listings.clear(); this.logs.clear(); this.times.clear();
     this.version++;
+  }
+
+  /**
+   * Lets go of the logs only (activity, chat, refusals, pins are not logs) no one asked for since `now - logIdleMs`
+   * (queue AQ): a closed queue's logs are kept while they are read, not for the server's life. A log let go is read
+   * again from its file when asked; it is no change (the version stays). Returns how many were let go.
+   */
+  release(now = Date.now()): number {
+    this.swept = now;
+    let n = 0;
+    for (const [k, log] of this.logs) if (this.logOnly(k) && log.asked < now - this.logIdleMs) { this.logs.delete(k); n++; }
+    return n;
+  }
+
+  /** The logs held in memory now, with their entries (a test's and the measurement's look at the memory). */
+  held(): { file: string; entries: number }[] {
+    return [...this.logs.values()].map((l) => ({ file: l.file, entries: l.read.entries.length }));
+  }
+
+  /**
+   * The file's modification time in ms, undefined when it is missing: a stat at the first ask, then kept until the
+   * file's change is reported (write-through or the watcher), so asking again costs nothing.
+   */
+  modified(file: string): number | undefined {
+    const k = fileKey(file);
+    let t = this.times.get(k);
+    if (t === undefined) {
+      countWork("probes");
+      try { t = statSync(file).mtimeMs; } catch { t = null; }
+      this.times.set(k, t);
+    }
+    return t ?? undefined;
   }
 
   /** Reads now what has grown in these logs, not waiting for the watcher (another process appends to them now). */
@@ -203,13 +248,16 @@ export class FileCache implements Reader {
 
   jsonl<S extends z.ZodType>(file: string, schema: S, o: boolean): JsonlRead<z.infer<S>> {
     const k = fileKey(file);
+    const now = Date.now();
+    if (now - this.swept > this.logIdleMs / 4) this.release(now);
     let log = this.logs.get(k);
     if (log && log.schema !== schema) log = undefined;
     if (log && !log.dirty && this.live?.(k)) this.dirtyIfGrown(k, log);
     if (!log) {
-      log = { file, schema, ...unread(), dirty: true };
+      log = { file, schema, ...unread(), dirty: true, asked: now };
       this.logs.set(k, log);
     }
+    log.asked = now;
     if (log.dirty) this.readOn(log, o);
     if (o && log.ahead.length) log.ahead = taken(log.ahead);
     const r = log.read as JsonlRead<z.infer<S>>;

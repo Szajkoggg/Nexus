@@ -48,7 +48,9 @@ previous `state` message:
   64 KB), or there was nothing to diff against (the first publication after no socket was open, a state that failed);
   read the state in full.
 
-Applying a state message to the state held at the previous `seq` gives the state the server holds at this one.
+Applying a state message to the state held at the previous `seq` gives the state the server holds at this one. That
+state is the dashboard's: a closed queue that waits for nothing is its summary in it (`archived: true`; see
+["Closed queues" in the server API](api.md#server-api)).
 
 ### Where a reply stands
 

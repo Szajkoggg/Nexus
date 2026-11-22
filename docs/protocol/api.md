@@ -12,7 +12,8 @@ The replies the dashboard reads are typed once, in the protocol's types-only mod
 these types and the dashboard reads them as the same, so a change on one side fails the other's typecheck.
 
 Reads: `GET /api/projects` (with each project's "waiting for you" list; a question's item carries its `qid` and its
-`options`, if it has any), `GET /api/projects/:id/state`,
+`options`, if it has any), `GET /api/projects/:id/state` (a closed queue in it may be its summary: "Closed queues"
+at the end), `GET /api/projects/:id/queues/:queue` (one queue's whole `QueueView`; 404 for an unknown queue),
 `GET /api/projects/:id/file?path=` (files under the project, its worktree directory or a session's directory only;
 see "Files and commits" below), `GET /api/projects/:id/commits/:hash` (one commit; see there too),
 `GET /api/projects/:id/rules` (the rules files' check: `{ state, agents, claude, unseen_by?, fix?: { changes: [{ file,
@@ -387,3 +388,15 @@ you were answering this message:" followed by `asked`, each line quoted with `> 
 turn may have done part of it: check before you repeat anything." (several messages: "these messages", "them"; none:
 "The server restarted during your turn, which was cut off; go on where you left off."). A hand-over's turn is the
 hand-over's again: its reply goes to the orchestrator. Then `interrupted` is dropped.
+
+**Closed queues.** The state the dashboard reads (`GET /api/projects/:id/state` and the live stream's `state`
+messages) holds a queue that is done or cancelled and waits for nothing (no step in review or with a provisional
+acceptance to confirm, no open question, no item in the project's attention list) as its **summary**, marked
+`archived: true` (queue AQ; `packages/protocol/src/archive.ts`, `isArchived`, `shownState`). It is the queue as the
+list shows it: its own fields without `description`, `report` and with `stop_conditions` empty; each step with its
+status, title, times (`started_at`, `finished_at`, `segments`), tags, review level and who accepted it (`accepted`),
+and with its details empty (`goal` `""`; `acceptance`, `timeline`, `messages`, `checks`, `metrics`, `review_items`,
+`notes`, `sent_back` `[]`; `pictures` `{}`; no `summary`, `reason`, `progress`). The dashboard reads the whole queue
+from `GET /api/projects/:id/queues/:queue` when it opens it. A queue that is no longer archived (a question opened on
+it, an attention item) comes whole in the next state message. Everything else the server answers (the statistics, the
+digest, the estimates, the search, the CLI's `nexus status`) reads the whole state, as before.

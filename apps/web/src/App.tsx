@@ -39,6 +39,7 @@ import { RulesWarning } from "./components/Rules.tsx";
 import { FinishedGroup } from "./components/Finished.tsx";
 import { PlanView } from "./components/Plan.tsx";
 import { splitFinished } from "./finished.ts";
+import { detailsPath, openedQueue } from "./archived.ts";
 import { ApprovalView, useApprovalForm } from "./components/Approval.tsx";
 import { needsApproval } from "./approval.ts";
 import { rich, t, type Key } from "./i18n.ts";
@@ -144,7 +145,11 @@ export function App() {
     };
   }, [state]);
 
-  const queue = state?.queues.find((q) => q.id === route.queue);
+  const shownQueue = state?.queues.find((q) => q.id === route.queue);
+  // A closed queue the state holds as its summary: its whole view is read when it is opened (archived.ts; queue AQ).
+  const details = detailsPath(shownQueue);
+  const fullQueue = useQuery<QueueView>(projectId && details ? projectUrl(projectId, details) : undefined, shownQueue && queueVersionOf(shownQueue.id)).data;
+  const queue = openedQueue(shownQueue, fullQueue);
   const step = queue?.steps.find((s) => s.id === route.step);
   const close = () => nav.close("item");
   const openWaiting = (w: WaitingItem) => nav.closeThenItem("waiting", w.project, w.queue, attentionTarget(w), w.qid);

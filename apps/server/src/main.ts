@@ -14,9 +14,9 @@ import {
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, reviewStats, type ReviewStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
   SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, queueWorkedOn, stepsWorkedOn, ProjectModel, FileCache, useHomeReader, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
   projectIdeas, ideaMatches, ideaLinks, changeIdeaLinks, decideIdeaMatches, ideaStatuses, changeIdeaStatus, reconcileIdeaStatuses, readNotes, type IdeasResponse, type IdeaMatchesResponse,
-  previewIdeaHandoff, sendIdeaHandoff, retryIdeaHandoff,
+  previewIdeaHandoff, sendIdeaHandoff, retryIdeaHandoff, shownState,
 } from "@nexus/protocol";
-import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
+import { digestInput, newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
 import { Coordinator } from "./coordinator.ts";
 import { Capacity } from "./capacity.ts";
@@ -241,7 +241,8 @@ const live = new LiveStream({
   send: sendAll,
   listening: () => sockets.size > 0,
   sources: {
-    state: (id) => { const e = projects.get(id); return e && stateOf(e); },
+    // The dashboard's state: a closed queue that waits for nothing as its summary (queue AQ; GET …/queues/:queue below).
+    state: (id) => { const e = projects.get(id); const s = e && stateOf(e); return s && shownState(s); },
     summary: (id, s) => summaryOf(projects.get(id)!, s),
     log: (id, session, kind) => {
       const st = projects.get(id)!.store;
@@ -834,6 +835,16 @@ app.get("/api/projects/:id/sessions/:session/activity", (c) => {
   return c.json(items.slice(-Number(c.req.query("limit") ?? 300)));
 });
 
+// A queue's whole view (QueueView, as in the model's state): the dashboard reads it when it opens a queue that its state
+// holds as a summary (`archived`: closed and waiting for nothing; packages/protocol/src/archive.ts).
+app.get("/api/projects/:id/queues/:queue", (c) => {
+  const e = c.get("entry");
+  const s = stateOf(e);
+  if (!s) return c.json({ error: e.error }, 500);
+  const q = s.queues.find((x) => x.id === c.req.param("queue"));
+  return q ? c.json(q) : c.json({ error: "unknown queue" }, 404);
+});
+
 // Git on the dashboard (src/gitinfo.ts; local git only, never a fetch): a step's commits per round, a queue's branch.
 // null when the project is not a git repository (or nothing was recorded).
 app.get("/api/projects/:id/queues/:queue/steps/:step/commits", async (c) => {
@@ -909,15 +920,7 @@ app.get("/api/digest", (c) => {
     const state = stateOf(e);
     if (!state) continue;
     for (const q of state.queues) if (q.run) runs.push({ session: q.run.session, state: q.run.state, updated_at: q.run.updated_at });
-    const st = e.store;
-    const ids = st.sessionIds();
-    const recent = <T extends { at: string }>(xs: T[]) => xs.filter((x) => x.at > since);
-    events.push(...projectDigest({
-      state,
-      events: ids.flatMap((s) => recent(st.readEvents(s).entries)),
-      refusals: ids.flatMap((s) => recent(st.readRefusals(s).entries)),
-      activity: ids.flatMap((s) => recent(st.readActivity(s).entries.filter((a) => a.kind === "retry"))),
-    }, since));
+    events.push(...projectDigest(digestInput(e.store, state, since), since));
     running.push(...projectRunning(state));
   }
   // The usage line: the account's windows are server-wide, so its turns are every project's (turns.jsonl).

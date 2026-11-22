@@ -267,7 +267,8 @@ them.
 - **The state without closed queues' details**: the 7.3 MB a page reads at its start is mostly closed queues'
   timelines, which a list does not show. Their summaries in the state, their details read when a queue is opened, as
   the archiving decision says for logs (docs/design/model.md, "What it holds"). The largest remaining cost of a full
-  read, and so of every reconnect.
+  read, and so of every reconnect. Built in queue AQ ([archive.md](archive.md)): 7.4 MB became 1.5 MB on the
+  synthetic tree at 1×, 30.1 MB 6.2 MB at 4×.
 - **Compression**: `permessage-deflate` on the socket and gzip on the full reads (JSON of this shape shrinks several
   times); mostly for the phone over Tailscale.
 - **Git as a change**: the queue git and commits reads are narrowed to their queue's deltas, but commits move without a
