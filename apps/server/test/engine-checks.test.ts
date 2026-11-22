@@ -8,8 +8,8 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { ProjectStore, applyDraft, approveQueue, loadProjectState, readCapacity, routeAnswers, updateSettings, type ChecksFile } from "@nexus/protocol";
+import { join, resolve } from "node:path";
+import { ProjectStore, applyDraft, approveQueue, loadProjectState, onWrite, readCapacity, routeAnswers, updateSettings, type ChecksFile } from "@nexus/protocol";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Capacity } from "../src/capacity.ts";
 import { failedTests } from "../src/check-runs.ts";
@@ -483,6 +483,32 @@ test("an accept decided before a restart and not yet recorded as accepted is fin
     assert.deepEqual(x.store.queueIds().filter((id) => id.startsWith("CI")), ["CI"], "no second fix queue");
     assert.equal((x.store.readQueue("CI").description ?? "").split("\n").filter((l) => /^- \S+: queue Q, step Q1 /.test(l)).length, 1, "the occurrence once");
   } finally { fault?.clear(); x.stop(); }
+});
+
+test("a server that ends between the base run's failure and its acceptance: the next server finishes the acceptance and does not run the base again (queue LH, finding 14)", async () => {
+  const x = withOrchestrator(["Q"]);
+  x.plan("Q-unit", [1]); x.plan("Q-unit", [1], true);
+  let fault: ReturnType<typeof ProjectStore.faultWrites> | undefined;
+  // endBase writes the base run's failure; the write after it (accept's) fails, as at a server's end.
+  const file = join(x.store.queueDir("Q"), "checks.yaml");
+  const unhook = onWrite((f) => {
+    if (fault || resolve(f) !== resolve(file)) return;
+    if (x.store.readChecks("Q")?.steps.Q1?.sets[0]?.dispute?.base?.state === "failed") fault = ProjectStore.faultWrites({ file: "queues/Q/checks.yaml" });
+  });
+  try {
+    await x.hello();
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the acceptance's write refused", () => (fault?.failed() ?? 0) > 0);
+    unhook();
+    x.restart();
+    fault!.clear();
+    const set = () => x.sets("Q")[0]!;
+    assert.deepEqual([set().dispute?.base?.state, set().dispute?.outcome], ["failed", undefined], "the failure recorded, its acceptance not");
+    if (x.queue("Q").run?.state !== "running") x.engine.resume("Q");
+    await x.until("Q to finish", () => x.queue("Q").run?.state === "finished");
+    assert.deepEqual([set().state, set().dispute?.outcome, set().fix_queue], ["accepted", "accepted", { id: "CI", created: true }]);
+    assert.equal(x.runs().filter((r) => r.endsWith("@base")).length, 1, "the base run not run again");
+  } finally { unhook(); fault?.clear(); x.stop(); }
 });
 
 test("an unreadable checks.yaml while the checks run: the step does not go to its review, the run halts with the reason, and the check's end is no crash (queue LF, F6)", async () => {

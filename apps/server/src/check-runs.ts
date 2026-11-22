@@ -383,6 +383,9 @@ export class CheckRunner {
     const set = checkSetOf(q.check_runs, st.id, done.id);
     const ev = st.timeline.findLast((e): e is Disputed => e.type === "check.disputed" && e.at >= done.at);
     if (!set || !ev) return;
+    // The base run's failure recorded, its acceptance not (the server ended between endBase's two writes, queue LH,
+    // as F5 for a decided accept): the acceptance is finished now; the base is not run again.
+    if (set.dispute?.base?.state === "failed" && !set.dispute.outcome) return this.accept(q.id, st.id, done.id, state);
     if (!set.dispute) this.update(q.id, st.id, done.id, (s) => { s.dispute = { event: ev.id, name: ev.name, evidence: ev.evidence, at: ev.at, base: { state: "queued" } }; });
     const check = set.checks.find((c) => c.name === (set.dispute?.name ?? ev.name));
     const cwd = checkoutOf(this.store, q);

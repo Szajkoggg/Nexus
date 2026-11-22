@@ -12,6 +12,8 @@ import { AgentHost, ROLE_RECORDS, type Launch, type RoleRecord } from "../src/ag
 
 class Stand extends EventEmitter<AgentEvents> implements AgentProcess {
   state: "working" | "idle" | "exited" = "idle";
+  /** AgentProcess.settling: the test sets it (queue LH). */
+  settling = false;
   readonly pid = 4242;
   calls: string[] = [];
   readonly launch: Launch;
@@ -163,4 +165,18 @@ test("lateTurnMs: a host's own goes to every Claude process whose launch sets no
   const plain = new AgentHost(store, ROLE_RECORDS.conversation, { spawn: (l) => { const p = new Stand(l); spawned.push(p); return p; } });
   plain.start(s, () => claude(), {}, () => ({}));
   assert.equal(late(), undefined, "without one: Claude's default");
+});
+
+test("idle: not while a process settles, when a turn of the runtime's own may still start (queue LH, finding 13)", () => {
+  const { host, start, proc } = setup(ROLE_RECORDS.worker);
+  start();
+  assert.equal(host.idle(), true);
+  proc().send();
+  assert.equal(host.idle(), false, "working");
+  proc().turn();
+  proc().settling = true;
+  assert.equal(host.idle(), false, "settling: an update's drain would end the process with the message sent into its last turn");
+  proc().settling = false;
+  proc().emit("settled");
+  assert.equal(host.idle(), true);
 });

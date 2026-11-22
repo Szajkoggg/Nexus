@@ -135,8 +135,12 @@ export class AgentHost<E extends object = object> {
   /** The processes as last started, by session. */
   all(): Hosted<E>[] { return [...this.live.values()]; }
 
-  /** No process is in the middle of a turn. */
-  idle(): boolean { return !this.all().some((l) => l.proc.state === "working"); }
+  /**
+   * No process is in the middle of a turn, nor settling after one (AgentProcess.settling): then a turn of the
+   * runtime's own may still start with a message sent into the last one, which an update's drain ending the process
+   * now would lose (queue LH). Settling lasts a moment (lateTurnMs).
+   */
+  idle(): boolean { return !this.all().some((l) => l.proc.state === "working" || (l.proc.state === "idle" && !!l.proc.settling)); }
 
   /** A process is still running (after shutdown: not yet exited). */
   alive(): boolean { return this.all().some((l) => l.proc.state !== "exited"); }
