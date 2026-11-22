@@ -339,5 +339,20 @@ dropped as needless (the next message restarts it, and nothing runs meanwhile).
 pair with each value's source, and whether they differ. The running pair is the launch's, not the session file's:
 after a save the file already holds the next turn's values.
 
+**The editor (CM3).** `ModelAndEffort` (apps/web/src/components/ConversationSettings.tsx) sits under the header of
+every Ideas chat, whichever way it was opened: the conversation list, a step's "Chat about this" (`StepChat`, which
+opens the step's latest conversation or starts one) and a note's "Chat about this" (queue IC, a fresh idea chat). They
+all open the same `ChatColumn`, so there is one control, readable before the first message. It replaced the effort
+radio list under ⋯ (which wrote the effort alone, against the menu's own idea of the efforts) and the model and effort
+in the status line (which read the session file, already the next turn's values after a save). Its pure parts
+(apps/web/src/conversationSettings.ts) work out the summary, the selectors' default labels ("Default (gpt-6)",
+"Runtime default" when the head's `inherited` value is null), the efforts the draft's model takes (also an inherited
+model; where the runtime's list does not name its levels, the runtime's levels with a note, never a verdict) and the
+one PATCH (explicit nulls for inherited fields). The editor's draft lives in the component; a failed save shows the
+server's reason in the editor and leaves the draft, the composer's draft (its own store, drafts.ts) and the saved pair.
+A saved notice ("applies from the next reply", or that the running reply finishes on its pair) stays until a reply
+runs on the saved pair. The shared `ModelSelect` and `EffortSelect` (Settings.tsx) take an `id`, and `EffortSelect` a
+list of `offered` efforts, so the new-conversation form, run settings and this editor keep one look and behaviour.
+
 Lifecycle note (queue CM): `agent-host.ts` changed (restartAfterTurn waits for a queued turn; `launchedWith`; `cutOff`
 takes the role's waiting input), and `conversations.ts` holds input across a process's end.

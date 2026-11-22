@@ -110,6 +110,7 @@ for (const runtime of ["claude", "codex"] as const) {
         running: { model: null, effort: null },
         next: { model: "fake-b", effort: "high", model_from: "own", effort_from: "own" },
         changes: true,
+        inherited: { model: null, effort: null, model_from: "runtime", effort_from: "runtime" },
       }, "the running pair and the next turn's, apart");
       x.conversations.say(c.id, "Quick one");
       assert.equal(x.conversations.head(c.id).state, "working");
@@ -190,6 +191,9 @@ test("inherited and own values: the project's settings fill what the conversatio
     assert.deepEqual(x.settings(own.id).next, { model: "proj-m", effort: "low", model_from: "project", effort_from: "own" });
     assert.deepEqual(x.settings(codex.id).next, { model: null, effort: null, model_from: "runtime", effort_from: "runtime" }, "another runtime: its own defaults");
     assert.deepEqual(x.settings(old.id).next, x.settings(follows.id).next);
+    const fromProject = { model: "proj-m", effort: "medium", model_from: "project", effort_from: "project" };
+    assert.deepEqual(x.settings(own.id).inherited, fromProject, "what its own effort would go back to");
+    assert.deepEqual(x.settings(codex.id).inherited, { model: null, effort: null, model_from: "runtime", effort_from: "runtime" }, "unknown runtime defaults");
 
     updateSettings(x.store, { conversations: { effort: "high" } });
     assert.equal(x.settings(follows.id).next.effort, "high", "a project change reaches what is inherited");
@@ -412,7 +416,10 @@ test("a save reaches the dashboard in the live stream: the conversation's head c
 
     assert.equal((await call("PATCH", `/conversations/${id}`, { model: "fake-b", effort: "high" })).status, 200);
     await until("the head with the saved pair", () => heads().some((s) => s.next.effort === "high"), LONGER.step);
-    assert.deepEqual(heads().at(-1), { running: null, next: { model: "fake-b", effort: "high", model_from: "own", effort_from: "own" }, changes: false });
+    assert.deepEqual(heads().at(-1), {
+      running: null, next: { model: "fake-b", effort: "high", model_from: "own", effort_from: "own" }, changes: false,
+      inherited: { model: null, effort: "medium", model_from: "runtime", effort_from: "project" },
+    });
 
     const refused = await call("PATCH", `/conversations/${id}`, { effort: "ultra" });
     assert.equal(refused.status, 400);

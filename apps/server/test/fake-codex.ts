@@ -191,6 +191,11 @@ function take(more: string): void {
     const images = (): string[] => (m.params?.input ?? []).filter((x: { type?: string }) => x.type === "localImage").map((x: { path: string }) => x.path);
     switch (m.method) {
       case "initialize": reply({ userAgent: "fake-codex" }); break;
+      // The models it offers: FAKE_CODEX_MODELS, a JSON list of { model, efforts } (a capture's fixture), else none.
+      case "model/list":
+        reply({ data: (JSON.parse(process.env.FAKE_CODEX_MODELS ?? "[]") as { model: string; efforts?: string[] }[])
+          .map((x) => ({ model: x.model, displayName: x.model, supportedReasoningEfforts: (x.efforts ?? []).map((e) => ({ reasoningEffort: e })) })) });
+        break;
       case "thread/start": recordArgs({ method: m.method, model: m.params.model, approvalsReviewer: m.params.approvalsReviewer ?? null, approvalPolicy: m.params.approvalPolicy, sandbox: m.params.sandbox, cwd: m.params.cwd, writableRoots: m.params.config?.["sandbox_workspace_write.writable_roots"] ?? null, config: m.params.config ?? null, instructions: m.params.developerInstructions ?? null }); threadId = randomUUID(); reply({ thread: { id: threadId }, model: "fake-codex-model", reasoningEffort: "medium" }); break;
       case "thread/resume":
         recordArgs({ method: m.method, threadId: m.params.threadId, model: m.params.model ?? null, sandbox: m.params.sandbox, config: m.params.config ?? null, instructions: m.params.developerInstructions ?? null });

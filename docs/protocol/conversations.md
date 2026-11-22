@@ -292,8 +292,10 @@ drain, and an update's cut-off keeps it in the runtime record's `interrupted.ask
 `GET …/conversations/:cid` and the live stream's `session` message carry `settings` (`ConversationSettings` in
 `packages/protocol/src/api.ts`): `running`, the model and effort the running process was started with (null without a
 process; a null value: the runtime's default); `next`, those the next turn runs on, with `model_from` and
-`effort_from` (`own`, `project` or `runtime`); `changes`, whether they differ. `state` is `working` while input waits for
-the new process. `model` and `effort` beside them stay the conversation's own values.
+`effort_from` (`own`, `project` or `runtime`); `changes`, whether they differ; `inherited`, what each value would be
+without its own (the project's setting on its runtime, else the runtime's default as null), with `model_from` and
+`effort_from` (`project` or `runtime`), so the dashboard can name the default a choice goes back to. `state` is
+`working` while input waits for the new process. `model` and `effort` beside them stay the conversation's own values.
 
 **A conversation about a step** ("Chat about this"): `queue` and `step` are kept in `session.yaml` as `about`, never as
 `queue` (which makes a session a worker of the queue: `nexus status` would deliver the queue's notes to it and mark

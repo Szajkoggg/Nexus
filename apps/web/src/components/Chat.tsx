@@ -18,7 +18,8 @@ import { layerValue } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
 import { usePhone } from "../phone.ts";
 import { firstUnread, hasUnread, opening, placeKey, readPlace, seenUpTo, unreadCount, usePlaces, writePlace } from "../chatPlace.ts";
-import { EffortSelect, ModelSelect, useEfforts } from "./Settings.tsx";
+import { EffortSelect, ModelSelect } from "./Settings.tsx";
+import { ModelAndEffort } from "./ConversationSettings.tsx";
 import { rich, t } from "../i18n.ts";
 import { SentPictures, filesOf, usePictures } from "./Pictures.tsx";
 import { splitPictures, withPictures } from "../pictures.ts";
@@ -74,7 +75,7 @@ export function useOrchestrator(project: string | undefined) {
 }
 
 /** A chat: what it is (its header; on a desktop's orchestrator chat, in the middle column's header), the messages, and the composer. */
-function ChatColumn({ project, title, over, who, about, view, ready, error, place, status, showTools, onNeedTools, menu, empty, draft, placeholder, onSend, onStop, onBack, bare, search, wrapTitle }: {
+function ChatColumn({ project, title, over, who, about, settings, view, ready, error, place, status, showTools, onNeedTools, menu, empty, draft, placeholder, onSend, onStop, onBack, bare, search, wrapTitle, pairInStatus = true }: {
   /** The project: where pictures are uploaded, and served from. */
   project: string;
   title: string; over: string;
@@ -90,6 +91,10 @@ function ChatColumn({ project, title, over, who, about, view, ready, error, plac
   draft: string; placeholder: string; onSend: (text: string) => Promise<void>; onBack?: () => void;
   /** The chat's menu, at the right of its header. */
   menu?: MenuEntry[];
+  /** Under the header, above the messages: a conversation's model and effort (ConversationSettings.tsx). */
+  settings?: ReactNode;
+  /** The status line names the model and effort (the orchestrator's); a conversation's are in `settings` instead. */
+  pairInStatus?: boolean;
   /** No header of its own: the desktop's orchestrator chat, whose state is in the middle column's header. */
   bare?: boolean;
   search: Search;
@@ -143,13 +148,14 @@ function ChatColumn({ project, title, over, who, about, view, ready, error, plac
             <h2 className={`${wrapTitle ? "break-words" : "truncate"} font-semibold text-fg`}>{title}</h2>
             {about}
           </div>
-          <span className="text-xs text-fg-3">{statusLine(view, status)}</span>
+          <span className="text-xs text-fg-3">{statusLine(view, status, pairInStatus)}</span>
           <span className="ml-auto flex items-center gap-1.5">
             {ready && view?.session && <SearchButton open={search.open} onToggle={() => search.set(!search.open)} />}
             {menu && <Menu items={menu} down label={t("chat.actions")} />}
           </span>
         </header>
       )}
+      {settings}
       <QuoteTarget.Provider value={quote}>
       <QuoteSelection scroller={p.scroller} />
       <div className="relative flex min-h-0 flex-1 flex-col">
@@ -373,12 +379,16 @@ function usePlace(key: string, full: readonly ChatEntry[], ready: boolean, showT
   return { scroller, onScroll, unread, jump, follow };
 }
 
-/** What a chat's session is doing, its model, effort and its context: "ready · opus-5-5 · 212k tokens of context (21%)". */
-function statusLine(view: View | undefined, status: string): string {
+/**
+ * What a chat's session is doing, its model, effort (with `pair`) and its context: "ready · opus-5-5 · 212k tokens of
+ * context (21%)".
+ */
+function statusLine(view: View | undefined, status: string, pair = true): string {
   const rt = view?.runtime;
   const context = rt?.context_tokens && rt.context_window
     ? t("chat.context", { tokens: tokenCount(rt.context_tokens), pct: Math.round((100 * rt.context_tokens) / rt.context_window) }) : undefined;
   const model = rt?.model ? rt.model.replace(/^claude-/, "") : view?.model;
+  if (!pair) return `${status}${context ? ` · ${context}` : ""}`;
   return `${status}${model ? ` · ${model}` : ""}${view?.effort ? ` · ${t("run.effort", { effort: view.effort })}` : ""}${context ? ` · ${context}` : ""}`;
 }
 
@@ -758,7 +768,6 @@ function Conversations({ project, name, defaultRuntime, inline, desk, switcher }
   const showToolCalls = useCallback(() => setShowTools(true), []);
   const [searching, setSearching] = useState(false);
   useEffect(() => setSearching(false), [open]);
-  const efforts = useEfforts(current?.runtime === "codex" ? "codex" : "claude", current?.model ?? "");
   const patch = (body: unknown) => act(project, "PATCH", `/conversations/${enc(open!)}`, body).then(onChanged, (e: Error) => alert(e.message));
   // The menu of an open conversation: what its header had (Hand to orchestrator, More…) and the tool calls.
   const menu: MenuEntry[] | undefined = !creating && open && current ? [
@@ -785,10 +794,10 @@ function Conversations({ project, name, defaultRuntime, inline, desk, switcher }
     }] : []),
     { label: t("chat.rename"), onSelect: () => { const title = prompt(t("chat.topic"), current.title); if (title) void patch({ title }); } },
     { label: t(current.archived ? "chat.unarchive" : "chat.archive"), onSelect: () => void patch({ archived: !current.archived }) },
-    { heading: t("chat.effortHeading") },
-    { label: t("run.default"), checked: !current.effort, onSelect: () => void patch({ effort: null }) },
-    ...efforts.map((x) => ({ label: x, checked: current.effort === x, onSelect: () => void patch({ effort: x }) })),
   ] : undefined;
+  // Its model and effort (queue CM), once its own view is here; an external session's are not Nexus's to set.
+  const head = view?.session?.id === open ? view : undefined;
+  const runtime = head?.session?.runtime;
 
   return (
     <Panel inline={inline} desk={desk} which="ideas" head={desk && switcher(false)}>
@@ -839,7 +848,11 @@ function Conversations({ project, name, defaultRuntime, inline, desk, switcher }
             <AboutStep project={project} c={current} className="mt-1" />
             {view?.idea_context_error && <p role="alert" className="mt-2 text-xs text-warn">{view.idea_context_error}</p>}
             {current.about?.idea && current.archived && <p className="mt-2 text-xs text-warn">{t("ideas.chatArchived")}</p>}
-          </>} view={view} status={stateText(view)} onBack={() => nav.close("conversation")}
+          </>} view={view} status={stateText(view)} onBack={() => nav.close("conversation")} pairInStatus={false}
+          settings={head?.settings && head.session && (runtime === "claude" || runtime === "codex") && (
+            <ModelAndEffort key={open} project={project} id={open} runtime={runtime} own={head.session} settings={head.settings}
+              working={head.state === "working"} onSaved={onChanged} />
+          )}
           showTools={showTools} onNeedTools={showToolCalls} menu={menu} search={{ open: searching, set: setSearching }}
           empty={<>
             <p>{t("chat.ideasEmpty")}</p>

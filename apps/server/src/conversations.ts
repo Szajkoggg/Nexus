@@ -147,7 +147,11 @@ export class Conversations {
     const next = { model: v.model ?? null, effort: v.effort ?? null, model_from: from(s.model, c.model), effort_from: from(s.effort, c.effort) } as const;
     const was = this.host.launchedWith(s.id);
     const running = was ? { model: was.model ?? null, effort: was.effort ?? null } : null;
-    return { running, next, changes: !!running && (running.model !== next.model || running.effort !== next.effort) };
+    const inherited = {
+      model: (same ? c.model : undefined) ?? null, effort: (same ? c.effort : undefined) ?? null,
+      model_from: from(undefined, c.model) as "project" | "runtime", effort_from: from(undefined, c.effort) as "project" | "runtime",
+    };
+    return { running, next, changes: !!running && (running.model !== next.model || running.effort !== next.effort), inherited };
   }
 
   private canCompact(s: SessionFile): boolean { return s.runtime !== "external" && this.compacts(s.runtime); }
