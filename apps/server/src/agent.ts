@@ -151,6 +151,11 @@ export interface AgentProcess extends EventEmitter<AgentEvents> {
   cleanup?(): Promise<void>;
 }
 
+/** A message can reach the process: it has not exited, nor is it exiting (AgentProcess.exiting; queue CXD). */
+export function reachable(proc: AgentProcess): boolean {
+  return proc.state !== "exited" && !proc.exiting;
+}
+
 /**
  * Which runtimes compact a conversation on request (probed 2026-11-15 with small models, queue CC3): Claude Code 2.1.323
  * takes "/compact" as a user message on its stream-json input; Codex 0.167.2 has thread/compact/start. A runtime

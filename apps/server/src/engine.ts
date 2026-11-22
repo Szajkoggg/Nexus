@@ -15,7 +15,7 @@ import {
   type SessionView, type StepView, type PlanBy,
   addNote,
 } from "@nexus/protocol";
-import type { TurnFailure } from "./agent.ts";
+import { reachable, type TurnFailure } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import { nexusDenyRules } from "./claude.ts";
 import {
@@ -1174,7 +1174,7 @@ export class Engine implements Member {
    */
   private usageGate(queueId: string, state: ProjectState, run: RunFile, live: Live | undefined, failed?: { until: string; reason: string }): boolean {
     if (questionsHold(state, queueId, run.step)) return true;
-    if (!live || live.proc.state === "working" || live.proc.state === "exited" || live.proc.exiting || this.ending.has(live.session)) return false;
+    if (!live || live.proc.state === "working" || !reachable(live.proc) || this.ending.has(live.session)) return false;
     const q = state.queues.find((x) => x.id === queueId);
     const step = q?.steps.find((s) => s.id === run.step);
     const session = state.sessions.find((x) => x.id === run.session);
@@ -1454,7 +1454,7 @@ export class Engine implements Member {
   /** Hands unread inbox entries to a live session: inside a running turn, or as a new turn when it is idle. */
   private deliverInbox(state: ProjectState, l: Live): void {
     // A process Nexus is ending gets nothing more (a session taken over had its unread entries carried across).
-    if (l.proc.state === "exited" || l.proc.exiting || this.ending.has(l.session) || this.cleaning.has(l.proc)) return;
+    if (!reachable(l.proc) || this.ending.has(l.session) || this.cleaning.has(l.proc)) return;
     const s = state.sessions.find((x) => x.id === l.session);
     // While a switch waits for the old session's settling (switchWaits), only a stop reaches it: anything else would
     // start a turn there, taken for a late turn and ended with its process (queue LH); unread, it goes to the fresh

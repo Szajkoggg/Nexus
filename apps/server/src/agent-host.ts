@@ -7,7 +7,7 @@ import { join } from "node:path";
 import {
   appendTurn, now, readUsage, stepDefs, stepTags, writeUsage, type ProjectStore, type RuntimeFile, type SessionFile, type TokenCounts, type TurnRecord,
 } from "@nexus/protocol";
-import type { ActivityItem, AgentEvents, AgentProcess, RefusalItem, StreamFacts, TurnTokens } from "./agent.ts";
+import { reachable, type ActivityItem, type AgentEvents, type AgentProcess, type RefusalItem, type StreamFacts, type TurnTokens } from "./agent.ts";
 import { ClaudeSession, type ClaudeOptions } from "./claude.ts";
 import { CodexSession, type CodexOptions } from "./codex.ts";
 
@@ -133,12 +133,12 @@ export class AgentHost<E extends object = object> {
   }
 
   /**
-   * The session's process if a message can reach it: not exited, nor exiting (AgentProcess.exiting: exited, its last
-   * output still being read). A role that answers the user's messages starts a new one otherwise.
+   * The session's process if a message can reach it (agent.ts, reachable). A role that answers the user's messages
+   * starts a new one otherwise.
    */
   reachable(session: string): Hosted<E> | undefined {
-    const l = this.running(session);
-    return l && !l.proc.exiting ? l : undefined;
+    const l = this.live.get(session);
+    return l && reachable(l.proc) ? l : undefined;
   }
 
   /** The processes as last started, by session. */
