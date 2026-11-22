@@ -163,9 +163,9 @@ export function helpCommands(help: string): CliCommands {
   // One space before the second word: after more, a line's description begins (`nexus tags      the tags …`).
   for (const m of help.matchAll(/^\s*nexus ([a-z][\w-]*)(?: (\S+))?/gm)) {
     const [, command = "", second] = m;
-    if (!out.has(command)) out.set(command, new Set());
-    const subs = out.get(command);
-    if (subs === null || subs === undefined) continue;
+    if (out.get(command) === null) continue;
+    const subs = out.get(command) ?? new Set<string>();
+    out.set(command, subs);
     if (second === undefined || /^\[?--/.test(second)) continue;
     const literal = /^\[?([a-z][a-z|-]*)\]?$/.exec(second);
     if (literal?.[1]) for (const s of literal[1].split("|")) subs.add(s);
@@ -209,22 +209,27 @@ export function proseProblems(files: ReadonlyMap<string, string>, facts: ProseFa
   const problems: string[] = [];
   for (const [path, text] of files) {
     for (const { span, n } of codeSpans(text)) {
-      const cmd = /^nexus ([a-z][\w-]*)(?: +([^\s]+))?/.exec(span);
-      if (cmd) {
-        const [, command = "", second = ""] = cmd;
-        const subs = facts.commands.get(command);
-        if (subs === undefined && !onPurpose(`nexus ${command}`)) problems.push(`${path}:${n}: \`${span}\`: the CLI has no command nexus ${command}`);
-        else if (subs && subs.size > 0 && /^[a-z][a-z-]*$/.test(second) && !subs.has(second) && !onPurpose(`nexus ${command} ${second}`)) {
-          problems.push(`${path}:${n}: \`${span}\`: nexus ${command} has no subcommand ${second} (it has ${[...subs].join(", ")})`);
-        }
-        continue;
-      }
-      const p = span.replace(/(:\d+(-\d+)?|#[\w-]*)$/, "");
-      if (!/^[\w.@-]+(\/[\w.@-]+)+\/?$/.test(p)) continue;
-      if (!facts.roots.has(p.slice(0, p.indexOf("/")))) continue;
-      const at = p.replace(/\/$/, "");
-      if (!facts.exists(at) && !onPurpose(at)) problems.push(`${path}:${n}: \`${span}\` names a path that does not exist`);
+      const problem = /^nexus /.test(span) ? commandProblem(span, facts.commands) : pathProblem(span, facts);
+      if (problem) problems.push(`${path}:${n}: \`${span}\`${problem}`);
     }
   }
   return problems;
+}
+
+/** What is wrong with a `nexus <command> [<subcommand>]` span (the text after the span in a problem), or undefined. */
+function commandProblem(span: string, commands: CliCommands): string | undefined {
+  const [, command = "", second = ""] = /^nexus ([a-z][\w-]*)(?: +(\S+))?/.exec(span) ?? [];
+  if (!command) return undefined;
+  const subs = commands.get(command);
+  if (subs === undefined) return onPurpose(`nexus ${command}`) ? undefined : `: the CLI has no command nexus ${command}`;
+  if (subs === null || subs.size === 0 || !/^[a-z][a-z-]*$/.test(second) || subs.has(second)) return undefined;
+  return onPurpose(`nexus ${command} ${second}`) ? undefined : `: nexus ${command} has no subcommand ${second} (it has ${[...subs].join(", ")})`;
+}
+
+/** What is wrong with a span that names a repository path (its `:line` or `#anchor` dropped), or undefined. */
+function pathProblem(span: string, facts: ProseFacts): string | undefined {
+  const p = span.replace(/(:\d+(-\d+)?|#[\w-]*)$/, "");
+  if (!/^[\w.@-]+(\/[\w.@-]+)+\/?$/.test(p) || !facts.roots.has(p.slice(0, p.indexOf("/")))) return undefined;
+  const at = p.replace(/\/$/, "");
+  return facts.exists(at) || onPurpose(at) ? undefined : " names a path that does not exist";
 }
