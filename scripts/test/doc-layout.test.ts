@@ -1,5 +1,6 @@
 // The documents split by topic (docs/doc-split-plan.md; PROTOCOL.md and DESIGN.md): the index lists every topic file and only existing ones, no
-// relative link or anchor under docs/ is broken, and a topic file over about 40 KB is warned about (never failed). The
+// relative link or anchor under docs/ is broken, a topic file over about 40 KB is warned about (never failed), and the
+// prose of AGENTS.md, README.md and docs/ names only existing repository paths and nexus commands. The
 // checks (scripts/doc-layout.ts) run on faulty examples first, then on the real files. The text-only-moved proof of a
 // split is scripts/check-doc-split.ts, against the commit the split began from.
 import { test } from "node:test";
@@ -7,7 +8,8 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { brokenLinks, contentsProblems, largeTopics, SPLITS, TOPIC_WARN_BYTES } from "../doc-layout.ts";
+import { execFileSync } from "node:child_process";
+import { ABSENT_ON_PURPOSE, brokenLinks, contentsProblems, helpCommands, largeTopics, proseProblems, SPLITS, TOPIC_WARN_BYTES } from "../doc-layout.ts";
 import { differences } from "../check-doc-split.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -73,6 +75,54 @@ test("the proof that a split only moved text finds a rewritten, a dropped and an
   assert.equal(differences(original, idx, [one, two + "\nExtra.\n"]).length, 1);
 });
 
+test("the CLI's commands are read from its help: literal subcommands, or a free word after the command", () => {
+  const help = [
+    "  nexus step start <step>",
+    "  nexus step done <step> --summary <text>",
+    "  nexus check <step> <name> --ok",
+    "  nexus check decide <queue>",
+    "  nexus tags                  the tags a step may carry",
+    "  nexus tags propose --area <name>",
+    "  nexus static-analysis [status]   whether",
+    "  nexus status [--all]",
+  ].join("\n");
+  const c = helpCommands(help);
+  assert.deepEqual([...c.keys()], ["step", "check", "tags", "static-analysis", "status"]);
+  assert.deepEqual([...(c.get("step") ?? [])], ["start", "done"]);
+  assert.equal(c.get("check"), null);
+  assert.deepEqual([...(c.get("tags") ?? [])], ["propose"]);
+  assert.deepEqual([...(c.get("static-analysis") ?? [])], ["status"]);
+  assert.deepEqual([...(c.get("status") ?? [])], []);
+});
+
+test("prose naming a path or a nexus command that does not exist fails; placeholders, code blocks and other folders do not", () => {
+  const facts = {
+    exists: (p: string) => ["docs/a.md", "scripts", "scripts/x.ts"].includes(p),
+    roots: new Set(["docs", "scripts"]),
+    commands: helpCommands(["  nexus step start <step>", "  nexus check <step> --ok", "  nexus status [--all]"].join("\n")),
+  };
+  const good = [
+    "See `docs/a.md#part`, `scripts/x.ts:12`, `scripts/`, `docs/<file>.md`, `.nexus/queues/Q`, `protocol/b.md`,",
+    "`nexus step start S1`, `nexus check S1 lint --ok`, `nexus status --all`, `nexus step`, `nexus step <step>`.",
+    "",
+    "```",
+    "nexus nothing `scripts/gone.ts`",
+    "```",
+  ].join("\n");
+  assert.deepEqual(proseProblems(new Map([["docs/a.md", good]]), facts), []);
+  const bad = "Run `scripts/gone.ts` and `docs/old/b.md`,\nthen `nexus import x.md` and `nexus step begin S1`.\n";
+  assert.deepEqual(proseProblems(new Map([["AGENTS.md", bad]]), facts), [
+    "AGENTS.md:1: `scripts/gone.ts` names a path that does not exist",
+    "AGENTS.md:1: `docs/old/b.md` names a path that does not exist",
+    "AGENTS.md:2: `nexus import x.md`: the CLI has no command nexus import",
+    "AGENTS.md:2: `nexus step begin S1`: nexus step has no subcommand begin (it has start)",
+  ]);
+  // What the prose names on purpose passes: the path and what is under it.
+  const kept = [...ABSENT_ON_PURPOSE.keys()][0] ?? "";
+  const named = `Notes in \`${kept}\` and \`${kept}/x.md\`.`;
+  assert.deepEqual(proseProblems(new Map([["docs/a.md", named]]), { ...facts, roots: new Set([kept.split("/")[0] ?? ""]) }), []);
+});
+
 // ---------------------------------------------------------------- the real files
 
 function markdownFiles(dir: string): string[] {
@@ -103,4 +153,17 @@ test("no relative link or anchor under docs/ is broken", () => {
   const files = new Map<string, string>();
   for (const path of markdownFiles("docs")) files.set(path, readFileSync(join(ROOT, path), "utf8"));
   assert.deepEqual(brokenLinks(files, (p) => existsSync(join(ROOT, p))), []);
+});
+
+test("the prose of AGENTS.md, README.md and docs/ names only existing repository paths and nexus commands", () => {
+  const files = new Map<string, string>();
+  for (const path of ["AGENTS.md", "README.md", ...markdownFiles("docs")]) files.set(path, readFileSync(join(ROOT, path), "utf8"));
+  const main = readFileSync(join(ROOT, "packages/cli/src/main.ts"), "utf8");
+  const start = main.indexOf("const HELP = `");
+  assert.ok(start >= 0, "the CLI's help text is found in packages/cli/src/main.ts");
+  const commands = helpCommands(main.slice(start, main.indexOf("\n`;", start)));
+  assert.ok(commands.has("step") && commands.has("server"), "the help names the CLI's commands");
+  const tracked = execFileSync("git", ["ls-files"], { cwd: ROOT, encoding: "utf8" }).split("\n").filter(Boolean);
+  const roots = new Set(tracked.map((f) => f.split("/")[0] ?? ""));
+  assert.deepEqual(proseProblems(files, { exists: (p) => existsSync(join(ROOT, p)), roots, commands }), []);
 });

@@ -1,6 +1,7 @@
 // The layout of the documents split by topic (docs/doc-split-plan.md): an index file (docs/PROTOCOL.md) with a "Contents"
 // section, and one topic file per subject in a folder beside it (docs/protocol/). Pure checks over file contents, so a test
 // can show them on faulty examples; scripts/test/doc-layout.test.ts runs them on the real files.
+// Besides, the prose check (proseProblems): backticked repository paths and nexus commands in the text must exist.
 
 /** A split document: its index file and the folder of its topic files, both relative to the repository. */
 export interface Split {
@@ -148,4 +149,82 @@ export function largeTopics(sizes: ReadonlyMap<string, number>): string[] {
         ? `${path} is ${kb} KB (a known exception: one section)`
         : `${path} is ${kb} KB: split it along its headings, and list the parts in the Contents`;
     });
+}
+
+/**
+ * The `nexus` commands the CLI's help text names: command → its literal subcommands (`step` → start, progress …), or
+ * null where the word after the command is free (an id, a text: `nexus check <step>`, `nexus run <queue>`).
+ */
+type CliCommands = Map<string, Set<string> | null>;
+
+/** The commands of the CLI's help text (each line `  nexus <command> [<subcommand>|<placeholder>] …`). */
+export function helpCommands(help: string): CliCommands {
+  const out: CliCommands = new Map();
+  // One space before the second word: after more, a line's description begins (`nexus tags      the tags …`).
+  for (const m of help.matchAll(/^\s*nexus ([a-z][\w-]*)(?: (\S+))?/gm)) {
+    const [, command = "", second] = m;
+    if (!out.has(command)) out.set(command, new Set());
+    const subs = out.get(command);
+    if (subs === null || subs === undefined) continue;
+    if (second === undefined || /^\[?--/.test(second)) continue;
+    const literal = /^\[?([a-z][a-z|-]*)\]?$/.exec(second);
+    if (literal?.[1]) for (const s of literal[1].split("|")) subs.add(s);
+    else out.set(command, null);
+  }
+  return out;
+}
+
+/** The inline code spans of a Markdown text's prose (outside fenced code blocks), with their lines. */
+function codeSpans(text: string): { span: string; n: number }[] {
+  const out: { span: string; n: number }[] = [];
+  for (const { n, line } of proseLines(text)) for (const m of line.matchAll(/`([^`]+)`/g)) if (m[1]) out.push({ span: m[1].trim(), n });
+  return out;
+}
+
+/** What the prose check knows of the repository: whether a path exists, its top-level entries, the CLI's commands. */
+interface ProseFacts {
+  exists: (path: string) => boolean;
+  roots: ReadonlySet<string>;
+  commands: CliCommands;
+}
+
+/**
+ * What the prose names on purpose although the repository does not have it, with why: a path (and everything under
+ * it), or a command as `nexus <command> <subcommand>`. Keep it short; a stale name is fixed in the text instead.
+ */
+export const ABSENT_ON_PURPOSE = new Map<string, string>([
+  ["docs/ideas", "the user's own notes, kept beside the repository but not in it"],
+  ["docs/QUEUE.md", "a file of another project (Honeycomb)"],
+  ["docs/protocol/README.md", "the layout the split plan weighed and did not take"],
+]);
+
+const onPurpose = (name: string): boolean => [...ABSENT_ON_PURPOSE.keys()].some((k) => name === k || name.startsWith(`${k}/`));
+
+/**
+ * Inline code in the prose of `files` that names what does not exist: a repository path (its first part one of
+ * `roots`, without placeholders such as `<id>` or `*`) that is not there, or a `nexus <command> [<subcommand>]` the
+ * CLI's help does not name; ABSENT_ON_PURPOSE passes. A path's `:line` or `#anchor` is dropped first.
+ */
+export function proseProblems(files: ReadonlyMap<string, string>, facts: ProseFacts): string[] {
+  const problems: string[] = [];
+  for (const [path, text] of files) {
+    for (const { span, n } of codeSpans(text)) {
+      const cmd = /^nexus ([a-z][\w-]*)(?: +([^\s]+))?/.exec(span);
+      if (cmd) {
+        const [, command = "", second = ""] = cmd;
+        const subs = facts.commands.get(command);
+        if (subs === undefined && !onPurpose(`nexus ${command}`)) problems.push(`${path}:${n}: \`${span}\`: the CLI has no command nexus ${command}`);
+        else if (subs && subs.size > 0 && /^[a-z][a-z-]*$/.test(second) && !subs.has(second) && !onPurpose(`nexus ${command} ${second}`)) {
+          problems.push(`${path}:${n}: \`${span}\`: nexus ${command} has no subcommand ${second} (it has ${[...subs].join(", ")})`);
+        }
+        continue;
+      }
+      const p = span.replace(/(:\d+(-\d+)?|#[\w-]*)$/, "");
+      if (!/^[\w.@-]+(\/[\w.@-]+)+\/?$/.test(p)) continue;
+      if (!facts.roots.has(p.slice(0, p.indexOf("/")))) continue;
+      const at = p.replace(/\/$/, "");
+      if (!facts.exists(at) && !onPurpose(at)) problems.push(`${path}:${n}: \`${span}\` names a path that does not exist`);
+    }
+  }
+  return problems;
 }

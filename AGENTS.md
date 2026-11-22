@@ -67,7 +67,10 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   or `nexus doc docs/DESIGN.md` or `nexus doc docs/PROTOCOL.md` and the file named there). A new topic goes into a new file, listed in the
   contents. A topic file that has grown past about 40 KB is split along its headings, and the contents with it.
   `scripts/test/doc-layout.test.ts` checks the contents and every relative link and anchor, and warns about a
-  large file. Cite a section as `docs/protocol/<file>.md, "Section"` (or docs/design/) or `<file>#anchor`, never by line number.
+  large file; it also checks the prose (outside code blocks): a backticked repository path (`scripts/capture.ts`) must exist,
+  and a backticked `nexus <command> [<subcommand>]` must be one the CLI's help names. A name the text means although it
+  does not exist (another project's file, a layout not taken) goes into `ABSENT_ON_PURPOSE` in `scripts/doc-layout.ts`,
+  with why. Cite a section as `docs/protocol/<file>.md, "Section"` (or docs/design/) or `<file>#anchor`, never by line number.
 - **Agents: lines**: a commit that changes something agents rely on (a CLI command, a briefing, the protocol, or a
   file an agent reads or writes) carries a line `Agents: <what changed>` in its message, one per change, written for
   an orchestrator whose briefing is older. At a deploy, every project's orchestrator is told these lines.
