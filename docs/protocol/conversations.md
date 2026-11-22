@@ -10,7 +10,7 @@ See also: [Stopping a chat agent's turn](orchestrator.md#stopping-a-chat-agents-
 role `conversation`: a thinking partner the user talks with about the project, one session per topic, with its chat
 in `chat.jsonl` (`from: partner` for its replies, whole). It reads the whole project and writes only in `notes_dir`
 (relative to the root, checked to lie inside it): Claude Code runs it in `dontAsk` mode allowed `Read`, `Grep`,
-`Glob`, `nexus status`, `nexus help`, `nexus doc`, `nexus tags` and read-only git (`git log`, `git status`, `git diff`, `git show`) on both shell
+`Glob`, `nexus status`, `nexus ideas status`, `nexus help`, `nexus doc`, `nexus tags` and read-only git (`git log`, `git status`, `git diff`, `git show`) on both shell
 tools (`Bash(nexus status:*)` and `PowerShell(nexus status:*)`, and so on), and `Edit(<notes_dir>/**)` and `nexus covers`
 (which appends to its own events) only with a notes folder; Codex runs it
 with `notes_dir` as its working directory in a `workspace-write` sandbox whose one other writable root is its own session

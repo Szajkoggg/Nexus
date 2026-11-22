@@ -61,7 +61,7 @@ test("refusals: no workaround, one simpler retry, then report", () => {
 test("commits: a clean tree at every step's end, the commit named, only the step's own files", () => {
   const t = nexus("help", "commits");
   assert.match(t, /Every commit belongs to exactly one step/);
-  assert.match(t, /nexus step done <step> --commit <sha>/);
+  assert.match(t, /nexus step done <step> --summary "\.\.\." --commit <sha>/);
   assert.match(t, /Leave the working tree clean at the step's end/);
   assert.match(t, /never commit changes you did not make/);
 });

@@ -5,8 +5,8 @@ Part of [the protocol](../PROTOCOL.md).
 ## The `nexus` CLI
 
 The only interface agents use. It finds its session from the `NEXUS_SESSION` and `NEXUS_DIR` environment variables
-(set by Nexus when it launches a session, or by `nexus attach` for a session started by hand), validates the
-arguments against the protocol and appends one event.
+(set by Nexus when it launches a session; for a session started by hand `nexus attach` prints the id, to be given as
+`NEXUS_SESSION` or as `--session <id>` to every command), validates the arguments against the protocol and appends one event.
 
 ```
 nexus status                                   # the current queue, step, notes and unanswered questions, as text
@@ -53,6 +53,10 @@ nexus review accept W W3 --note "what it checked"   # level 2 only; send-back as
 nexus review pass-on W W3 --why criterion,doubt --findings "what it checked and what it could not"   # to the orchestrator; reasons: criterion, deviation, question, limit, doubt, level
 # orchestrator only
 nexus queue draft <file.yaml|->                # a new queue, or a change to one: a new revision
+nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift [--continued-in <refs>] --reason "..."   # housekeeping (see "The orchestrator"); done, approving and lifting are the user's
+nexus review accept|send-back|ask-user|provisional <queue> <step> ...   # the orchestrator's decision on a step waiting for its review (see "The orchestrator"); a review helper has the first two for its own step (below)
+nexus run <queue> cancel-start --reason "..."   # takes a queue the orchestrator planned out of the plan
+nexus plan propose <queue> [--after <queue>]... --reason "..."   # propose to the user a new list of predecessors that changes ones the user set (see "The plan")
 nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF]   # writes .nexus/drafts/BF.yaml to complete and upload
 nexus recurring set weekly --template maintenance [--set scope=...] (--every "mon 03:00" | --after-queues 5) [--maintenance survey|fix_small] [--reason ...]   # through the server; the user approves it
 nexus static-analysis decline --reason "..."  # the user's no to the static-analysis template: no reminder for 90 days
@@ -72,11 +76,14 @@ nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring)
                                                # a kept .nexus/ (a project removed from Nexus) brings it back under its id
 nexus import <file.md> [--prefix X]            # one-time import of queues written as Markdown tables
 nexus note <queue> <step> <text> [--from user|orchestrator]   # until the dashboard can add notes
+nexus server status                            # the version, the steps running in each project, and an update in progress
 nexus server perf                              # the server's measurements since its start: event loop delay, requests by route, measured operations, the latest blocks over 200 ms
 nexus server away [on --until <8:00|ISO> | off]  # the user's away mode (refused from any agent session); no argument: its state
 nexus server update --after <queue>[/<step>] [--ref <ref>]   # plan a deploy for after a step or queue of this project (the user, or an orchestrator the user asked)
 nexus server update --at <HH:MM|"YYYY-MM-DD HH:MM"> [--deadline <time>] [--ref <ref>]   # plan a deploy for a time, with an optional deadline
 nexus server cancel-plan                       # cancel the planned deploy (and the drain it started)
+nexus server update [--now] [--ref <ref>]      # deploy now: let running steps finish (--now: stop them), move the live worktree to <ref> (default main), build, restart; every `server update` and `server cancel` form: only the user, or an orchestrator the user asked in the chat and then only that (AGENTS.md); workers and thinking partners are refused
+nexus server cancel                            # give up waiting for a deploy; the held queues go on (same rule as `server update`)
 ```
 
 A command line the CLI cannot take (an unknown option, an option without its value, a value the protocol does not know)

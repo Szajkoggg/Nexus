@@ -28,7 +28,7 @@ const HELP = `nexus — report to and manage Nexus (protocol 1)
 Agent commands (session from NEXUS_SESSION or --session):
   nexus status [--all] [--queue <id>]           current queue, step, notes and open questions (without a
                                                 session: the queues at work, then the approved ones not running).
-                                                An orchestrator's: the open queues, the finished ones counted, the
+                                                An orchestrator's or a thinking partner's: the open queues, the finished ones counted, the
                                                 live worker sessions, those of open queues and the 10 latest others
                                                 (cards cut short), what waits for the user, the machine; --all: every
                                                 queue and session, cards whole (to choose an older session to
@@ -109,15 +109,16 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus review pass-on <queue> <step> --why <reasons> --findings <text>   (the step's review helper only) to the
                                       orchestrator; reasons: criterion, deviation, question, limit, doubt, level
   nexus review ask-user <queue> <step> <why>                      (orchestrator only) hand the review to the user
-  nexus review provisional <queue> <step> [--note <text>]        (orchestrator only) level 3: accept provisionally;
-                                      the run goes on, the user confirms it or asks a fix on their return
+  nexus review provisional <queue> <step> [--note <text>]        (orchestrator only) a step at review level 3 (or at
+                                      level 2 while the user is away): accept provisionally; the run goes on, the
+                                      user confirms it or asks a fix on their return
   nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift [--continued-in <refs>] --reason <text>
                                       (orchestrator only) housekeeping: skip a pending, stopped or failed step; close a
                                       halted run of a queue whose steps are all done or skipped; cancel a queue that is
                                       not running; propose that the user lift a stop. Done, approving and lifting are the
                                       user's. --continued-in FL4,FL5 (steps, QX/QX2, queues) with skipped: the step's own
                                       work is done and went on there, or they did it; also on a step skipped already
-  nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>... | --next | --at "YYYY-MM-DD HH:MM" | --at usage-reset]   (orchestrator only; start --after: into the plan, when those queues are done (repeat it for each); --next: into the plan with none before it; --at: at that local time, or when the runtime's usage window resets)
+  nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>]... | --next | --at "YYYY-MM-DD HH:MM" | --at usage-reset]   (orchestrator only; start --after: into the plan, when those queues are done (one --after for each); --next: into the plan with none before it; --at: at that local time, or when the runtime's usage window resets)
   nexus run <queue> cancel-start --reason <text>   (orchestrator only: takes the queue out of the plan; not one the user put in)
   nexus plan propose <queue> [--after <queue>]... --reason <text>   (orchestrator only) propose to the user a new list of
                                       predecessors that changes dependencies the user set; the user accepts or declines

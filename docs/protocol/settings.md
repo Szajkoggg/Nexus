@@ -10,7 +10,7 @@ for a project then. Same paths as in `project.yaml`:
 
 ```yaml
 protocol: 1
-defaults: { stop_conditions: [], review_level: 2, review_send_back_limit: 2, context_reuse_tokens: 300000,
+defaults: { stop_conditions: [], review_level: 2, review_send_back_limit: 2, check_fix_limit: 3, context_reuse_tokens: 300000,
             context_care: true, protect_nexus: true, push_accepted: false, provisional_counts: true,
             merge_back: false, resolve_conflicts: false, usage_pause_threshold: 0.9, max_running: 2 }
 runtimes:
@@ -64,7 +64,7 @@ one: `null`). The effective settings do not change. It writes only such a file, 
 
 | Kind | Settings |
 |---|---|
-| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_tokens`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`, `max_running` (see ["One queue per checkout, and a limit"](git.md#one-queue-per-checkout-and-a-limit)), `check_fix_limit` (see ["Checks run by Nexus"](checks.md#checks-run-by-nexus)). `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `fallback`, `notify`, `context_threshold`. `languages`: `reader`. `kinds.<kind>`: `runtime`, `model`, `effort` (a model or effort may be the project's own `null`: the project's for that runtime), `fallback`. `review_helper`: `enabled`, `runtime`, `model`, `effort` (likewise `null`), `audit_rate` (see ["The review helper"](review.md#the-review-helper)) |
+| Global, with a project override | `defaults`: `stop_conditions`, `review_level`, `review_send_back_limit`, `context_reuse_tokens`, `context_care`, `protect_nexus`, `push_accepted`, `provisional_counts`, `merge_back`, `resolve_conflicts`, `usage_pause_threshold`, `max_running` (see ["One queue per checkout, and a limit"](git.md#one-queue-per-checkout-and-a-limit)), `check_fix_limit` (see ["Checks run by Nexus"](checks.md#checks-run-by-nexus)). `runtimes`: `default`; `claude`: `model`, `effort`, `permission_mode`; `codex`: `model`, `effort`, `sandbox`, `approval_policy`, `approvals_reviewer`. `conversations`: `runtime`, `model`, `effort`, `web`. `orchestrator`: `runtime`, `model`, `effort`, `fallback`, `notify`, `context_threshold_tokens` (`context_threshold`, its old key, is ignored when read). `languages`: `reader`. `kinds.<kind>`: `runtime`, `model`, `effort` (a model or effort may be the project's own `null`: the project's for that runtime), `fallback`. `review_helper`: `enabled`, `runtime`, `model`, `effort` (likewise `null`), `audit_rate` (see ["The review helper"](review.md#the-review-helper)) |
 | Project only | `name`, `defaults.worktree_dir`, `defaults.worktree_setup`, `defaults.worktree_setup_inputs` (see ["Without a model"](git.md#without-a-model)), `defaults.checks`, `runtimes.claude.allowed_tools` (the project's own allow rules), `runtimes.codex.mcp_servers` (the user's Codex MCP servers, by name, that Codex workers keep; empty by default), `conversations.notes_dir`, `languages.working` (`id` and `root` identify the project) |
 | Global only | Remote access (`<NEXUS_HOME>/auth.json`, `push.json`), the deploy push (`deploy.json`), the server; each stays in its own file |
 | State, not a setting | `orchestrator.session` |

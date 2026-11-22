@@ -22,8 +22,8 @@ step", ["Without a model"](git.md#without-a-model)). A step's **review level** s
 With `review_helper.enabled` on (queue RH), a short-lived review helper takes the orchestrator's routine reviews at
 levels 2 and 3 within these rules; see "The review helper".
 
-**Provisional acceptances.** A `review.provisional` (only the orchestrator's, only of a level-3 step waiting for its
-review; any other is ignored with a warning) makes the step `done` with `provisional` (`at`, `event`, `text?`) on the
+**Provisional acceptances.** A `review.provisional` (only the orchestrator's, only of a step waiting for its review that
+is at level 3, or at level 2 while away mode is on; any other is ignored with a warning) makes the step `done` with `provisional` (`at`, `event`, `text?`) on the
 derived step, and the run goes on. Until the user deals with it, it is in the **return batch**: one item of kind
 `provisional` in the attention list ("N provisional acceptances wait for your confirmation"), with `provisional`, the
 steps oldest first (`queue`, `step`, `title`, `at`, `text?`, `summary?`); a finished queue's steps too. For each the
@@ -113,7 +113,7 @@ user is ignored (with a warning); the user may accept either. Workers may write 
 ## Sending a step back
 
 One server action (`sendBack` in `packages/protocol/src/actions.ts`) sends a step in review back to its worker, with
-who sends it (`orchestrator` or `user`) and the text. The orchestrator's comes from `nexus review send-back` (its
+who sends it (`orchestrator`, `helper` or `user`) and the text. The orchestrator's (and the review helper's) comes from `nexus review send-back` (its
 `review.sent_back` event, which the server carries out and answers in `applied.jsonl`); the user's is **Fix it** in
 the dashboard (`POST …/steps/:s/send-back`), for which the server writes `review.sent_back` as the user's session, the
 text verbatim (it must not be empty). Picture comments (N8.3) are a user's Fix it.
@@ -188,7 +188,7 @@ send-back` and `nexus review pass-on`, each on both shell tools (`Bash(nexus rev
 never. Codex: its session folder as the working directory in a `workspace-write` sandbox whose only writable root it
 is (for the CLI's events), approval `never`, without the user's own Codex tools; it reads the checkout by absolute path.
 The CLI takes the three review commands from a helper session only for the step in its `about`, while the step's
-`helper` is that session and `running`; it refuses a helper every command but `nexus status`, `nexus help` and those
+`helper` is that session and `running`; it refuses a helper every command but `nexus status`, `nexus help`, `nexus doc` and those
 three (`nexus review ask-user`, `provisional`, `add`, `nexus ask`, `nexus step …`: "a review helper only reads and
 decides its review"). A refused action is
 recorded in its `refusals.jsonl` like any session's; its briefing asks it to report the refusal in its verdict (pass on

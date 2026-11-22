@@ -101,8 +101,9 @@ user-message behaviour remain.
 - `nexus review accept <queue> <step> [--note <text>]`, `nexus review send-back <queue> <step> <what to fix>` and
   `nexus review ask-user <queue> <step> <why>` write `review.accepted` (the note as its `text`), `review.sent_back`
   and `review.asked_user`; `nexus review provisional <queue> <step> [--note <text>]` writes `review.provisional`
-  (refused for a step not at review level 3). The CLI refuses them from any session but an orchestrator, and for a
-  step that is not waiting for the orchestrator's review. The orchestrator's overview marks a step accepted
+  (refused for a step not at review level 3, or at level 2 while away mode is on). The CLI refuses them from any session but an orchestrator, and for a
+  step that is not waiting for the orchestrator's review; `accept` (at review level 2) and `send-back` are also taken from the step's review helper,
+  for the step it was started for (see "The review helper" in review.md). The orchestrator's overview marks a step accepted
   provisionally: waiting for the user's confirmation, confirmed, or with the fix the user asked. `send-back` waits for the server's result and prints it ("sent back to its
   worker as round N", or that the step goes to the user beyond the limit).
 - `nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift [--continued-in <refs>] --reason …` sends `status.set`
@@ -116,7 +117,7 @@ user-message behaviour remain.
   nor the pause of a server restart or of an update), when a step waits for its review ("Step S of queue X is done and
   waits for your review: <summary>", with the step's goal, acceptance, the checks reported this round and those of the
   queue not reported, the review material of the round, the commits, and the commands: accept, send back, ask the
-  user, and at review level 3 also `nexus review provisional`; key
+  user, and at review level 3 (or 2 while the user is away) also `nexus review provisional`; key
   `notify:review:<queue>:<step>:<finished_at>`, once per round and session, also for a step that entered review before
   the session started, so a reset orchestrator is told; a step waiting for it starts an orchestrator that has no
   session), and when a run halts or finishes. Whatever `notify` says, like a rejection, it is told the user's Fix it on

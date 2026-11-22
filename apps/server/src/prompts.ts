@@ -85,7 +85,7 @@ Report through the \`nexus\` command (on PATH; your session is set in the enviro
 - nexus review add <step> <file|url>... --label "..."       other review material (documents, data, links)
 - nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, only where you run them: where the step's opening says Nexus runs them, it runs and records them itself after your \`nexus step done\`, and this is refused. Otherwise report each with how long it ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (\`nexus check <step> "npm test" --ok …\`, not "test"): a check reported under another name counts as not reported
 - nexus check <step> <name> --unrelated --evidence "..."   in a check-fix round, a failed check that is not your work's failure (it fails on the base too, a test you did not touch): Nexus runs it on the queue's base commit and decides by it; end your turn without \`nexus step done\`
-- nexus metric record <name> <value>                        a value of one of the project's metrics, when the step asks you to measure one (\`nexus metric list\` shows them); it is kept with your step and HEAD commit
+- nexus metric record <name> <value>                        a value of one of the project's metrics, when the step asks you to measure one (\`nexus metric list\` shows them); it is kept with your step and HEAD commit; a negative value goes after --: nexus metric record <name> -- -5
 - nexus step done <step> --summary "..." [--commit <sha>] --activities a,b   when the acceptance criteria are met; --activities names what you actually did, whatever was planned (\`nexus tags\` lists the names)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "<the stop condition met>" --reason "<what happened, short>"   when a stop condition is met (first commit what is consistent, see below); give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened and what you left out (the user sees the reason first, the condition behind "more")
@@ -429,7 +429,7 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus template list|show <id>; nexus queue draft --template <id> --set k=v ... [--id ID] [--maintenance survey|fix_small]   queue templates (Nexus's, the user's, the project's nexus-templates/); the draft goes to .nexus/drafts/ID.yaml: complete it and upload it as any
 - nexus static-analysis [status]; nexus static-analysis decline --reason "..."   whether Nexus sees static analysis in the project; the user's no to the static-analysis template (the monthly reminder rests 90 days)
 - nexus recurring set <id> --template <id> [--set k=v]... (--every "daily HH:MM|mon 03:00|monthly D HH:MM" | --after-queues N) [--maintenance survey|fix_small] --reason "..."; nexus recurring list   a template run at each time while the user's standing approval holds
-- nexus run <queue> start --reason "..." [--use-session <id>] [--runtime claude|codex] [--model <model>] [--effort low|medium|high|xhigh|max]   start an approved queue (--use-session continues an existing session; runtime, model and effort default to the project's)
+- nexus run <queue> start --reason "..." [--use-session <id>] [--runtime claude|codex] [--model <model>] [--effort low|medium|high|xhigh|max|ultra]   start an approved queue (--use-session continues an existing session; runtime, model and effort default to the project's; Claude Code takes the efforts low to max, Codex the levels its model lists, up to ultra)
 - nexus run <queue> start --after <other> [--after <another>]... --reason "..." [same options]   put it into the plan: Nexus starts it once every queue named is done and its current revision is approved (at once if that is so already, and its checkout is free and the limit allows; else it waits and starts by itself). This sets the queue's whole list of predecessors; those the user set must stay in it. With --use-session it waits while that session runs another queue; --use-session of <other>'s session continues its context
 - nexus run <queue> start --next --reason "..." [same options]   put it into the plan with no queue before it: it starts as soon as it is approved, its checkout is free and the limit allows
 - nexus plan propose <queue> [--after <other>]... --reason "..."   propose to the user a new list of predecessors that changes dependencies the user set (which you may not change yourself); the user accepts or declines it with one action, and you are told
@@ -437,7 +437,7 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus tags propose --area <name> | --activity <prefix:name> --reason "..."   propose a new area or project activity; it waits in the user's list, and a draft may use it only once the user accepts it (you are told)
 - nexus tags rename <old> <new> --reason "..."   propose renaming an area or a project activity; once accepted, the old name reads as the new one everywhere (use the new one)
 - nexus stats [--by model|effort|kind|activity|area|size|origin] [--project <id>] [--since <date>]   how steps went, by group: steps, accepted in the first round, average rounds, stops and failures, median working time, estimated use of the usage windows (every project by default; groups under 5 steps are marked few data)
-- nexus metric define <name> --unit <unit> [--show line|bar|number] [--target <value>] [--warn-above|--warn-below <value>]   name something the project measures, or change it (the whole definition); say in a step's goal what its worker should measure and record (nexus metric record). Each check's time is the metric check:<its name>, in seconds, without a definition; define it for a target or a threshold. A value beyond the threshold is marked on its step and told to you; nexus metric list shows the metrics
+- nexus metric define <name> --unit <unit> [--show line|bar|number] [--target <value>] [--warn-above|--warn-below <value>]   (a negative number: --warn-below=-5) name something the project measures, or change it (the whole definition); say in a step's goal what its worker should measure and record (nexus metric record). Each check's time is the metric check:<its name>, in seconds, without a definition; define it for a target or a threshold. A value beyond the threshold is marked on its step and told to you; nexus metric list shows the metrics
 - nexus run <queue> start --at "YYYY-MM-DD HH:MM" --reason "..." [same options]   start it at that local time; --at usage-reset: when the usage window of its runtime resets (refused while Nexus knows no usage data of that runtime). At the time its session must be free, or it does not start and the user is told; not approved yet, it waits for the approval and starts then; if Nexus was down then (more than 15 minutes late) it does not start, and you are told
 - nexus run <queue> cancel-start --reason "..."   take the queue out of the plan (its predecessors and its schedule); not one the user put into it
 - nexus run <queue> pause|resume|stop --reason "..."
@@ -774,7 +774,7 @@ export function helperBriefing(p: Pick<ProjectFile, "name" | "languages">): stri
 
 What you may do:
 - Read the packet, the diff file it names, and the checkout (to check a criterion: a document that should say something, a test that should exist). Use read-only git (git log, git show, git diff, git status), nexus status, nexus help and nexus doc (a Markdown file's headings, or one section: nexus doc <file.md#section>).
-- Never run a build, a test or a check: the packet has the results of the checks Nexus ran. Never change a file.
+- Never run a build, a test or a check: the packet has the results of the checks (the ones Nexus ran, or those the worker reported where Nexus ran none). Never change a file.
 - Decide exactly once, with one of the three commands the packet names: accept, send back, or pass on to the orchestrator. Then end your turn with a one-line reply.
 
 How to decide:
@@ -822,7 +822,7 @@ export function helperPacket(q: QueueView, st: StepView, c: HelperPacketContext)
     ? ` (this round's own change: ${c.range.round.from}..${c.range.round.to})` : "";
   const cmd = (x: string) => `nexus review ${x} ${q.id} ${st.id}`;
   const decide = st.level === 3
-    ? `Review level 3: the judgement is the orchestrator's, and you never accept. When a criterion you can check fails: ${cmd("send-back")} "what to fix". Otherwise pass it on, with level among the reasons: ${cmd("pass-on")} --why level[,criterion,deviation,doubt] --findings "what you checked and what you could not".`
+    ? `Review level 3: the judgement is the orchestrator's, and you never accept. When a criterion you can check fails: ${cmd("send-back")} "what to fix". Otherwise pass it on, with level among the reasons: ${cmd("pass-on")} --why <reasons, level among them> --findings "what you checked and what you could not". The reasons: criterion, deviation, question, limit, doubt, level.`
     : `Review level 2. Every criterion checkable and met: ${cmd("accept")} --note "what you checked". A criterion you can check not met: ${cmd("send-back")} "what to fix". Otherwise: ${cmd("pass-on")} --why <reasons> --findings "what you checked and what you could not".`;
   return [
     `[Nexus] Review step ${st.id} of queue ${q.id}, round ${round}: "${st.title}".`,
@@ -862,7 +862,7 @@ export function awayStuckNotice(q: QueueView, st: StepView, why: string, next: {
   const plan = next.length
     ? `Next in the plan (Nexus starts them by itself): ${next.map((x) => `${x.id} "${x.title}" (now: ${x.waiting})`).join("; ")}.`
     : "Nothing else is in the plan.";
-  const resume = paused.length ? ` Paused queues that could go on: ${paused.map((x) => `${x.id} "${x.title}" (nexus run ${x.id} resume)`).join("; ")}.` : "";
+  const resume = paused.length ? ` Paused queues that could go on: ${paused.map((x) => `${x.id} "${x.title}" (nexus run ${x.id} resume --reason "...")`).join("; ")}.` : "";
   return {
     fact: `Queue ${q.id} waits for the user at step ${st.id} (${why}).`,
     todo: `The user is away. ${plan}${resume} Start no queue outside the plan while the user is away; say in the chat what happens.`,
@@ -873,7 +873,7 @@ export function awayStuckNotice(q: QueueView, st: StepView, why: string, next: {
 export function planHeldNotice(q: QueueView, e: { queue: string; by: "user" | "orchestrator"; waiting: string }): Notice {
   const change = e.by === "user"
     ? `the user made it wait for ${e.queue}: propose a change with nexus plan propose ${q.id} [--after <queue>]... --reason "..."`
-    : `you made it wait for ${e.queue}: change it with nexus run ${q.id} start --after <queue>... --reason "..." (or take it out with nexus run ${q.id} cancel-start)`;
+    : `you made it wait for ${e.queue}: change it with nexus run ${q.id} start [--after <queue>]... --reason "..." (or take it out with nexus run ${q.id} cancel-start --reason "...")`;
   return {
     fact: `Queue ${q.id} waits in the plan, but ${e.waiting}.`,
     todo: `Nexus does not start ${q.id} until ${e.queue} is done. If it should not wait for ${e.queue}, ${change}; else tell the user what it waits for.`,
