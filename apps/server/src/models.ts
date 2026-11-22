@@ -20,6 +20,22 @@ export async function listModels(runtime: "claude" | "codex"): Promise<ModelInfo
 }
 
 /**
+ * The models the runtime itself last named (listModels), however long ago; undefined when it never answered (the
+ * fixed list is no evidence of what a model takes). Asks nothing: a save checks against what is known.
+ */
+export function knownModels(runtime: "claude" | "codex"): ModelInfo[] | undefined { return cache.get(runtime)?.models; }
+
+/**
+ * Why `model` cannot run at `effort` by the runtime's own list of the model's effort levels, or undefined: the model
+ * or its levels unknown (the runtime checks for itself when it starts).
+ */
+export function modelEffortIssue(runtime: "claude" | "codex", model: string | undefined, effort: string | undefined): string | undefined {
+  if (!model || !effort) return undefined;
+  const m = knownModels(runtime)?.find((x) => x.value === model);
+  return m?.efforts?.length && !m.efforts.includes(effort) ? `${m.label} takes effort ${m.efforts.join(", ")}` : undefined;
+}
+
+/**
  * Runs a runtime's process, writes the given lines, and resolves with the first answer `pick` accepts. A process that
  * cannot start, exits before it answers or does not answer in time resolves with no models (the caller's fixed list).
  */

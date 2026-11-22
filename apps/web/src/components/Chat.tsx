@@ -1,6 +1,6 @@
 // Chats: the project's orchestrator, and conversations with a thinking partner.
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import type { ChatEntry, RuntimeFile, SessionFile, SessionView } from "@nexus/protocol";
+import type { ChatEntry, ConversationSettings, RuntimeFile, SessionFile, SessionView } from "@nexus/protocol";
 import type { NumberedEntry } from "@nexus/protocol/chat";
 import { tokenCount } from "@nexus/protocol/tokens";
 import { PinButton, PinsBar, SearchBar, SearchButton, StopButton, type PinView, type SearchState } from "./ChatTools.tsx";
@@ -631,7 +631,7 @@ export function ChatPanel({ project, name, view, error, inline, desk }: {
 
 interface ConversationItem extends SessionFile { state: string; last_at: string; messages: number }
 /** `compact`: its runtime compacts a conversation on request (apps/server/src/conversations.ts): Compact is offered. */
-interface ConversationView extends View { notes_dir: string | null; compact?: boolean; idea_context_error?: string }
+interface ConversationView extends View { notes_dir: string | null; compact?: boolean; idea_context_error?: string; settings?: ConversationSettings }
 
 /** The step a conversation is about, as a link back to it (it closes the Ideas panel and opens the step). */
 function AboutStep({ project, c, className = "" }: { project: string; c: SessionFile; className?: string }) {

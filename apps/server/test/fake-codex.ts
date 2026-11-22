@@ -193,7 +193,7 @@ function take(more: string): void {
       case "initialize": reply({ userAgent: "fake-codex" }); break;
       case "thread/start": recordArgs({ method: m.method, model: m.params.model, approvalsReviewer: m.params.approvalsReviewer ?? null, approvalPolicy: m.params.approvalPolicy, sandbox: m.params.sandbox, cwd: m.params.cwd, writableRoots: m.params.config?.["sandbox_workspace_write.writable_roots"] ?? null, config: m.params.config ?? null, instructions: m.params.developerInstructions ?? null }); threadId = randomUUID(); reply({ thread: { id: threadId }, model: "fake-codex-model", reasoningEffort: "medium" }); break;
       case "thread/resume":
-        recordArgs({ method: m.method, threadId: m.params.threadId, sandbox: m.params.sandbox, config: m.params.config ?? null, instructions: m.params.developerInstructions ?? null });
+        recordArgs({ method: m.method, threadId: m.params.threadId, model: m.params.model ?? null, sandbox: m.params.sandbox, config: m.params.config ?? null, instructions: m.params.developerInstructions ?? null });
         if (!fakeSaved(m.params.threadId, "codex")) { out({ id: m.id, error: { code: -32600, message: `no rollout found for thread id ${m.params.threadId}` } }); break; }
         threadId = m.params.threadId; reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
       // The user's MCP servers, as a real Codex reads them from its config: FAKE_CODEX_MCP names them (comma-separated).

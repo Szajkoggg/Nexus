@@ -298,3 +298,46 @@ forms' plain boxes do not. Headless Edge has `webkitSpeechRecognition`, so the c
 listening state is captured with `scripts/capture/fake-speech.js`, loaded through a view's `script` before the
 dashboard. Smaller choices made while building, not by the user: the regions, en-US for English, a stop square on a red
 button while it listens, and the notice remembered per browser (localStorage `nexus.voice.noticed`).
+
+## Model and effort of a conversation
+
+Each Ideas conversation can run on a model and effort of its own (queue CM; the user's request, the editor's design in
+[docs/ux/conversation-settings.md](../ux/conversation-settings.md); the protocol in
+[conversations.md](../protocol/conversations.md#conversations)). The session file keeps only the values the user chose;
+what it leaves follows the project's conversation settings (on their runtime), else the runtime's default, so a later
+change of the project's defaults reaches it and never overwrites an own value. Nothing here is global: no new default,
+no runtime switch, no orchestrator or worker setting.
+
+**A save is no turn.** `Conversations.update` checks the pair the next turn would run on (the runtime's effort
+levels, then the model's where the runtime's own model list names them; a model it does not name is left to the
+runtime, which the server cannot ask without starting it) and writes both or neither. It no longer ends the process:
+`retire` closed a working process's input and dropped it from the host at once, so a message sent right after started
+a second process beside the first, and the running pair could not be told from the saved one.
+
+**The turn boundary is the process's end.** The next message finds the process started on other values (`stale`, the
+same check a change of the project's settings meets) and:
+
+- idle: the process ends and a new one resumes the native session (as before);
+- at a turn, or settling after one (`AgentProcess.settling`, queue KM: a message sent into the turn may still run as a
+  turn of its own): `restartAfterTurn` ends it after that, and the message waits in `Conversations.waiting` until the
+  old process has exited (its `exit` event); then a new process gets everything that waited, in order. Before, a
+  message at a turn went into it (`next`) and ran on the old values, and one while settling went to the old process
+  too. The waiting input is shown as `working`, keeps `idle()` false for an update's drain, and an update's `cutOff`
+  writes it into `interrupted.asked`.
+
+A hand-over asked during a turn is queued in the process as its next turn (`afterTurn`); `AgentHost` now keeps a
+process held for a restart alive while such a turn is queued in it and ends it after that turn: killed at the first
+turn's end, it took the hand-over with it. That one hand-over runs on the old values; anything sent after the save
+waits for the new process. Compact needs the process at once, so it is refused (409, as at a turn) while input waits.
+
+Ways not taken: Codex can change model and effort per turn (`retune`, as the engine does for workers), but one path
+for both runtimes, through the stale check, keeps the boundary the same; a restart at save time while idle was
+dropped as needless (the next message restarts it, and nothing runs meanwhile).
+
+**What the dashboard reads.** `head()` (and so the live stream's `session` message, which the dashboard applies with
+`applyConversation`) carries `settings`: the running process's launch pair (`AgentHost.launchedWith`), the next turn's
+pair with each value's source, and whether they differ. The running pair is the launch's, not the session file's:
+after a save the file already holds the next turn's values.
+
+Lifecycle note (queue CM): `agent-host.ts` changed (restartAfterTurn waits for a queued turn; `launchedWith`; `cutOff`
+takes the role's waiting input), and `conversations.ts` holds input across a process's end.

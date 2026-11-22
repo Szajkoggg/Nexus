@@ -272,6 +272,29 @@ Code); a compaction that ends without it gets an error line. Refused (409) while
 conversation with no reply yet, and for a runtime that cannot compact. `GET …/conversations/:cid` says which:
 `compact` (true where its runtime compacts on request; the dashboard offers Compact only then).
 
+**A conversation's model and effort** (queue CM; the design: docs/design/chat.md, "Model and effort of a
+conversation"). `model` and `effort` in `session.yaml` are the conversation's own; an absent one follows the project's
+`conversations` setting when the conversation runs on that runtime, else the runtime's default, also when the project's
+setting changes later. `PATCH …/conversations/:cid` with `model` and/or `effort` sets its own; `null` or `""` drops it
+(the inherited value again). The pair the next turn would run on (own, else inherited) is checked before anything is
+written, and both are written together or neither: 400 for an effort the runtime does not take (Claude Code: `low`,
+`medium`, `high`, `xhigh`, `max`), one the model does not take where the runtime's own model list names its levels (the
+list `GET /api/models/:runtime` gives, as last asked; a model it does not name is left to the runtime), an unknown
+effort, or a `model` that is no string. A save starts no turn and ends no process: the conversation's next turn runs on
+the new values in a new process that resumes the same native session (Claude Code's `--resume`, Codex's
+`thread/resume`). A process at a turn, or settling after one (a message sent into that turn may still run as a turn of
+its own), finishes it first, a hand-over's turn already queued in it included; a message (or a hand-over) sent
+meanwhile waits on the server and goes to the new process once the old one has exited, in order, so two processes of
+one conversation never run a turn at once. Compact in that moment is refused (409) like at a turn. The same holds when
+the project's settings the conversation follows change. Waiting input keeps the conversations busy for an update's
+drain, and an update's cut-off keeps it in the runtime record's `interrupted.asked`, for the next server to answer.
+
+`GET …/conversations/:cid` and the live stream's `session` message carry `settings` (`ConversationSettings` in
+`packages/protocol/src/api.ts`): `running`, the model and effort the running process was started with (null without a
+process; a null value: the runtime's default); `next`, those the next turn runs on, with `model_from` and
+`effort_from` (`own`, `project` or `runtime`); `changes`, whether they differ. `state` is `working` while input waits for
+the new process. `model` and `effort` beside them stay the conversation's own values.
+
 **A conversation about a step** ("Chat about this"): `queue` and `step` are kept in `session.yaml` as `about`, never as
 `queue` (which makes a session a worker of the queue: `nexus status` would deliver the queue's notes to it and mark
 them read). The default title is `<step>: <step title>`. Creating it starts no model turn and changes nothing in the
