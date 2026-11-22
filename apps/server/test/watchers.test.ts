@@ -109,7 +109,7 @@ test("Node's watcher after its error: a new one is made, the dead one closed (qu
   assert.equal(natives.length, 2, "watched again");
   natives[1]!.listener("change", join("queues", "Q", "run.yaml"));
   assert.deepEqual(calls.splice(0), ["rebuild", "changed", "watched:change:run.yaml", "changed"], "made again: the model read again whole, then fed by the new one");
-  w.close();
+  await w.close();
   assert.equal(natives[1]!.closed, true);
 });
 
@@ -123,7 +123,7 @@ test("Node's watcher not made at the start: tried again until it is (queue LH, f
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(natives.length, 1, "made at the third try");
   assert.ok(calls.filter((c) => c === "rebuild").length >= 1, "once made, the model is read again: changes before it went unseen");
-  w.close();
+  await w.close();
   const made = natives.length;
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(natives.length, made, "closed: no more tries");

@@ -43,7 +43,7 @@ import { LiveStream, type LiveSources } from "./live.ts";
 import { SEQ_HEADER, type LogKind } from "@nexus/protocol/live";
 import { searchProject } from "./search.ts";
 import { perf } from "./perf.ts";
-import { watchHome, watchProject as watchProjectFiles, type ProjectWatch, type TreeWatcher } from "./watchers.ts";
+import { watchHome, watchProject as watchProjectFiles, type ProjectWatch } from "./watchers.ts";
 import { dashboardFiles, isPublicFile } from "./web-static.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
@@ -176,8 +176,6 @@ function dropProject(e: Entry): { parts: Parameters<typeof stopProject>[0]; clos
   pending.delete(e.id);
   const w = watchers.get(e.id);
   watchers.delete(e.id);
-  modelWatchers.get(e.id)?.close();
-  modelWatchers.delete(e.id);
   watchedNotes.delete(e.id);
   watch.forget(e.id);
   e.model.close();
@@ -293,11 +291,11 @@ function changed(id: string): void {
   }, 150));
 }
 
-/** Each project's watcher of its .nexus folder, by project id. */
-const watchers = new Map<string, TreeWatcher>();
+/** Each project's watchers of its .nexus folder (watchers.ts; Node's made again after an error), by project id. */
+const watchers = new Map<string, ProjectWatch>();
 const watchedNotes = new Map<string, string>();
 function syncNotesWatcher(id: string, state: ProjectState): void {
-  const watcher = watchers.get(id);
+  const watcher = watchers.get(id)?.tree;
   if (!watcher) return;
   const dir = state.project.conversations.notes_dir;
   const path = dir ? join(state.project.root, dir) : undefined;
@@ -325,12 +323,8 @@ function logChanged(id: string, path: string): void {
   if (logPending.has(key)) return;
   logPending.set(key, setTimeout(() => { logPending.delete(key); publish(id); }, 150));
 }
-/** Each project's own Node watcher, feeding its model (watchers.ts; made again after an error), by project id. */
-const modelWatchers = new Map<string, ProjectWatch>();
 function watchProject(id: string, dir: string): void {
-  const w = watchProjectFiles(id, dir, { model: () => projects.get(id)?.model, changed: () => changed(id), log: (path) => logChanged(id, path) });
-  modelWatchers.set(id, w);
-  watchers.set(id, w.tree);
+  watchers.set(id, watchProjectFiles(id, dir, { model: () => projects.get(id)?.model, changed: () => changed(id), log: (path) => logChanged(id, path) }));
 }
 
 // NEXUS_HOME's files that every project's state, the statistics and the estimates read, kept in memory (model.ts):
@@ -1209,8 +1203,6 @@ async function release(): Promise<void> {
   pending.clear();
   const closing = [...watchers.values()].map((w) => w.close());
   watchers.clear();
-  for (const w of modelWatchers.values()) w.close();
-  modelWatchers.clear();
   await Promise.all(closing);
   planner.shutdown(); // its timers write the plan file: no longer this server's
   capacity?.shutdown(); // so does the coordinator: the successor writes capacity.yaml anew

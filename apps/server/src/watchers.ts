@@ -29,7 +29,7 @@ export interface WatchFactory {
   tree(paths: string | string[], options: TreeOptions): TreeWatcher;
 }
 
-export const realWatch: WatchFactory = {
+const realWatch: WatchFactory = {
   native: (dir, listener) => watchFiles(dir, { recursive: true }, listener),
   tree: (paths, options) => chokidar.watch(paths, options),
 };
@@ -63,8 +63,8 @@ const REWATCH_MS = 1_000;
 export interface ProjectWatch {
   tree: TreeWatcher;
   native(): NativeWatcher | undefined;
-  /** Closes Node's watcher and stops making new ones (chokidar's is closed by its owner). */
-  close(): void;
+  /** Closes both, and stops making new Node watchers; resolves once chokidar's is closed. */
+  close(): Promise<void>;
 }
 
 /**
@@ -127,7 +127,7 @@ export function watchProject(id: string, dir: string, hooks: ProjectWatchHooks, 
   return {
     tree,
     native: () => native,
-    close: () => { closed = true; clearTimeout(timer); timer = undefined; native?.close(); native = undefined; },
+    close: () => { closed = true; clearTimeout(timer); timer = undefined; native?.close(); native = undefined; return tree.close(); },
   };
 }
 
