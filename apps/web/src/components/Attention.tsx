@@ -93,12 +93,17 @@ function StopRow({ project, a, onOpen, onChanged, pushAccepted, queue }: {
 
 /**
  * A "Merging back" card's way on (docs/design/dashboard.md, "Merge back where it waits"): Merge into main… with its
- * question in the card, the queue panel's question and action (useMergeBack), and Open, the integration step.
+ * question in the card, the queue panel's question and action (useMergeBack), and Open, the integration step. Nothing
+ * for an item that names no base (nothing to merge into).
  */
-function MergeRow({ project, a, onOpen, onChanged, className = "px-3.5 pb-3" }: {
-  project: string; a: AttentionItem & { queue: string; merge: NonNullable<AttentionItem["merge"]> }; onOpen: () => void; onChanged?: () => void; className?: string;
+function MergeRow({ a, ...rest }: { project: string; a: AttentionItem; onOpen: () => void; onChanged?: () => void; className?: string }) {
+  return a.queue && a.merge ? <MergeActions {...rest} queue={a.queue} merge={a.merge} integrated={!!a.step} /> : null;
+}
+
+function MergeActions({ project, queue, merge: { into, branch }, integrated, onOpen, onChanged, className = "px-3.5 pb-3" }: {
+  project: string; queue: string; merge: NonNullable<AttentionItem["merge"]>; integrated: boolean; onOpen: () => void; onChanged?: () => void; className?: string;
 }) {
-  const merge = useMergeBack({ project, queue: a.queue, into: a.merge.into, branch: a.merge.branch, integrated: !!a.step, onChanged });
+  const merge = useMergeBack({ project, queue, into, branch, integrated, onChanged });
   return (
     <div className={className}>
       <div className="flex flex-wrap items-center gap-2">
@@ -109,9 +114,6 @@ function MergeRow({ project, a, onOpen, onChanged, className = "px-3.5 pb-3" }: 
     </div>
   );
 }
-
-/** The item's Merge back, when it is a "Merging back" one that names its base. */
-const mergeOf = (a: AttentionItem) => (a.kind === "merge" && a.queue && a.merge ? { ...a, queue: a.queue, merge: a.merge } : undefined);
 
 /**
  * What waits for the user in this project, on its page. A stopped queue's card names the queue and has Continue; its
@@ -145,7 +147,7 @@ export function AttentionPanel({ project, items, queues, pushAccepted, onOpen, o
               {a.lift && a.queue && (
                 <StopRow project={project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} onChanged={onChanged} pushAccepted={pushAccepted} queue={q} />
               )}
-              {mergeOf(a) && <MergeRow project={project} a={mergeOf(a)!} onOpen={() => onOpen(a)} onChanged={onChanged} />}
+              {a.kind === "merge" && <MergeRow project={project} a={a} onOpen={() => onOpen(a)} onChanged={onChanged} />}
               {a.kind === "provisional" && <BatchRows project={project} item={a} onOpen={(queue, step) => nav.item(project, queue, step)} onChanged={onChanged} />}
               {a.kind === "plan" && <PlanRow project={project} a={a} onChanged={onChanged} />}
               {a.kind === "tags" && <TagProposalRow project={project} a={a} onChanged={onChanged} />}
@@ -189,7 +191,7 @@ export function WaitingList({ projects, onOpen, onChoose }: {
               {a.lift && <LiftProposal lift={a.lift} />}
             </button>
             {a.lift && a.queue && <StopRow project={a.project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} />}
-            {mergeOf(a) && <MergeRow project={a.project} a={mergeOf(a)!} onOpen={() => onOpen(a)} />}
+            {a.kind === "merge" && <MergeRow project={a.project} a={a} onOpen={() => onOpen(a)} />}
             {a.kind === "provisional" && <BatchRows project={a.project} item={a} onOpen={(queue, step) => nav.item(a.project, queue, step)} />}
             {a.kind === "plan" && <PlanRow project={a.project} a={a} />}
             {a.kind === "tags" && <TagProposalRow project={a.project} a={a} />}
@@ -234,7 +236,7 @@ export function WaitingCards({ projects, current, onOpen }: { projects: ProjectS
             {a.lift && <LiftProposal lift={a.lift} />}
           </button>
           {a.lift && a.queue && <div className="-mt-1"><StopRow project={a.project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} /></div>}
-          {mergeOf(a) && <MergeRow project={a.project} a={mergeOf(a)!} onOpen={() => onOpen(a)} className="-mt-1 px-3 pb-2.5" />}
+          {a.kind === "merge" && <MergeRow project={a.project} a={a} onOpen={() => onOpen(a)} className="-mt-1 px-3 pb-2.5" />}
           {a.kind === "provisional" && <div className="-mx-0.5"><BatchRows project={a.project} item={a} onOpen={(queue, step) => nav.item(a.project, queue, step)} /></div>}
           {a.kind === "plan" && <div className="-mx-3.5 -mb-3"><PlanRow project={a.project} a={a} /></div>}
           {a.kind === "tags" && <TagProposalRow project={a.project} a={a} className="px-3 pb-2.5" />}
