@@ -2,7 +2,7 @@
 // (apps/web/test/strings.test.ts lets them through here only).
 
 /** The runtimes Nexus runs agents on, in the order the choices list them. */
-export const RUNTIMES = ["claude", "codex"] as const;
+const RUNTIMES = ["claude", "codex"] as const;
 export type RuntimeId = (typeof RUNTIMES)[number];
 
 const NAME: Record<RuntimeId, string> = { claude: "Claude Code", codex: "Codex" };
