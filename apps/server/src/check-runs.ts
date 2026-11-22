@@ -421,7 +421,12 @@ export class CheckRunner {
       if (unrunnable(last.attempt.exit_code ?? null, last.output)) return this.endBase(queue, step, done, state, "unrunnable", `it cannot run there (exit code ${last.attempt.exit_code})`, last.attempt);
       this.endBase(queue, step, done, state, "failed", undefined, last.attempt);
     } finally {
-      if (a.stopped && !this.closed) this.update(queue, step, done, (s) => { if (s.dispute?.base?.state === "running") s.dispute.base = { state: "queued" }; });
+      // Guarded (queue LH): a write that fails here must not skip the rest, the base worktree's removal and the release,
+      // nor halt a run the user stopped; with its record left `running`, the base run still runs again at Resume.
+      if (a.stopped && !this.closed) {
+        try { this.update(queue, step, done, (s) => { if (s.dispute?.base?.state === "running") s.dispute.base = { state: "queued" }; }); }
+        catch (e) { console.error(`queue ${queue} step ${step}: the stopped base run was not recorded as queued: ${(e as Error).message}`); }
+      }
       if (added) await run("git", ["worktree", "remove", "--force", dir], { cwd, windowsHide: true }).catch(() => {});
       try { rmSync(dir, { recursive: true, force: true }); }
       catch (e) { console.error(`queue ${queue} step ${step}: the base run's folder ${dir} was not removed: ${(e as Error).message}`); }

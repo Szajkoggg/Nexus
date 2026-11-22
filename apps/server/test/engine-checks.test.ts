@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectStore, applyDraft, approveQueue, loadProjectState, routeAnswers, updateSettings, type ChecksFile } from "@nexus/protocol";
+import { ProjectStore, applyDraft, approveQueue, loadProjectState, readCapacity, routeAnswers, updateSettings, type ChecksFile } from "@nexus/protocol";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Capacity } from "../src/capacity.ts";
 import { failedTests } from "../src/check-runs.ts";
@@ -415,6 +415,40 @@ test("a Stop while the disputed check's base worktree is being added: the server
     assert.deepEqual([x.sets("Q")[0]!.state, x.sets("Q")[0]!.dispute?.base?.state], ["accepted", "failed"]);
     assert.equal(x.runs().filter((r) => r.endsWith("@base")).length, 1);
   } finally { x.stop(); }
+});
+
+test("a base run stopped while checks.yaml cannot be written: its worktree is still removed and its end released, the run stays stopped (queue LH, finding 3)", async () => {
+  // The stop's ticket.cancel() already ends the grant, so the machine's slot is free either way (the survey's "slot
+  // held" does not happen); what the unguarded write in the base run's `finally` skipped was the rest of that block:
+  // the base worktree's removal and the release, and its throw halted the run the user had stopped.
+  const x = withOrchestrator(["Q"]);
+  x.plan("Q-unit", [1]); x.plan("Q-unit", [1], true);
+  const root = x.store.readProject().root;
+  const marker = join(root, "adding");
+  const hook = join(root, ".git", "hooks", "post-checkout");
+  writeFileSync(hook, `#!/bin/sh\necho started > "${marker.replaceAll("\\", "/")}"\nsleep 2\n`);
+  const slotFree = () => { const c = readCapacity(); return !c || (!c.held.length && !c.waiting.length); };
+  const worktrees = () => execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: root, encoding: "utf8" }).split("\n").filter((l) => l.startsWith("worktree ")).length;
+  let fault: ReturnType<typeof ProjectStore.faultWrites> | undefined;
+  try {
+    await x.hello();
+    const seen = await rejections(async () => {
+      x.engine.start("Q", { runtime: "claude" });
+      await x.until("the base worktree to be added", () => existsSync(marker));
+      x.engine.stopNow("Q");
+      // The base run's end (its `finally`) writes checks.yaml: that write fails, as on a full disk.
+      fault = ProjectStore.faultWrites({ file: "queues/Q/checks.yaml" });
+      await x.until("the base run to end", () => fault!.failed() > 0 && x.engine.idle() && worktrees() === 1, LONGER.step);
+    });
+    assert.deepEqual(seen.map(String), [], "no rejection nobody handled");
+    assert.ok(slotFree(), "the machine's slot given back");
+    assert.deepEqual([x.queue("Q").run?.state, x.queue("Q").run?.reason], ["paused", "stopped by the user"], "stopped, not halted by the failed write");
+    fault?.clear();
+    rmSync(hook);
+    x.engine.resume("Q");
+    await x.until("Q to finish", () => x.queue("Q").run?.state === "finished");
+    assert.equal(x.runs().filter((r) => r.endsWith("@base")).length, 1, "the base run asked for again and run");
+  } finally { fault?.clear(); rmSync(hook, { force: true }); x.stop(); }
 });
 
 test("an accept decided before a restart and not yet recorded as accepted is finished by the next look: the step goes to its review (queue LF, F5)", async () => {
