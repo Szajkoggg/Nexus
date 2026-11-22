@@ -138,7 +138,10 @@ apart from a send-back's round. The queue stays `running` and the run holds its 
   such a step in its review (`enterAcceptedReview`), and a take-up is recorded at the `step.started` (`fix_round_of`:
   started while its done still waited for review), so a start after a send-back is not mistaken for one. The
   notices themselves were never lost to a busy orchestrator: they are derived from the state at every change and told
-  once by key.
+  once by key. The reverse window (queue LH): a set that failed before the round was taken up left the replayed step
+  in its review from its `step.done`, so a verdict written then (from a stale view) was taken as the review of work
+  whose checks failed, and the step went to done. A verdict now counts only when the latest done's set had let the
+  step into its review (`verdictBeforeReview`).
 
 ### The capacity coordinator, first slice
 

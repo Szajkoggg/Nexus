@@ -220,3 +220,31 @@ test("an unreadable checks.yaml: a step waiting for its review is not taken as r
   assert.match(q.check_runs_error ?? "", /./, "the queue says its checks file cannot be read");
   assert.deepEqual([q.steps[0]!.status, q.steps[0]!.checking?.phase], ["checking", "queued"]);
 });
+
+// The reverse window (queue NL's open item, queue LH): a set that failed before the worker took up its check-fix
+// round. The replay has the step in its review from its step.done; a verdict written then (from a stale view: the
+// derived state had it in its check-fix round) must not count as a review of work whose checks failed.
+for (const [who, level] of [["user", 1], ["o", 2]] as const) {
+  test(`a failed set not taken up yet: a ${who === "o" ? "orchestrator's" : "user's"} acceptance written then does not count (queue LH, (b))`, () => {
+    const x = setup(level);
+    if (level > 1) x.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: null } }));
+    const d = x.done(1);
+    x.sets([x.set(d, { state: "failed", ended_at: at(3), checks: [failedRun] })]);
+    assert.deepEqual([x.step().status, x.step().check_fix], ["running", 1], "its check-fix round, not its review");
+    const verdict = verdictSessions(x, level);
+    verdict(who, 6, { type: "review.accepted", text: "fine" });
+    const st = x.step();
+    assert.deepEqual([st.status, st.accepted], ["running", undefined], "not accepted: its checks failed");
+  });
+
+  test(`a failed set not taken up yet: a ${who === "o" ? "orchestrator's" : "user's"} acceptance written before the set failed does not count either (queue LH, (b))`, () => {
+    const x = setup(level);
+    if (level > 1) x.store.updateProject((p) => ({ ...p, orchestrator: { runtime: "claude", notify: true, session: null } }));
+    const d = x.done(1);
+    const verdict = verdictSessions(x, level);
+    verdict(who, 2, { type: "review.accepted", text: "fine" }); // while the checks ran
+    x.sets([x.set(d, { state: "failed", ended_at: at(3), checks: [failedRun] })]);
+    const st = x.step();
+    assert.deepEqual([st.status, st.accepted], ["running", undefined], "not accepted: its checks were running, then failed");
+  });
+}

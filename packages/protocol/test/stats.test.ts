@@ -234,7 +234,10 @@ test("steps after a context switch against those in the session of the step befo
     ],
   });
   store.writeChecks("B", { protocol: 1, steps: { B4: { by: "nexus", sets: [
-    { done: ids.B4!, round: 1, fix: 0, requested_at: at(5, 11), state: "failed", checks: [] },
+    // Shorthand for one check-fix round: its failed set's done stands outside the timeline, so the step counts one
+    // round of work, and the acceptance follows a passed set (a verdict counts only after the checks let the step into
+    // its review: queue LH).
+    { done: "e-before", round: 1, fix: 0, requested_at: at(5, 11), state: "failed", checks: [] },
     { done: ids.B4!, round: 1, fix: 1, requested_at: at(5, 15), state: "passed", checks: [] },
   ] } } });
 

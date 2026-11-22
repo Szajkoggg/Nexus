@@ -71,6 +71,23 @@ export function enterAcceptedReview(q: QueueView, st: StepView, at: string): voi
   toReviewAsOf(q, st, taken.done);
 }
 
+/**
+ * A review verdict at `at` that does not count: the step's latest done has a set of Nexus's checks that never let it
+ * into its review (queued, running, interrupted, or failed and not accepted), or one whose failure Nexus accepted only
+ * after `at`. The replay has the step in its review from its step.done; without this a verdict written in such a
+ * moment (from a stale view: the derived state had the step checking or in its check-fix round) was taken as the
+ * review of work whose checks failed (queue LH: NL's reverse window, a set that failed before its round was taken up).
+ */
+export function verdictBeforeReview(q: Pick<QueueView, "check_runs">, st: Pick<StepView, "id" | "timeline">, at: string): boolean {
+  if (q.check_runs?.steps[st.id]?.by !== "nexus") return false;
+  const done = lastDone(st);
+  if (!done) return false;
+  const set = checkSetOf(q.check_runs, st.id, done.id);
+  if (!set) return false; // its checks not asked for yet: nothing known against it (older records)
+  if (!reachedReview(q.check_runs, st.id, done.id)) return true;
+  return set.state === "failed" && !!set.ended_at && at < set.ended_at;
+}
+
 /** A taken-up check-fix round's step back in its review, as of the done (the step.started kept its review_with). */
 function toReviewAsOf(q: QueueView, st: StepView, done: StepDone): void {
   st.status = "review"; st.finished_at = done.at;

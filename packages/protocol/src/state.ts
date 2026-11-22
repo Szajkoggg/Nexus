@@ -1,6 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { applyCheckSets, enterAcceptedReview, reviewRound } from "./checks.ts";
+import { applyCheckSets, enterAcceptedReview, reviewRound, verdictBeforeReview } from "./checks.ts";
 import { CONVERSATION_ONLY, HELPER_VERDICTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, countRebuild, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
@@ -730,7 +730,14 @@ function apply(
   // began when Nexus accepted the failure, not after the replay (checks.ts, enterAcceptedReview).
   if (REVIEW_VERDICTS.has(e.type) && "step" in e && e.queue !== undefined) {
     const q = queues.get(e.queue); const st = q?.steps.find((x) => x.id === e.step);
-    if (q && st) enterAcceptedReview(q, st, e.at);
+    if (q && st) {
+      // Written while its checks had not let the step into its review: no review of it (checks.ts, verdictBeforeReview).
+      if (verdictBeforeReview(q, st, e.at)) {
+        warnings.push(`event ${e.id} (${e.type}): step ${q.id}/${st.id} was not in its review when it was written (its checks had not passed); it does not count`);
+        return;
+      }
+      enterAcceptedReview(q, st, e.at);
+    }
   }
 
   switch (e.type) {

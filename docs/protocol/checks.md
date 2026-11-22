@@ -177,6 +177,10 @@ removed after.
   up the check-fix round first (`nexus step start`): the step waits for its review from the set's `ended_at` on, as of
   its `step.done`, and the verdicts on it after that time (a helper's pass-on, an acceptance, a send-back, a hand-over
   to the user) count (queue NL; before it they were dropped, and the orchestrator never got the review notice).
+  The other way round, a verdict written while the step's latest done had a set that had not let it into its review
+  (queued, running, interrupted, or failed and not accepted, also before its check-fix round was taken up), or before
+  Nexus accepted its failure, does not count: it is left out with a warning in the state (queue LH). The CLI refuses
+  such a verdict anyway; only one written from a stale view gets that far.
 - **It passes there**: the failure is the queue's (`outcome: fix`): the worker gets the round's entry
   (`check-failed-<done>-base`) saying so; it counts in the round it is in, without a decision.
 - **It cannot run there** (the worktree cannot be made, the setup fails, or the command is not there: exit code 127
