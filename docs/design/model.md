@@ -65,6 +65,11 @@ calling `changed()`. The server's own writes reach it at once, before the write 
 (**write-through**), so a decision that writes and the next one that reads see the write, as they did through
 `writeCount` before the model (the count is gone since: the write-through took its place). The watcher's event for the same write comes later and finds nothing new (a stat).
 
+The watchers live in `apps/server/src/watchers.ts` (queue LH; before it, in `main.ts`): `watchProject` makes a
+project's two watchers (Node's recursive one feeding the model, chokidar's), `watchHome` NEXUS_HOME's. Both take the
+watchers from a `WatchFactory` (by default `realWatch`), so a test gives stand-ins and drives their reports and errors
+without a server (`watchers.test.ts`).
+
 - **A JSONL log**: the model keeps the byte position of the end of the last complete line it read. On a change it
   reads from that position to the end of the file in one read, takes the complete lines (a final line without a
   newline is being written: it is left for the next change, as `readJsonl` leaves it today), parses each once, adds

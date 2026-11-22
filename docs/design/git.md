@@ -324,7 +324,7 @@ that injection tests recovery, not the origin of a persistent Windows lock.
 
 A diagnostic preload in those server processes wrapped `fs.watch`, recording PID, path, creation stack and close
 events. The observed paths were the temporary registry file and the project's `.nexus` tree, including newly
-created worker sessions and queues; none pointed into either worktree directory. `main.ts`'s `watchProject` watches
+created worker sessions and queues; none pointed into either worktree directory. `main.ts`'s `watchProject` (since queue LH in `watchers.ts`) watches
 the store directory, `dropProject` closes its watcher, and the handover release awaits watcher closure. This probe
 therefore does not justify closing a project watcher when one queue ends: other queues still need it. The inspected
 file route uses `files.ts`'s `head` with a finally-close and `Readable.toWeb(createReadStream(...))`; `gitinfo.ts` runs
