@@ -44,6 +44,24 @@ const writeListeners = new Set<(file: string) => void>();
 export function onWrite(fn: (file: string) => void): () => void { writeListeners.add(fn); return () => { writeListeners.delete(fn); }; }
 /** Tells the listeners of a write of `file`; for a write made outside this module's helpers too (a note's withdrawal). */
 export function wrote(file: string): void { for (const fn of writeListeners) fn(file); }
+
+/** A write fault a test set (ProjectStore.faultWrites): the file it names, how many writes of it still go through. */
+interface WriteFault { file: string; left: number; error: string; writes: number; failed: number }
+let writeFault: WriteFault | undefined;
+
+/**
+ * Before a replacement or an append through this module's helpers: throws when the test's fault names this file and
+ * its writes that go through are used up. The file is named by its path's end, with forward slashes ("git.yaml",
+ * "queues/Q/run.yaml").
+ */
+function faultCheck(file: string): void {
+  const f = writeFault;
+  if (!f || !`/${file.replaceAll("\\", "/")}`.endsWith(`/${f.file}`)) return;
+  f.writes++;
+  if (f.left > 0) { f.left--; return; }
+  f.failed++;
+  throw Object.assign(new Error(`${f.error}: ${file}`), { code: "EIO" });
+}
 /** Removes a file if it is there, and tells of it. */
 function removeFile(file: string): void {
   if (existsSync(file)) { unlinkSync(file); wrote(file); }
@@ -119,6 +137,7 @@ const RENAME_RETRY_MS = 2_000;
  * apart) for up to RENAME_RETRY_MS; then the last error is thrown. Synchronous, like the writes it serves.
  */
 export function renameRetrying(from: string, to: string): void {
+  try { faultCheck(to); } catch (e) { try { unlinkSync(from); } catch { /* already gone */ } throw e; }
   const start = Date.now();
   for (let wait = 5; ; wait = Math.min(wait * 2, 200)) {
     try { renameSync(from, to); wrote(from); wrote(to); return; }
@@ -174,6 +193,7 @@ export function parseJsonlLines<S extends z.ZodType>(file: string, complete: str
 
 /** One complete line in a single write. */
 function appendJsonl(file: string, entry: unknown): void {
+  faultCheck(file);
   mkdirSync(dirname(file), { recursive: true });
   appendFileSync(file, JSON.stringify(entry) + "\n", "utf8");
   wrote(file);
@@ -238,6 +258,19 @@ export class ProjectStore {
   private yaml<S extends z.ZodType>(file: string, schema: S): z.infer<S> { return schema.parse(this.reader.parsed(file, YAML.parse)); }
 
   static forRoot(root: string): ProjectStore { return new ProjectStore(join(root, NEXUS_DIRNAME)); }
+
+  /**
+   * Test seam (queue LH): a server that ends between two writes. The first `after` writes of the file named by its
+   * path's end (`file`: "git.yaml", "queues/Q/run.yaml") go through; every later one throws, in this process and for
+   * every store, as the replacement or the append it is (the target untouched, the temporary file removed), until
+   * `clear`. `writes` counts that file's writes tried, `failed` those refused. One fault at a time: a new one replaces
+   * the last.
+   */
+  static faultWrites(o: { file: string; after?: number; error?: string }): { writes(): number; failed(): number; clear(): void } {
+    const f: WriteFault = { file: o.file.replaceAll("\\", "/"), left: o.after ?? 0, error: o.error ?? "injected write fault", writes: 0, failed: 0 };
+    writeFault = f;
+    return { writes: () => f.writes, failed: () => f.failed, clear: () => { if (writeFault === f) writeFault = undefined; } };
+  }
 
   /** Creates .nexus/ with a .gitignore that ignores the directory itself, so the project's own .gitignore is untouched. */
   /**

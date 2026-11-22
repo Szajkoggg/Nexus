@@ -233,6 +233,9 @@ git dozens of times. In the full suite every core is busy, so each file takes ab
   processes with every cleanup counted (`calls`, each with whether the process had run a turn) and passed through a
   gate the test holds, releases or makes fail; `failBeforeTurn` fails the cleanups before a first turn, as a busy
   machine's slow job host does.
+- **A server that ends between two writes** is `ProjectStore.faultWrites({ file, after })` (queue LH): the named file's
+  writes past the first `after` throw, in this process, leaving the file as it was and no temporary file, until
+  `clear()`; no file contents forged by hand.
 - **"Nothing happens" waits are kept, shorter, sized to what would have happened**: twice the timer that would have
   acted (500 ms past `startupMs`, 200 ms past a retry or a nudge), and a push that would have started is waited for
   with `pusher.settled()` after twice the test's 150 ms look.
