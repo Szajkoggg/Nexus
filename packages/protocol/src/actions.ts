@@ -627,14 +627,6 @@ export function closingToSkipAtApproval(store: ProjectStore, queue: string): Que
 // ---------------------------------------------------------------- housekeeping by the orchestrator
 
 /**
- * The orchestrator's housekeeping (`nexus queue set`, event `status.set`), recorded as an entry in the queue's
- * `changes`. Allowed: a pending, stopped or failed step to `skipped`; a halted run of a queue whose steps are all done
- * or skipped to `finished`; a queue whose run is not going to `cancelled`; and `propose-lift` on a stopped queue.
- * A skip may say where the step's work went on (`continued_in`, docs/design/continued.md), also on a step skipped
- * already (an entry from `skipped` to `skipped`). Consent stays the user's: marking work done, approving, lifting a
- * stop, reopening a finished step.
- */
-/**
  * A run of an older revision than `revision` (the queue's current one, or the one just approved): a run without the
  * field is older when a revision of the queue (its `history`) was replaced after the run started.
  */
@@ -686,6 +678,14 @@ export function releaseOrphanedSteps(store: ProjectStore, queueId: string, o: { 
   return open.map(({ s }) => s.id);
 }
 
+/**
+ * The orchestrator's housekeeping (`nexus queue set`, event `status.set`), recorded as an entry in the queue's
+ * `changes`. Allowed: a pending, stopped or failed step to `skipped`; a halted run of a queue whose steps are all done
+ * or skipped to `finished`; a queue whose run is not going to `cancelled`; and `propose-lift` on a stopped queue.
+ * A skip may say where the step's work went on (`continued_in`, docs/design/continued.md), also on a step skipped
+ * already (an entry from `skipped` to `skipped`). Consent stays the user's: marking work done, approving, lifting a
+ * stop, reopening a finished step.
+ */
 export function orchestratorStatusChange(store: ProjectStore, input: { queue: string; step?: string; to: string; reason: string; continued_in?: string[] }): string {
   const to = input.to.trim().toLowerCase();
   const reason = nonEmpty(input.reason, "the reason");
