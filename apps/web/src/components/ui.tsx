@@ -7,13 +7,14 @@ import { runTimes, stepTimes } from "@nexus/protocol/times";
 import { formatClock, formatDateTime, formatDuration, rich, t, timeAgo, type Key } from "../i18n.ts";
 import { useAction, type QueueView, type StepView } from "../api.ts";
 import { AttachButton, PictureStrip, filesOf, type Pictures } from "./Pictures.tsx";
+import { checkWord } from "../checks.ts";
 import { MicButton, VoiceLine, useVoice } from "./Voice.tsx";
 import { withHeard } from "../voice.ts";
 
 // ---------------------------------------------------------------- status colours
 
 type Tone = { dot: string; text: string };
-// A status is a dot and a word in the status's colour, never a ring or a filled pill (docs/DESIGN.md, theme tokens).
+// A status is a dot and a word in the status's colour, never a ring or a filled pill (docs/design/dashboard.md, "Colours are theme tokens").
 // Written out in full so Tailwind sees every class.
 const TONES: Record<string, Tone> = {
   pending: { dot: "bg-fg-3", text: "text-fg-3" },
@@ -22,6 +23,9 @@ const TONES: Record<string, Tone> = {
   approved: { dot: "bg-info", text: "text-info" },
   running: { dot: "bg-accent animate-pulse", text: "text-accent" },
   waiting: { dot: "bg-warn", text: "text-warn" },
+  // The checks Nexus runs after a step's done (checks.ts): at work, or quieter while they wait for the machine.
+  checking: { dot: "bg-accent animate-pulse", text: "text-accent" },
+  queued: { dot: "bg-accent/40", text: "text-fg-2" },
   review: { dot: "bg-review", text: "text-review" },
   paused: { dot: "bg-fg-2", text: "text-fg-2" },
   stopped: { dot: "bg-stop", text: "text-stop" },
@@ -29,6 +33,8 @@ const TONES: Record<string, Tone> = {
   rejected: { dot: "bg-danger", text: "text-danger" },
   done: { dot: "bg-ok", text: "text-ok" },
   skipped: { dot: "bg-fg-3", text: "text-fg-3" },
+  // Skipped with the mark that its own work is done and went on elsewhere (docs/design/continued.md): a ring.
+  continued: { dot: "border-[1.5px] border-ok", text: "text-ok/80" },
   cancelled: { dot: "bg-fg-3", text: "text-fg-3" },
 };
 export const toneOf = (status: string): Tone => TONES[status] ?? TONES.pending!;
@@ -36,7 +42,8 @@ export const toneOf = (status: string): Tone => TONES[status] ?? TONES.pending!;
 const STATE_WORDS: Record<string, Key> = {
   pending: "state.pending", draft: "state.draft", proposed: "state.proposed", approved: "state.approved", running: "state.running",
   waiting: "state.waiting", review: "state.review", paused: "state.paused", stopped: "state.stopped", failed: "state.failed",
-  rejected: "state.rejected", done: "state.done", skipped: "state.skipped", cancelled: "state.cancelled",
+  rejected: "state.rejected", done: "state.done", skipped: "state.skipped", continued: "state.continued", cancelled: "state.cancelled",
+  checking: "state.checksRunning", queued: "state.checksQueued",
 };
 /** A queue's or step's status as a word in the interface language; one the dashboard does not know, as it is. */
 export const statusWord = (status: string): string => (STATE_WORDS[status] ? t(STATE_WORDS[status]) : status);
@@ -45,6 +52,11 @@ export const statusWord = (status: string): string => (STATE_WORDS[status] ? t(S
 export function reviewLabel(step: { status: string; review_with?: "orchestrator" | "user" }): string | undefined {
   if (step.status !== "review") return undefined;
   return t(step.review_with === "orchestrator" ? "state.reviewOrchestrator" : "state.reviewYou");
+}
+
+/** A step's word where its review or the checks Nexus runs say more than its status ("review: you", "check fix 1 of 3"). */
+export function stepLabel(step: Parameters<typeof reviewLabel>[0] & Parameters<typeof checkWord>[0]): string | undefined {
+  return reviewLabel(step) ?? checkWord(step);
 }
 
 export function StatusBadge({ status, label, className = "" }: { status: string; label?: string; className?: string }) {

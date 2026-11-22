@@ -1,13 +1,14 @@
-// Searching a project's whole history (queue SR; docs/PROTOCOL.md, "Searching a project"): the server reads the
-// project's files as they are, without an index, and the protocol's pure functions (packages/protocol/src/search.ts)
-// decide what each entry offers and whether it is a hit. JSONL logs are read line by line in chunks (memory stays
-// small however long a log is), a line is parsed only when every word occurs in it raw, a file not changed since
-// `since` is not read, and only the newest `limit` hits are kept.
+// Searching a project's whole history (queue SR; docs/protocol/api.md, "Searching a project"), without an index; the
+// protocol's pure functions (packages/protocol/src/search.ts) decide what each entry offers and whether it is a hit.
+// The queues, notes and events come from the store (the server's model: queue SM, docs/design/model.md); the chats,
+// logs the model keeps only once opened, are read from their files line by line in chunks (memory stays small however
+// long a log is), a line parsed only when every word occurs in it raw, a file not changed since `since` not read. Only
+// the newest `limit` hits are kept.
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import {
-  ChatEntry, Event, SearchHits, chatItem, eventItems, lineMayMatch, normPath, noteItem, queueItems,
+  ChatEntry, SearchHits, chatItem, eventItems, lineMayMatch, normPath, noteItem, queueItems,
   type ProjectStore, type SearchKind, type SearchQuery, type SearchResult, type SessionFile,
 } from "@nexus/protocol";
 
@@ -65,17 +66,9 @@ export function searchProject(store: ProjectStore, q: SearchQuery): SearchResult
   for (const id of store.sessionIds()) {
     const dir = store.sessionDir(id);
     if (events) {
-      const file = join(dir, "events.jsonl");
-      // Every question counts for an answer's place, so a file is skipped by its time only when no question is searched.
-      if (questions || changedSince(file, q.since)) {
-        eachLine(file, (line) => {
-          const may = lineMayMatch(line, q);
-          if (!may && !(questions && line.includes('"question.asked"'))) return;
-          const e = parsed(line, Event);
-          if (!e) return;
-          if (e.type === "question.asked") asked.set(e.qid, { queue: e.queue, step: e.step });
-          if (may) for (const item of eventItems(e)) hits.add(item);
-        });
+      for (const e of store.readEvents(id).entries) {
+        if (e.type === "question.asked") asked.set(e.qid, { queue: e.queue, step: e.step });
+        for (const item of eventItems(e)) hits.add(item);
       }
     }
     if (wants("chat")) {

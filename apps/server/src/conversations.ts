@@ -2,7 +2,7 @@
 // thread. They read the whole project and write only in its notes folder; they start no work. A conversation can
 // be handed to the orchestrator: the partner writes a summary, which goes into the orchestrator's chat.
 //
-// The web: by `conversations.web` (claudeWeb, CODEX_WEB_SEARCH; PROTOCOL.md, "Conversations"). A Codex partner runs
+// The web: by `conversations.web` (claudeWeb, CODEX_WEB_SEARCH; docs/protocol/conversations.md, "Conversations"). A Codex partner runs
 // without the user's own Codex tools (MCP servers, plugins, apps), which run outside its sandbox.
 //
 // Writing only in the notes folder: Claude Code runs in `dontAsk` mode with `Edit(<notes>/**)` as the only write
@@ -22,14 +22,15 @@ import { partnerBriefing, restartedNotice } from "./prompts.ts";
 import { RESTARTED, STOPPED, chatView } from "./chats.ts";
 import { guardSettings, webFetchDenyRules } from "./web-guard.ts";
 import { shellRules } from "./shell-rules.ts";
+import { byConversationOrder } from "@nexus/protocol/live";
 
 // `nexus help` (decided 2026-11-15, queue OP): how Nexus works, its topics; it reads only. A Codex partner runs it in
 // its sandbox, which reads everywhere.
-const READ = ["Read", "Grep", "Glob", ...shellRules(["nexus status", "nexus ideas status", "nexus help", "nexus tags", "git log", "git status", "git diff", "git show"])];
+const READ = ["Read", "Grep", "Glob", ...shellRules(["nexus status", "nexus ideas status", "nexus help", "nexus doc", "nexus tags", "git log", "git status", "git diff", "git show"])];
 /** With a notes folder the partner also records what its hand-over covers (`nexus covers`, among its own events). */
 const COVERS = shellRules(["nexus covers"]);
 /** What a hand-over covers (decided 2026-11-14): this conversation's topics, and the dates of the decisions it passes on. */
-const HANDOFF_SCOPE = "Summarize only the topics discussed in this conversation, unless the user asked you to include others. From a notes file, pass on what this conversation decided or recorded; another topic in the notes folder, even a related one, is not part of this hand-over: name its file at most, as 'see also', without its content. Run nexus ideas status for the current effective state. In notes, Decided holds the decision content; read it together with the effective user dispositions and assessment invalidations in .nexus/idea-statuses.yaml and the relationships in .nexus/idea-matches.yaml. Report conflicts; Open/Ideas remain undecided. Historical hand-over does not override a later drop, replacement or reopening, and does not approve or start a queue. Name the dates of the Decided entries you cover.";
+const HANDOFF_SCOPE = "Summarize only the topics discussed in this conversation, unless the user asked you to include others. From a notes file, pass on what this conversation decided or recorded; another topic in the notes folder, even a related one, is not part of this hand-over: name its file at most, as 'see also', without its content. Run nexus ideas status for the current effective state (a summary per entry; one entry's full JSON: nexus ideas status <file>.md#<date>), and read an entry with nexus doc <file>.md#<date>. In notes, Decided holds the decision content; read it together with the effective user dispositions and assessment invalidations in .nexus/idea-statuses.yaml and the relationships in .nexus/idea-matches.yaml. Report conflicts; Open/Ideas remain undecided. Historical hand-over does not override a later drop, replacement or reopening, and does not approve or start a queue. Name the dates of the Decided entries you cover.";
 /** The hand-over's record for the ideas overview (decided 2026-11-15, queue IO): the entries it covers, by command. */
 const HANDOFF_COVERS = "Before you reply, record the Decided entries this hand-over passes on: nexus covers <file>.md#<YYYY-MM-DD> ... (one argument per entry, the notes folder may be left out); if it refuses one, fix the reference and run it again. The ideas overview shows them as handed over.";
 /**
@@ -88,17 +89,31 @@ export class Conversations {
     return this.store.sessionIds()
       .map((id) => { try { return this.store.readSession(id); } catch { return undefined; } })
       .filter((s): s is SessionFile => s?.role === "conversation")
-      .map((s) => {
-        const chat = this.store.readChat(s.id).entries;
-        return { ...s, state: this.host.get(s.id)?.proc.state ?? "exited", last_at: chat.at(-1)?.at ?? s.created_at, messages: chat.filter((c) => c.kind === "message").length };
-      })
-      .sort((a, b) => Number(!!a.archived) - Number(!!b.archived) || b.last_at.localeCompare(a.last_at));
+      .map((s) => this.itemOf(s))
+      .sort(byConversationOrder);
+  }
+
+  /** A conversation's line in the list, or undefined when the session is no conversation (the live stream's item). */
+  item(id: string) {
+    let s: SessionFile | undefined;
+    try { s = this.store.readSession(id); } catch { return undefined; }
+    return s.role === "conversation" ? this.itemOf(s) : undefined;
+  }
+
+  private itemOf(s: SessionFile) {
+    const chat = this.store.readChat(s.id).entries;
+    return { ...s, state: this.host.get(s.id)?.proc.state ?? "exited", last_at: chat.at(-1)?.at ?? s.created_at, messages: chat.filter((c) => c.kind === "message").length };
   }
 
   view(id: string) {
+    return { ...this.head(id), ...chatView(this.store, id, 400) };
+  }
+
+  /** What a conversation's view shows beside its chat (the live stream's `session` message sends it when it changes). */
+  head(id: string) {
     const s = this.session(id);
     return {
-      session: s, state: this.host.get(id)?.proc.state ?? "exited", runtime: this.store.readRuntime(id) ?? null, ...chatView(this.store, id, 400),
+      session: s, state: this.host.get(id)?.proc.state ?? "exited", runtime: this.store.readRuntime(id) ?? null,
       model: s.model ?? null, effort: s.effort ?? null, notes_dir: this.store.readProject().conversations.notes_dir ?? null,
       // Whether its runtime compacts on request: the dashboard offers Compact only then.
       compact: this.canCompact(s),
@@ -350,7 +365,7 @@ ${text}`;
     const notes = p.conversations.notes_dir;
     const env = this.host.env(s.id);
     const web = p.conversations.web;
-    const instructions = partnerBriefing(p, notes);
+    const instructions = partnerBriefing(p, notes, s.runtime === "codex" ? "codex" : "claude");
     const { model, effort } = this.values(s);
     return (resume) => {
       if (s.runtime === "codex") {
@@ -383,6 +398,9 @@ ${text}`;
     if (existing && !this.host.stale(s.id, this.launcher(s))) return existing;
     if (existing) {
       if (existing.proc.state === "working") { this.host.restartAfterTurn(s.id); return existing; }
+      // Settling (AgentProcess.settling): a message sent into its last turn may still run as a turn of its own, which
+      // ending it now would lose. This message goes to it too; the next one, once it is over, finds it stale.
+      if (existing.proc.settling) return existing;
       this.retire(s.id);
     }
     return this.host.start(s, this.launcher(s), {}, (l) => {

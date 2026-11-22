@@ -26,9 +26,11 @@ export interface HonestStatus {
 
 export interface QueueLike {
   status: string;
-  steps: readonly { id: string; status: string; review_with?: "orchestrator" | "user" }[];
+  /** `checking`, `check_fix`, `check_fix_limit`: the checks Nexus runs after a step's done (checks.ts). */
+  steps: readonly { id: string; status: string; review_with?: "orchestrator" | "user"; checking?: { phase: string }; check_fix?: number; check_fix_limit?: number }[];
   questions: readonly { state: string; can_continue: boolean; step?: string }[];
-  run?: { state: string; step?: string };
+  /** `held`: a running run held at the limit on queues running at once (it goes on by itself once a place frees). */
+  run?: { state: string; step?: string; held?: { reason: string } };
   stop_step?: string;
   current_step?: string;
   /**
@@ -106,12 +108,27 @@ export function queueStatus(q: QueueLike, now = new Date()): HonestStatus {
   const blocking = questions.find(x => holdsRunStep(x, run?.step));
   if (blocking) return is("waiting", "status.waitingAnswer", undefined, blocking.step);
   const waiting = q.steps.find(s => s.status === "waiting" && (!run?.step || s.id === run.step));
-  if (waiting) return is("waiting", "status.waitingPermission", undefined, waiting.id);
+  if (waiting) return is("waiting", waiting.checking?.phase === "decision" ? "status.checkDecision" : "status.waitingPermission", undefined, waiting.id);
   const theirs = q.steps.find((s) => s.status === "review");
   if (theirs) return is("review", "status.orchestratorReviews", undefined, theirs.id);
   if (run) {
+    // Back from waiting, it would open a turn or its next step, but as many queues run as the limit allows.
+    if (run.state === "running" && run.held) return is("waiting", "status.heldLimit", undefined, run.step);
     switch (run.state) {
-      case "running": return is("running", "status.running", undefined, run.step);
+      case "running": {
+        // At the step whose checks Nexus runs, or in its check-fix round: the run is at work, on the checks.
+        const at = q.steps.find((x) => x.id === run.step);
+        if (at?.status === "checking") {
+          const phase = at.checking?.phase;
+          return is("running", phase === "queued" ? "status.checksQueued" : phase === "base" ? "status.checksOnBase" : "status.checksRunning", undefined, run.step);
+        }
+        if (at?.status === "running" && at.check_fix) {
+          return at.check_fix_limit !== undefined
+            ? is("running", "status.checkFixOf", { fix: at.check_fix, limit: at.check_fix_limit }, run.step)
+            : is("running", "status.checkFix", { fix: at.check_fix }, run.step);
+        }
+        return is("running", "status.running", undefined, run.step);
+      }
       case "pausing": return run.step ? is("running", "status.pausingAfter", { step: run.step }, run.step, true) : is("running", "status.pausingThisStep");
       case "retry_wait": return is("waiting", "status.retry", undefined, run.step);
       case "usage_wait": return is("waiting", "status.usage", undefined, run.step);

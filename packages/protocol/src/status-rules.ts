@@ -1,12 +1,13 @@
 // The status rules every part reads the same way: when a run is going, when a step waits for the user's review (or the
 // orchestrator's), and when a question is open. Pure and free of Node: the dashboard imports this module directly
-// (`@nexus/protocol/status-rules`), so it imports nothing at run time; the server, the CLI and the state derivation use
-// it too, so a rule changes in one place.
+// (`@nexus/protocol/status-rules`), so it imports nothing at run time but the equally pure ids.ts; the server, the CLI
+// and the state derivation use it too, so a rule changes in one place.
 import type { RunFile, StepStatus } from "./schemas.ts";
+import { compareIds } from "./ids.ts";
 
 type RunState = RunFile["state"];
 /** A run, as the state derivation, the server and the dashboard each hold it (the dashboard as plain text). */
-type RunLike = { state: RunState | (string & {}) } | null | undefined;
+type RunLike = { state: RunState | (string & {}); held?: unknown } | null | undefined;
 
 /**
  * Run states in which the run holds its session and its checkout: it goes on by itself (running, pausing, a usage or
@@ -32,8 +33,11 @@ const ENDED_RUN_STATES: readonly RunState[] = ["finished", "halted", "paused"];
 export const runGoing = (run: RunLike): boolean => !!run && HOLDING_RUN_STATES.includes(run.state as RunState);
 /** The run holds its checkout: going, or paused there (CHECKOUT_RUN_STATES). */
 export const runHoldsCheckout = (run: RunLike): boolean => !!run && CHECKOUT_RUN_STATES.includes(run.state as RunState);
-/** The run is at work now and counts toward the limit on queues running at once (COUNTED_RUN_STATES). */
-export const runCounted = (run: RunLike): boolean => !!run && COUNTED_RUN_STATES.includes(run.state as RunState);
+/**
+ * The run is at work now and counts toward the limit on queues running at once (COUNTED_RUN_STATES): not one held at
+ * the limit (`held`), which waits for a place.
+ */
+export const runCounted = (run: RunLike): boolean => !!run && COUNTED_RUN_STATES.includes(run.state as RunState) && !run.held;
 /** The run is not going: finished, halted or paused (ENDED_RUN_STATES). */
 export const runEnded = (run: RunLike): boolean => !!run && ENDED_RUN_STATES.includes(run.state as RunState);
 
@@ -44,8 +48,11 @@ type StepLike = { status: StepStatus | (string & {}); review_with?: string };
 export const waitsForUserReview = (s: StepLike): boolean => s.status === "review" && s.review_with !== "orchestrator";
 /** The step's review is the orchestrator's (review levels 2 and 3). */
 export const reviewedByOrchestrator = (s: StepLike): boolean => s.status === "review" && s.review_with === "orchestrator";
-/** The step is at work: running, or waiting for an answer within its turn. */
-export const stepAtWork = (s: Pick<StepLike, "status">): boolean => s.status === "running" || s.status === "waiting";
+/**
+ * The step is at work: running, waiting for an answer within its turn, or its checks running in its checkout (Nexus
+ * runs them after its done: a merge back into that checkout waits for them too).
+ */
+export const stepAtWork = (s: Pick<StepLike, "status">): boolean => s.status === "running" || s.status === "waiting" || s.status === "checking";
 /** The step holds its queue in `waiting`: a question or a review is open on it. */
 export const stepWaits = (s: Pick<StepLike, "status">): boolean => s.status === "waiting" || s.status === "review";
 
@@ -68,7 +75,24 @@ export function questionBarrier(questions: readonly {
   const own = step ? questions.filter(q => q.queue === queue && q.step === step) : [];
   const remaining = own.filter(isOpenQuestion).length;
   const last = own.flatMap(q => q.answers).filter(a => !a.escalate)
-    .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)).at(-1);
+    .sort((a, b) => a.at.localeCompare(b.at) || compareIds(a.id, b.id)).at(-1);
   const wait = last?.continue === false && last.id !== resumed;
   return { remaining, wait, blocked: remaining > 0 || wait, last: last?.id };
+}
+
+/**
+ * The step is at work now: the derivation says `running` and its queue's run is going (queue EF). A run the user
+ * stopped (paused, "stopped by the user") leaves its step `running` in the derivation, as the step it goes on with at
+ * Continue (the dashboard reads such a queue as paused); no agent works on it, so it is no step at work: not in the
+ * server's running steps, nothing an update waits for, no queue running in the projects' list. Without a run, the
+ * derivation decides: a session Nexus did not start (an external one) works on its step without a run of Nexus's.
+ */
+export const stepWorkedOn = (run: RunLike, step: { status: StepStatus | (string & {}) }): boolean => step.status === "running" && (!run || runGoing(run));
+
+/** The queue is at work now: `running` in the derivation and its run going (see stepWorkedOn). */
+export const queueWorkedOn = (q: { status: string; run?: RunLike }): boolean => stepWorkedOn(q.run, q);
+
+/** The steps at work in a project's state (stepWorkedOn), each with its queue: what `nexus server status` lists. */
+export function stepsWorkedOn<Q extends { run?: RunLike; steps: readonly { status: StepStatus | (string & {}) }[] }>(queues: readonly Q[]): { queue: Q; step: Q["steps"][number] }[] {
+  return queues.flatMap((queue) => queue.steps.filter((step) => stepWorkedOn(queue.run, step)).map((step) => ({ queue, step })));
 }

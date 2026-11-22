@@ -1,4 +1,4 @@
-// A seed for the capture tool: a test project "demo" with tags (PROTOCOL.md, "Tags"). Its lists (.nexus/tags.yaml)
+// A seed for the capture tool: a test project "demo" with tags (docs/protocol/stats.md, "Tags"). Its lists (.nexus/tags.yaml)
 // have areas, an own activity, a rename and two proposals waiting for the user; queue TG is tagged on the queue and on
 // its steps, and its first step waits for the user's review with the activities its worker reported. Run by
 // scripts/capture.ts as `node <this> <data dir>` with NEXUS_HOME set to the development instance's; it writes only

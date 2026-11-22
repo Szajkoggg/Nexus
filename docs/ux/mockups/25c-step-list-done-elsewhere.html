@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>25C A step done here and continued elsewhere: the step list, the digest, the step</title>
+<link rel="stylesheet" href="dash-mock.css">
+<!-- Queue UF (UF1), the proposal "done, continued elsewhere" (docs/design/dashboard.md, "Done here, continued
+     elsewhere"). The data is queue FL as it went on 2026-11-18: FL2 and FL3 stopped by design once they had found the
+     cause ("describe the cause and stop before fixing it"), the user approved the next revisions that planned the
+     fixes, and the orchestrator closed FL2 and FL3; today they read "skipped". Marked with a dashed outline is what is
+     new: the ring of the done colour, the status "→ FL4, FL5" (continued in), the hatched segment of the progress line,
+     the digest's line. Two views: this page as it is (step-list-done-elsewhere@1440: the queues view, the digest in
+     the right column), and with ?panel=detail (step-detail-done-elsewhere@1440: FL2 open). -->
+<style>
+  .content { padding: 24px; overflow: hidden; }
+  .group { display: flex; align-items: baseline; gap: 12px; margin: 4px 0 12px; }
+  .group h2 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--fg-2); }
+  .qcard { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 14px 16px 12px; }
+  .qhead { display: flex; align-items: baseline; gap: 10px; }
+  .qhead h3 { margin: 0; font-size: 16px; font-weight: 600; }
+  .prog { display: flex; gap: 3px; margin: 12px 0 10px; }
+  .prog i { flex: 1; height: 5px; border-radius: 3px; background: var(--surface-3); }
+  .prog i.done { background: var(--ok); }
+  .prog i.cont { background: repeating-linear-gradient(135deg, var(--ok) 0 3px, color-mix(in srgb, var(--ok) 35%, transparent) 3px 6px); }
+  .prog i.run { background: var(--accent); }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; align-items: start; }
+  .srow { display: grid; grid-template-columns: 10px 3.25rem 1fr auto; gap: 10px; align-items: center; padding: 6px 8px; border-radius: 6px; font-size: 14px; }
+  .srow .id { font-family: var(--mono); font-size: 12px; color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .srow .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .srow .w { font-size: 12px; white-space: nowrap; }
+  .srow.cur { align-items: start; background: color-mix(in srgb, var(--accent) 8%, transparent); padding: 8px; }
+  .srow.sel { background: var(--surface-2); }
+  .cont-word { color: color-mix(in srgb, var(--ok) 80%, var(--fg-2)); }
+  .rail { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .dig { border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .tile { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.35; }
+  .tile b { display: block; font-size: 20px; font-weight: 600; }
+  .ev { padding: 8px 10px; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.45; }
+  .ev:first-child { border-top: 0; }
+  .ref { color: var(--accent); font-family: var(--mono); font-size: 12px; }
+  .detail, .is-detail .rail { display: none; }
+  .is-detail .detail { display: flex; }
+</style></head>
+<body>
+<script>if (location.search.includes("panel=detail")) document.documentElement.classList.add("is-detail");</script>
+<div class="desk">
+  <aside class="side">
+    <div class="brand">Nexus<span class="grow"></span><span class="xs fg3">live <span class="ok">●</span></span></div>
+    <div class="label" style="padding: 0 10px 6px">Projects</div>
+    <div class="proj"><span class="av">NX</span>Nexus<span class="grow"></span><span class="badge">1</span></div>
+    <div class="row" style="padding: 18px 12px; color: var(--fg-2)"><span>⫼</span><span class="fg">Stats</span><span class="grow"></span><span class="xs fg3">all projects</span></div>
+    <div class="grow"></div>
+    <div class="xs fg3" style="padding: 8px 10px">☾ Away…</div>
+    <div class="row xs fg3" style="padding: 8px 10px">notify off<span class="grow"></span>⚙ ▯</div>
+  </aside>
+
+  <main class="mid">
+    <div class="deskhead">
+      <span class="seg"><span>● Orchestrator</span><span>Ideas</span><span>Stats</span></span>
+      <span class="semi" style="font-size: 14px">Nexus <span class="fg3" style="font-weight: 400">· queues</span></span>
+      <span class="search">⌕ Search history…<span class="grow"></span><span class="xs fg3" style="border:1px solid var(--line-strong); border-radius:4px; padding:0 4px">Ctrl K</span></span>
+    </div>
+    <div class="content">
+      <div class="group"><h2>In progress</h2><span class="xs fg3">1</span></div>
+      <div class="qcard">
+        <div class="qhead">
+          <span class="mono fg3">FL</span><h3>Flaky full-suite failures: causes and fixes</h3>
+          <span class="st accent"><span class="dot sm running"></span>running · FL5</span>
+          <span class="grow"></span><span class="xs fg3">4 of 9 · 22 min ago</span>
+        </div>
+        <div class="prog new"><i class="done"></i><i class="cont"></i><i class="cont"></i><i class="done"></i><i class="run"></i><i></i><i></i><i></i><i></i></div>
+        <div class="cols">
+          <div>
+            <div class="srow"><span class="dot done"></span><span class="id">FL1</span><span class="t">Reproduce the failures under load</span><span class="w fg3">done</span></div>
+            <div class="srow sel-if"><span class="dot continued"></span><span class="id">FL2</span><span class="t">Coordinator wait: the cause</span><span class="w cont-word new" title="continued in FL4, FL5">→ FL4, FL5</span></div>
+            <div class="srow"><span class="dot continued"></span><span class="id">FL3</span><span class="t">Three failures: the causes</span><span class="w cont-word new" title="continued in FL6, FL7, FL8">→ FL6 – FL8</span></div>
+            <div class="srow"><span class="dot done"></span><span class="id">FL4</span><span class="t">Clock step: the design</span><span class="w fg3">done</span></div>
+            <div class="srow cur"><span class="dot running" style="margin-top: 7px"></span><span class="id" style="line-height: 22px">FL5</span>
+              <span style="min-width: 0"><span class="semi">Clock step: the fix</span> <span class="xs accent">running</span>
+                <span class="xs fg2" style="display: block; margin-top: 2px">One clock for the engine and the CLI; the lag reproduction in the tests</span>
+                <span style="display: block; height: 4px; margin-top: 6px; border-radius: 2px; background: var(--surface-3)"><span style="display: block; width: 45%; height: 100%; border-radius: 2px; background: var(--accent)"></span></span></span>
+              <span></span></div>
+          </div>
+          <div>
+            <div class="srow"><span class="dot pending"></span><span class="id">FL6</span><span class="t">A stable order of equal times</span><span class="w fg3">pending</span></div>
+            <div class="srow"><span class="dot pending"></span><span class="id">FL7</span><span class="t">413 with its body drained</span><span class="w fg3">pending</span></div>
+            <div class="srow"><span class="dot pending"></span><span class="id">FL8</span><span class="t">A prompt worker exit</span><span class="w fg3">pending</span></div>
+            <div class="srow"><span class="dot pending"></span><span class="id">⟳</span><span class="t">Closing refactoring</span><span class="w fg3">pending</span></div>
+          </div>
+        </div>
+      </div>
+      <p class="xs fg3" style="margin-top: 14px">The phone folds the leading run the same way: <span class="fg2">FL1 – FL4 · 2 done, 2 continued ▸</span></p>
+    </div>
+  </main>
+
+  <aside class="right">
+    <div class="rail">
+      <div class="dig">
+        <div class="row"><span class="semi" style="font-size: 15px">Good morning</span><span class="grow"></span><span class="xs semi">Mark as seen</span></div>
+        <p class="xs fg3">since you last looked, 18 Nov 07:30 · all projects</p>
+        <div class="tiles">
+          <div class="tile"><b class="ok">2</b>steps finished</div>
+          <div class="tile"><b class="fg3">0</b>queues stopped</div>
+          <div class="tile"><b class="warn">1</b>waiting for you · 1 review</div>
+          <div class="tile"><b class="accent">1</b>running now</div>
+        </div>
+        <div class="label" style="margin: 12px 0 6px">What happened, newest first</div>
+        <div style="border: 1px solid var(--line); border-radius: 8px">
+          <div class="ev"><div class="row xs fg3">09:12 <span class="mono">FL4</span><span class="grow"></span>Nexus</div><span class="ok">● done</span> One clock for the engine and the CLI; the design in docs/design/engine.md.</div>
+          <div class="ev new"><div class="row xs fg3">08:44 <span class="mono">FL3</span><span class="grow"></span>Nexus</div><span class="cont-word"><span class="dot continued sm" style="width: 7px; height: 7px"></span> continued in</span> <span class="ref">FL6</span> <span class="ref">FL7</span> <span class="ref">FL8</span><span class="fg"> · Causes found (FL3-cause.md); the test limit fix is committed.</span></div>
+          <div class="ev"><div class="row xs fg3">08:40 <span class="mono">FL3</span><span class="grow"></span>Nexus</div><span style="color: var(--stop)">● stopped</span> Two failures' causes are in the product: the order of events at one time, the 413…</div>
+          <div class="ev new"><div class="row xs fg3">07:55 <span class="mono">FL2</span><span class="grow"></span>Nexus</div><span class="cont-word"><span class="dot continued sm" style="width: 7px; height: 7px"></span> continued in</span> <span class="ref">FL4</span> <span class="ref">FL5</span><span class="fg"> · Cause found and documented (clock step, product side).</span></div>
+        </div>
+        <div class="btn primary" style="width: 100%; margin-top: 12px">Go through them one by one →</div>
+      </div>
+    </div>
+
+    <div class="detail" style="flex-direction: column">
+      <div class="panel-head">
+        <div class="row xs" style="justify-content: space-between"><span class="accent"><span class="mono">FL</span> · Flaky full-suite failures: causes and fixes ›</span><span class="fg3" style="font-size: 18px; line-height: 1">×</span></div>
+        <h2 style="margin: 6px 0 0; font-size: 20px; font-weight: 600"><span class="mono fg3" style="margin-right: 8px">FL2</span>Coordinator wait: the cause</h2>
+        <div class="row wrap xs fg3" style="margin-top: 6px; gap: 4px 12px">
+          <span class="st cont-word new"><span class="dot sm continued" style="width: 7px; height: 7px"></span>continued in FL4, FL5</span>
+          <span><span style="background: var(--surface-3); border-radius: 4px; padding: 0 4px; color: var(--fg)">L1</span> You review</span>
+          <span>started 18 Nov 12:02</span><span>stopped 18 Nov 12:40</span><span>took 38 min</span>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="box okbox new">
+          <p>Its own work is done; what it found went on in</p>
+          <p style="margin-top: 6px"><span class="ref">FL4</span> Clock step: the design <span class="st ok" style="margin-left: 4px"><span class="dot sm done"></span>done</span></p>
+          <p><span class="ref">FL5</span> Clock step: the fix <span class="st accent" style="margin-left: 4px"><span class="dot sm running"></span>running</span></p>
+          <p class="xs fg2" style="margin-top: 8px">Cause found and documented (clock step, product side; FL2-cause.md); the fix is planned as FL4 (design) and FL5 (code) in revision 2.</p>
+          <p class="xs fg3" style="margin-top: 4px">Closed by the orchestrator · 18 Nov 13:09 · not a review: the step was not accepted</p>
+        </div>
+        <div class="note xs"><span class="fg3">Stopped at a stop condition:</span> <span class="fg2">If a failure's cause is in the product, describe the reproduction and the cause and stop before fixing it. The cause is in the product: the system clock jumped 240 s forward…</span></div>
+        <div>
+          <div class="label" style="margin-bottom: 8px">Review material</div>
+          <span class="btn line xs" style="font-size: 13px">▤ FL2-cause.md</span>
+        </div>
+        <div>
+          <div class="label" style="margin-bottom: 8px">Goal</div>
+          <p style="line-height: 1.6">Find why the coordinator test waits beyond its limit in the full suite: reproduce it, name the cause, and say whether it lies in the test or in the product.</p>
+        </div>
+      </div>
+    </div>
+  </aside>
+</div>
+<script>if (location.search.includes("panel=detail")) document.querySelector(".sel-if").classList.add("sel");</script>
+</body></html>

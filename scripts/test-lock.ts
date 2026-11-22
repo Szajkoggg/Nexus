@@ -11,8 +11,11 @@
 // - A lock held longer than a full run can take (20 minutes since it was taken, NEXUS_TEST_LOCK_STALE_MS) is stale even
 //   if its process lives (a hung run, a pid reused by another process): it is taken over at once (queue TF).
 //   Without process queries, the holder instead renews the lock's mtime; only an unrenewed lease expires (queue PT).
-// - After 15 minutes (NEXUS_TEST_LOCK_MAX_MS) it runs anyway, without the lock: a stuck run, or a pid reused by another
-//   process, never blocks the suite for good.
+// - It never runs without the lock (queue EC, 2026-11-18, EC1's proposal P11). It used to after 15 minutes, beside the
+//   run it waited for, which is what the lock is there to prevent. A waiting run keeps waiting and keeps saying what
+//   for; a hung holder or a reused pid is handled by the staleness above, not by a time after which waiting gives up.
+//   The Nexus server's capacity coordinator reads the same lock: packages/protocol/src/full-test-lock.ts holds the
+//   rules both go by.
 // - The lock is removed when the run ends (only if it is still this run's).
 // - The run ends with whoever started it (queue TF): a watchdog process watches the run's starter (this script's
 //   parent, and the shells and npm above it) and this script. The watchdog owns the runner. A known starter gone or
@@ -21,20 +24,20 @@
 //
 // `npm run test:files` takes no lock and never waits: it runs a few files while working, and is short.
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { openSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync, closeSync, futimesSync } from "node:fs";
+import { openSync, unlinkSync, writeFileSync, writeSync, closeSync, futimesSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  fullTestLockFile, fullTestStale, fullTestStaleMs, processAlive as alive, readFullTestHolder as readHolder,
+  type FullTestHolder as Holder,
+} from "@nexus/protocol/full-test-lock";
 
-/** Who holds the lock, as its file says. */
-interface Holder { pid: number; cwd: string; since: string; token?: string; lease?: boolean }
+export { alive };
 
 interface LockOptions {
   /** The lock file (default: nexus-full-test.lock in the system's temporary folder, or NEXUS_TEST_LOCK). */
   file?: string;
-  /** How long to wait at most before running without the lock (default 15 minutes, or NEXUS_TEST_LOCK_MAX_MS). */
-  maxWaitMs?: number;
   /** A lock held longer than this is stale, its process alive or not (default 20 minutes, or NEXUS_TEST_LOCK_STALE_MS). */
   staleMs?: number;
   /** How often the lock is looked at while waiting (default 1 s). */
@@ -48,6 +51,7 @@ interface LockOptions {
   cwd?: string;
   /** Without process queries, renew a lease rather than relying on PID visibility or absolute run age. */
   lease?: boolean;
+  /** Ends the wait (the run's starter is gone): acquire resolves with undefined, and nothing runs. */
   signal?: AbortSignal;
 }
 
@@ -55,33 +59,6 @@ interface LockOptions {
 interface Lock { file: string; token?: string; release: () => void }
 
 const MINUTE = 60_000;
-/** A lock file younger than this that cannot be read is being written: its taker is alive. */
-const WRITING_MS = 5_000;
-
-function defaultLockFile(): string {
-  return process.env.NEXUS_TEST_LOCK || join(tmpdir(), "nexus-full-test.lock");
-}
-
-/** A duration from the environment, or the default. */
-function envMs(name: string, fallback: number): number {
-  const raw = process.env[name];
-  const v = Number(raw);
-  return raw && Number.isFinite(v) && v >= 0 ? v : fallback;
-}
-
-/** Whether a process with this pid is alive (EPERM: it is, but not ours to signal). */
-export function alive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); return true; }
-  catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; }
-}
-
-function readHolder(file: string): Holder | undefined {
-  try {
-    const h = JSON.parse(readFileSync(file, "utf8")) as Partial<Holder>;
-    return typeof h.pid === "number" ? { pid: h.pid, cwd: String(h.cwd ?? "?"), since: String(h.since ?? "?"), token: h.token, lease: h.lease } : undefined;
-  } catch { return undefined; }
-}
 
 /** Creates the lock file exclusively, optionally renewing its lease; undefined when it exists. */
 function create(file: string, holder: Holder, staleMs: number): Lock | undefined {
@@ -103,25 +80,6 @@ function create(file: string, holder: Holder, staleMs: number): Lock | undefined
   } };
 }
 
-/**
- * The lock's holder is gone (its process is not alive, or the file is unreadable and not being written), or has held it
- * longer than `staleMs` (`heldMs`: how long).
- */
-function stale(file: string, staleMs: number): { holder?: Holder; heldMs?: number } | undefined {
-  const h = readHolder(file);
-  if (h) {
-    if (h.lease) {
-      try { const heldMs = Date.now() - statSync(file).mtimeMs; return heldMs > staleMs ? { holder: h, heldMs } : undefined; }
-      catch { return {}; }
-    }
-    if (!alive(h.pid)) return { holder: h };
-    const heldMs = Date.now() - Date.parse(h.since);
-    return heldMs > staleMs ? { holder: h, heldMs } : undefined; // an unreadable `since` (NaN) is never stale
-  }
-  try { return Date.now() - statSync(file).mtimeMs > WRITING_MS ? {} : undefined; }
-  catch { return {}; } // removed meanwhile: free
-}
-
 /** Removes the lock file if `pid` still holds it. */
 function releaseIf(file: string, pid: number, token?: string): void {
   const holder = readHolder(file);
@@ -132,13 +90,12 @@ function releaseIf(file: string, pid: number, token?: string): void {
 const clock = (iso: string) => (/T(\d\d:\d\d)/.exec(iso)?.[1] ?? iso);
 
 /**
- * Takes the machine's full-test lock, waiting for another run's end at most `maxWaitMs`. Resolves with the lock, or
- * with undefined when it waited that long (the caller runs without it).
+ * Takes the machine's full-test lock, waiting for another run's end as long as it takes (the lock is taken over only
+ * when it is stale). Resolves with the lock, or with undefined once `signal` ended the wait: the caller does not run.
  */
 export async function acquire(o: LockOptions = {}): Promise<Lock | undefined> {
-  const file = o.file ?? defaultLockFile();
-  const maxWaitMs = o.maxWaitMs ?? envMs("NEXUS_TEST_LOCK_MAX_MS", 15 * MINUTE);
-  const staleMs = o.staleMs ?? envMs("NEXUS_TEST_LOCK_STALE_MS", 20 * MINUTE);
+  const file = o.file ?? fullTestLockFile();
+  const staleMs = o.staleMs ?? fullTestStaleMs();
   const pollMs = o.pollMs ?? 1000;
   const sayEveryMs = o.sayEveryMs ?? MINUTE;
   const say = o.say ?? ((line: string) => process.stderr.write(`${line}\n`));
@@ -149,7 +106,7 @@ export async function acquire(o: LockOptions = {}): Promise<Lock | undefined> {
     if (o.signal?.aborted) return undefined;
     const fresh = create(file, me, staleMs);
     if (fresh) return fresh;
-    const gone = stale(file, staleMs);
+    const gone = fullTestStale(file, staleMs);
     if (gone) {
       // Taken over: removed, then created exclusively again (of two runs taking it over at once, one gets it). A run
       // that held it too long is left running: it is not this run's to end, and its end leaves the lock alone.
@@ -167,15 +124,11 @@ export async function acquire(o: LockOptions = {}): Promise<Lock | undefined> {
     const waited = Date.now() - started;
     const h = readHolder(file);
     const who = h ? `the full test run in ${h.cwd} (pid ${h.pid}, since ${clock(h.since)})` : "another full test run";
-    if (waited >= maxWaitMs) {
-      say(`npm test: waited ${Math.round(waited / MINUTE)} min for ${who}; running now without the lock`);
-      return undefined;
-    }
     if (lastSaid === undefined || Date.now() - lastSaid >= sayEveryMs) {
       lastSaid = Date.now();
-      say(`npm test: waiting for ${who} to end (${Math.round(waited / MINUTE)} of at most ${Math.round(maxWaitMs / MINUTE)} min)`);
+      say(`npm test: waiting for ${who} to end (${Math.round(waited / MINUTE)} min so far; it never runs without the lock)`);
     }
-    await new Promise((r) => setTimeout(r, Math.max(0, Math.min(pollMs, maxWaitMs - waited))));
+    await new Promise((r) => setTimeout(r, pollMs));
   }
 }
 
@@ -346,7 +299,7 @@ function watchdog(wrapper: number, parent: number, file: string, pollMs = 1000):
 
 /** Runs `node <args>` under the lock, ended with its starter (watchdog); resolves with its exit code. */
 async function runLocked(args: string[], o: LockOptions = {}): Promise<number> {
-  const file = o.file ?? defaultLockFile();
+  const file = o.file ?? fullTestLockFile();
   const say = o.say ?? ((line: string) => process.stderr.write(`${line}\n`));
   // Detached so it can remove the lock when the sandbox kills this wrapper. The IPC channel is the lifetime
   // connection, including where WMI/ps is denied. If the sandbox kills both, the unrenewed lease expires instead.
@@ -379,8 +332,9 @@ async function runLocked(args: string[], o: LockOptions = {}): Promise<number> {
     const result = await Promise.race([acquired.then((value) => ({ lock: value })), ended.then((code) => ({ code }))]);
     if ("code" in result) { void acquired.then((value) => value?.release()); return result.code; }
     lock = result.lock;
-    if (!guard.connected) return await ended;
-    send({ args, token: lock?.token });
+    // Never without the lock: undefined only when the wait was ended, and then nothing runs.
+    if (!lock || !guard.connected) { send({ stop: true }); return await ended; }
+    send({ args, token: lock.token });
     return await ended;
   } finally {
     lock?.release();

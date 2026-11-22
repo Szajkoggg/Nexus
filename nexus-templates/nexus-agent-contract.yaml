@@ -22,7 +22,7 @@ params:
     default: packages/protocol/src/schemas.ts (the .nexus/ files, the events, the inbox)
   - name: protocol_doc
     description: the description of the protocol between the agents and the system
-    default: docs/PROTOCOL.md
+    default: docs/PROTOCOL.md (the index) and the topic files in docs/protocol/
 title: "Maintenance: agent contract"
 description: |
   A survey of whether the agents' contract holds together: what {{instructions}} tell the agents, what {{cli}}

@@ -17,7 +17,7 @@ type Runtime = "claude" | "codex";
 const HOUR = 3_600_000;
 const key = (runtime: Runtime) => runtime === "claude" ? "five_hour" : "codex_5h";
 
-function setup(primary: Runtime, fallback?: Runtime) {
+function setup(primary: Runtime, fallback?: Runtime, o: { lateTurnMs?: number } = {}) {
   const root = mkdtempSync(join(tmpdir(), "nexus-orch-fallback-"));
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_LOG = join(root, "fake.log");
@@ -30,7 +30,7 @@ function setup(primary: Runtime, fallback?: Runtime) {
     fallback: fallback ? { runtime: fallback, model: "backup-model", effort: "low" } : null } });
   let clock = Date.now();
   const engine = new Engine(store, () => {});
-  let orchestrator = new Orchestrator(store, engine, tick, {}, { nowMs: () => clock });
+  let orchestrator = new Orchestrator(store, engine, tick, {}, { nowMs: () => clock, lateTurnMs: o.lateTurnMs });
   function tick() { orchestrator.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 100);
   const log = (): { text: string; session: string }[] => existsSync(join(root, "fake.log"))
@@ -58,7 +58,7 @@ function setup(primary: Runtime, fallback?: Runtime) {
     restart: async (resume = false) => {
       orchestrator.shutdown();
       await until("the old process ended", () => !orchestrator.alive());
-      orchestrator = new Orchestrator(store, engine, tick, {}, { nowMs: () => clock });
+      orchestrator = new Orchestrator(store, engine, tick, {}, { nowMs: () => clock, lateTurnMs: o.lateTurnMs });
       if (resume) orchestrator.resumeCutOff();
       tick();
     },
@@ -203,6 +203,79 @@ test("a manual runtime change after a summary waits on the destination quota, no
     await until("the summary on Codex", () => x.received(x.orchestrator.session()!.id, "Summary before changing runtime"), LONGER.step);
     await x.idle();
   } finally { x.stop(); }
+});
+
+test("a runtime change waits while a message sent as a turn ended may still run as a turn of its own (queue KM)", async () => {
+  // The fake holds the first turn's result until the next message comes, so that message is sent into the turn (`next`)
+  // but runs as a turn of its own after the result Nexus reads (FAKE_LATE_NEXT). The process is settling then, not idle:
+  // the runtime change made meanwhile waits for that turn's end.
+  process.env.FAKE_LATE_NEXT = "1";
+  const x = setup("claude");
+  try {
+    x.orchestrator.say("Hello");
+    const first = x.orchestrator.session()!;
+    await until("the first reply", () => x.orchestrator.view().chat.some((c) => c.from === "orchestrator"));
+    delete process.env.FAKE_LATE_NEXT; // for the Codex session's process
+    x.orchestrator.say("FAKE-HOLD");
+    updateSettings(x.store, { orchestrator: { runtime: "codex", model: null, effort: null } });
+    await until("the held turn", () => x.store.readChat(first.id).entries.some((c) => c.kind === "tool" && c.text.includes("FAKE-HOLD")), LONGER.step);
+    assert.equal(x.orchestrator.session()!.id, first.id, "not switched while the late turn runs");
+    x.release();
+    await until("the Codex session", () => x.orchestrator.session()?.runtime === "codex", LONGER.step);
+    const chat = x.store.readChat(first.id).entries;
+    const held = chat.findIndex((c) => c.from === "orchestrator" && c.text === "held reply");
+    assert.ok(held >= 0 && held < chat.findIndex((c) => c.from === "nexus" && c.text.startsWith("The orchestrator goes on on Codex")), "the held turn ended before the switch");
+    await x.idle();
+  } finally { delete process.env.FAKE_LATE_NEXT; x.stop(); }
+});
+
+test("a runtime change while the process settles with no late turn: the switch waits for `settled`, then comes with no new message (queue KM, LH)", async () => {
+  // FAKE_LATE_NEXT=inside: the first turn's result waits for the next message and reads it inside the turn, so no turn
+  // of the CLI's own follows; the process settles for the host's lateTurnMs and then is idle (`settled`). The test
+  // above is held mainly by `working` (its late turn starts at once); this one reaches the settled path (queue LH).
+  process.env.FAKE_LATE_NEXT = "inside";
+  const x = setup("claude", undefined, { lateTurnMs: 1500 });
+  try {
+    x.orchestrator.say("Hello");
+    const first = x.orchestrator.session()!;
+    await until("the first reply, its turn open", () => x.orchestrator.view().chat.some((c) => c.from === "orchestrator"));
+    delete process.env.FAKE_LATE_NEXT; // for the Codex session's process
+    updateSettings(x.store, { orchestrator: { runtime: "codex", model: null, effort: null } });
+    x.orchestrator.say("read inside the turn");
+    const proc = () => x.orchestrator["proc"];
+    await until("the turn over, the process settling", () => proc()?.state === "idle" && !!proc()!.settling, LONGER.step);
+    x.tick();
+    assert.equal(x.orchestrator.session()!.id, first.id, "not switched while settling");
+    assert.equal(x.orchestrator.idle(), false);
+    await until("the Codex session", () => x.orchestrator.session()?.runtime === "codex", LONGER.step);
+    assert.equal(x.store.readChat(first.id).entries.filter((c) => c.from === "user").length, 2, "no message after the two: the settled end made the switch");
+    assert.equal(x.log().filter((l) => l.session === first.id && l.text === "read inside the turn").length, 1, "the message read once, in the first turn");
+    await x.idle();
+  } finally { delete process.env.FAKE_LATE_NEXT; x.stop(); }
+});
+
+test("a model change while the process settles: the stale process ends on `settled`, and the next message starts the new model (queue KM, LH)", async () => {
+  process.env.FAKE_LATE_NEXT = "inside";
+  const x = setup("claude", undefined, { lateTurnMs: 1500 });
+  try {
+    x.orchestrator.say("Hello");
+    const s = x.orchestrator.session()!;
+    await until("the first reply, its turn open", () => x.orchestrator.view().chat.some((c) => c.from === "orchestrator"));
+    delete process.env.FAKE_LATE_NEXT;
+    const proc = x.orchestrator["proc"]!;
+    updateSettings(x.store, { orchestrator: { runtime: "claude", model: "new-model", effort: "high", fallback: null } });
+    x.orchestrator.say("read inside the turn");
+    await until("the turn over, the process settling", () => proc.state === "idle" && !!proc.settling, LONGER.step);
+    x.tick();
+    assert.notEqual(proc.state, "exited", "not ended while settling: a turn of its own may still start");
+    await until("the stale process ended once settled", () => proc.state === "exited", LONGER.step);
+    assert.equal(x.orchestrator.session()!.id, s.id, "the same session, resumed by the next process");
+    x.orchestrator.say("after");
+    await until("the next process", () => x.received(s.id, "after"), LONGER.step);
+    const argv = readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv: string[] }).at(-1)!.argv;
+    assert.equal(argv[argv.indexOf("--model") + 1], "new-model");
+    await x.idle();
+  } finally { delete process.env.FAKE_LATE_NEXT; x.stop(); }
 });
 
 test("restart carries an interrupted turn to the available fallback, with the seed first", async () => {

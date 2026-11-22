@@ -1,15 +1,16 @@
 // What the user does from the dashboard, as writes to a project's files. Run by the Nexus server, which is the
-// writer of queue definitions, notes and inboxes (docs/PROTOCOL.md, "Rules").
+// writer of queue definitions, notes and inboxes (docs/protocol/files.md, "Rules").
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type StatusChange, type InboxEntry, ReviewLevel, type RunFile, type SessionFile } from "./schemas.ts";
-import { ProjectStore, countWrite, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
+import { NEXUS_SESSION, ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type Effort, type StatusChange, type InboxEntry, ReviewLevel, type RunFile, type SessionFile } from "./schemas.ts";
+import { ProjectStore, wrote, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
 import { OVERRIDABLE, changedGlobal, settingKey } from "./settings.ts";
 import { reviewedByOrchestrator, runGoing } from "./status-rules.ts";
 import { commentTarget, isApproved, loadProjectState, pendingProvisional, type ProjectState, type QueueView } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { stepChecks } from "./steps.ts";
+import { checkCommandIssue } from "./commands.ts";
 import { inheritedTags, kindListIssue, tagIssues, type StepTags } from "./tags.ts";
 import { fallbackIssues, kindIssues } from "./routing.ts";
 import { importedFrom, noteRefIssue, noteRefs } from "./ideas.ts";
@@ -39,12 +40,22 @@ const nonEmpty = (text: unknown, what: string): string => {
 
 /** The session that records what the user does in the dashboard. */
 export function ensureUserSession(store: ProjectStore): SessionFile {
-  try { return store.readSession(USER_SESSION); } catch { /* create it */ }
+  return ensureServerSession(store, USER_SESSION, "user", "You (dashboard)");
+}
+
+/**
+ * The session of the steps the engine runs itself, without a model (queue MI): its events are the server's only; it has
+ * no process and no inbox.
+ */
+export function ensureNexusSession(store: ProjectStore): SessionFile {
+  return ensureServerSession(store, NEXUS_SESSION, "nexus", "Nexus (without a model)");
+}
+
+/** A session the server keeps itself (no process): read, or made the first time it is needed. */
+function ensureServerSession(store: ProjectStore, id: string, role: SessionFile["role"], title: string): SessionFile {
+  try { return store.readSession(id); } catch { /* create it */ }
   const p = store.readProject();
-  const s: SessionFile = {
-    protocol: 1, id: USER_SESSION, project: p.id, role: "user", runtime: "external", title: "You (dashboard)",
-    cwd: p.root, launched_by: "nexus", created_at: now(),
-  };
+  const s: SessionFile = { protocol: 1, id, project: p.id, role, runtime: "external", title, cwd: p.root, launched_by: "nexus", created_at: now() };
   store.writeSession(s);
   return s;
 }
@@ -71,7 +82,7 @@ export function deleteNote(store: ProjectStore, queue: string, step: string, id:
   if (!note) throw new ActionError("no such note", 404);
   if (note.read_at) throw new ActionError("the note was already delivered", 409);
   const file = join(store.queueDir(queue), "notes", step, `${id}.md`);
-  if (existsSync(file)) { unlinkSync(file); countWrite(); }
+  if (existsSync(file)) { unlinkSync(file); wrote(file); }
 }
 
 export function sendMessage(store: ProjectStore, session: string, text: unknown, about?: { queue?: string; step?: string }): string {
@@ -306,12 +317,12 @@ export function routeSendBacks(store: ProjectStore, state: ProjectState = loadPr
 
 /**
  * Sends a step in review back to its worker with what to fix: the orchestrator's send-back (its review.sent_back
- * event, `event`, written by `nexus review send-back`), or the user's Fix it (written here, as the user's session; also
+ * event, `event`, written by `nexus review send-back`; a review helper's likewise), or the user's Fix it (written here, as the user's session; also
  * what picture comments become). The step reopens in the same session as the next round; on a paused or halted run
  * the message waits for the resume. Beyond `defaults.review_send_back_limit` the orchestrator's send-back hands the
  * step to the user instead. Returns what became of it.
  */
-export function sendBack(store: ProjectStore, req: { queue: string; step: string; from: "orchestrator" | "user"; text: unknown; event?: string }): string {
+export function sendBack(store: ProjectStore, req: { queue: string; step: string; from: "orchestrator" | "user" | "helper"; text: unknown; event?: string }): string {
   nonEmpty(req.text, req.from === "user" ? "what to fix" : "the send-back");
   const text = req.text as string; // recorded verbatim
   stepOf(store, req.queue, req.step);
@@ -325,7 +336,7 @@ export function sendBack(store: ProjectStore, req: { queue: string; step: string
     id = newId();
     store.appendEvent({ v: 1, id, at: now(), session: user.id, type: "review.sent_back", queue: req.queue, step: req.step, text });
   }
-  if (!id) throw new ActionError("an orchestrator's send-back is its review.sent_back event");
+  if (!id) throw new ActionError("an orchestrator's (or a review helper's) send-back is its review.sent_back event");
   routeSendBacks(store);
   const state = loadProjectState(store);
   const st = state.queues.find((q) => q.id === req.queue)!.steps.find((s) => s.id === req.step)!;
@@ -435,6 +446,11 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   if (tagged.length) throw new ActionError(tagged.join("; "));
   const sourced = draftSourceIssues(store, draft, old);
   if (sourced.length) throw new ActionError(sourced.join("; "));
+  // Only a command can be a check (commands.ts): every check of the draft, also one an older queue had, so that a
+  // revision converts it.
+  const root = store.readProject().root;
+  const prose = draft.checks.flatMap((c) => checkCommandIssue(c, root) ?? []);
+  if (prose.length) throw new ActionError(prose.join("; "));
   const at = now();
   // A new step starts pending, or skipped (kept for the record); statuses change through nexus queue set only.
   const fresh = draft.steps.filter((s) => !old?.steps.some((o) => o.id === s.id) && s.status && s.status !== "skipped");
@@ -611,12 +627,6 @@ export function closingToSkipAtApproval(store: ProjectStore, queue: string): Que
 // ---------------------------------------------------------------- housekeeping by the orchestrator
 
 /**
- * The orchestrator's housekeeping (`nexus queue set`, event `status.set`), recorded as an entry in the queue's
- * `changes`. Allowed: a pending, stopped or failed step to `skipped`; a halted run of a queue whose steps are all done
- * or skipped to `finished`; a queue whose run is not going to `cancelled`; and `propose-lift` on a stopped queue.
- * Consent stays the user's: marking work done, approving, lifting a stop, reopening a finished step.
- */
-/**
  * A run of an older revision than `revision` (the queue's current one, or the one just approved): a run without the
  * field is older when a revision of the queue (its `history`) was replaced after the run started.
  */
@@ -638,8 +648,9 @@ function heldByLiveRun(run: RunFile | undefined, step: string): boolean {
  * start, which cleans a step an earlier server left so (a run record replaced, or a revision change before runs went
  * on across revisions). Returns the steps released.
  */
-export function releaseOrphanedSteps(store: ProjectStore, queueId: string, o: { replacing?: boolean } = {}): string[] {
-  const view = loadProjectState(store).queues.find((x) => x.id === queueId);
+export function releaseOrphanedSteps(store: ProjectStore, queueId: string, o: { replacing?: boolean; state?: ProjectState } = {}): string[] {
+  // `state`: the project's state as it stands, when the caller has it (the engine's recovery: one state for every queue).
+  const view = (o.state ?? loadProjectState(store)).queues.find((x) => x.id === queueId);
   if (!view || view.status === "done" || view.status === "cancelled") return [];
   // The run record holds the step it has open, whatever its revision: a revision changes no started step, so the run
   // finishes that step (or resumes it) and takes the new revision at the step's end.
@@ -667,7 +678,15 @@ export function releaseOrphanedSteps(store: ProjectStore, queueId: string, o: { 
   return open.map(({ s }) => s.id);
 }
 
-export function orchestratorStatusChange(store: ProjectStore, input: { queue: string; step?: string; to: string; reason: string }): string {
+/**
+ * The orchestrator's housekeeping (`nexus queue set`, event `status.set`), recorded as an entry in the queue's
+ * `changes`. Allowed: a pending, stopped or failed step to `skipped`; a halted run of a queue whose steps are all done
+ * or skipped to `finished`; a queue whose run is not going to `cancelled`; and `propose-lift` on a stopped queue.
+ * A skip may say where the step's work went on (`continued_in`, docs/design/continued.md), also on a step skipped
+ * already (an entry from `skipped` to `skipped`). Consent stays the user's: marking work done, approving, lifting a
+ * stop, reopening a finished step.
+ */
+export function orchestratorStatusChange(store: ProjectStore, input: { queue: string; step?: string; to: string; reason: string; continued_in?: string[] }): string {
   const to = input.to.trim().toLowerCase();
   const reason = nonEmpty(input.reason, "the reason");
   const q = queueOf(store, input.queue);
@@ -676,7 +695,11 @@ export function orchestratorStatusChange(store: ProjectStore, input: { queue: st
   if (input.step && !step) throw new ActionError(`queue ${q.id} has no step ${input.step} (has ${view.steps.map((s) => s.id).join(", ")})`, 404);
   const where = step ? `step ${q.id}/${step.id}` : `queue ${q.id}`;
 
-  if (to === "done") throw new ActionError("the orchestrator never marks a step done: work done elsewhere is skipped, with the reason saying where it was done");
+  if (to === "done") {
+    throw new ActionError("the orchestrator never marks a step done: a step whose own work is done while the rest goes on elsewhere, or whose work another step or queue did, is skipped with --continued-in naming where (nexus queue set QUEUE --step STEP skipped --continued-in FL4,FL5 --reason \"...\")");
+  }
+  const continued = input.continued_in?.length ? continuedRefs(input.continued_in) : undefined;
+  if (continued && to !== "skipped") throw new ActionError("--continued-in goes with skipped: it says where a skipped step's work went on");
   if (to === "approved" || to === "approve") throw new ActionError("approving is the user's, in the dashboard");
   if (["lift", "lifted", "resume", "continue"].includes(to) || (!step && ["approved", "running", "pending"].includes(to))) {
     throw new ActionError("only the user lifts a stop (by approving a new revision, or with Continue); propose it with: nexus queue set QUEUE propose-lift --reason \"...\"");
@@ -694,16 +717,22 @@ export function orchestratorStatusChange(store: ProjectStore, input: { queue: st
       if (!step) throw new ActionError("skipping is for a step: nexus queue set QUEUE --step STEP skipped --reason \"...\"");
       if (step.closing) throw new ActionError(`${where} is the queue's closing refactoring step: it is not skipped; the step itself may find that nothing is worth refactoring, and says why`, 409);
       if (step.integration) throw new ActionError(`${where} is the queue's integration step: it is not skipped; it merges the base into the queue's branch and runs the checks, so the queue's work can go back into the base`, 409);
+      if (continued) checkContinuedRefs(store, q.id, step.id, continued);
+      // Marking a step skipped already changes no status: also in a finished queue (FL2 and FL3 after the fact).
+      if (continued && step.status === "skipped") {
+        record({ kind: "status", step: step.id, from: "skipped", to: "skipped", reason, continued_in: continued });
+        return `${where} (skipped) is marked continued in ${continued.join(", ")}`;
+      }
+      if (step.status === "skipped") throw new ActionError(`${where} is skipped already (--continued-in marks where its work went on)`, 409);
       if (view.status === "done" || view.status === "cancelled") throw new ActionError(`queue ${q.id} is ${view.status}`, 409);
       // A running step no live run holds (one a revision change left behind) is not at work: it may be skipped.
       const orphaned = step.status === "running" && !heldByLiveRun(store.readRun(q.id), step.id);
       if (!["pending", "stopped", "failed"].includes(step.status) && !orphaned) {
-        throw new ActionError(step.status === "done" || step.status === "skipped"
-          ? `${where} is ${step.status} already`
+        throw new ActionError(step.status === "done" ? `${where} is done already`
           : `${where} is ${step.status}: a step at work is not skipped (pause or stop the run first)`, 409);
       }
-      record({ kind: "status", step: step.id, from: step.status, to: "skipped", reason });
-      return `${where} skipped (was ${step.status})`;
+      record({ kind: "status", step: step.id, from: step.status, to: "skipped", reason, ...(continued ? { continued_in: continued } : {}) });
+      return `${where} skipped (was ${step.status})${continued ? `, continued in ${continued.join(", ")}` : ""}`;
     }
     case "finished": {
       if (step) throw new ActionError("finished is for a queue's halted run, not for a step");
@@ -732,6 +761,35 @@ export function orchestratorStatusChange(store: ProjectStore, input: { queue: st
     }
     default:
       throw new ActionError(`${to} is not a status the orchestrator sets: a step can be skipped; a queue cancelled, its halted run finished, or a lift proposed (propose-lift)`);
+  }
+}
+
+/** `--continued-in`'s references, trimmed and without repeats; each `STEP`, `QUEUE/STEP` or `QUEUE`. */
+function continuedRefs(refs: readonly string[]): string[] {
+  const out = [...new Set(refs.map((r) => r.trim()).filter(Boolean))];
+  const bad = out.filter((r) => !/^[^/\s]+(\/[^/\s]+)?$/.test(r));
+  if (bad.length) throw new ActionError(`--continued-in takes steps (FL4), steps of another queue (QX/QX2) or queues (QX), comma-separated; not: ${bad.join(", ")}`);
+  if (!out.length) throw new ActionError("--continued-in names no step or queue");
+  return out;
+}
+
+/**
+ * Each reference of a skip's mark names a step of the queue, a step of another queue or a queue of the project
+ * (pending or proposed is fine: the work is planned there), and not the step itself.
+ */
+function checkContinuedRefs(store: ProjectStore, queue: string, step: string, refs: readonly string[]): void {
+  const queues = loadProjectState(store).queues;
+  const own = queues.find((x) => x.id === queue)!;
+  for (const r of refs) {
+    const [a, b] = r.split("/") as [string, string | undefined];
+    if (b === undefined ? (a === step) : (a === queue && b === step)) throw new ActionError(`--continued-in names the step itself (${r})`);
+    if (b !== undefined) {
+      const other = queues.find((x) => x.id === a);
+      if (!other) throw new ActionError(`--continued-in: no queue ${a} in this project`, 404);
+      if (!other.steps.some((x) => x.id === b)) throw new ActionError(`--continued-in: queue ${a} has no step ${b} (has ${other.steps.map((x) => x.id).join(", ")})`, 404);
+    } else if (!own.steps.some((x) => x.id === a) && !queues.some((x) => x.id === a)) {
+      throw new ActionError(`--continued-in: ${a} is neither a step of queue ${queue} nor a queue of this project`, 404);
+    }
   }
 }
 
@@ -784,6 +842,8 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
     languages: merged(p.languages, b.languages),
     // Each kind's runtime, model, effort and fallback (a null model or effort: the project's for that runtime).
     kinds: Object.fromEntries(Object.entries(p.kinds).map(([k, d]) => [k, merged(d, b.kinds?.[k])])),
+    // The review helper (queue RH): whether it runs, its runtime, model, effort (null: the project's) and audit rate.
+    review_helper: merged(p.review_helper, b.review_helper),
     // The orchestrator's runtime, notices, model, effort and context threshold (its section is made here if the project
     // has had none yet).
     orchestrator: b.orchestrator === undefined
@@ -794,17 +854,23 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
         ...("model" in b.orchestrator ? { model: b.orchestrator.model } : {}),
         ...("effort" in b.orchestrator ? { effort: b.orchestrator.effort } : {}),
         ...("fallback" in b.orchestrator ? { fallback: b.orchestrator.fallback } : {}),
-        ...(b.orchestrator.context_threshold !== undefined ? { context_threshold: b.orchestrator.context_threshold } : {}),
+        ...(b.orchestrator.context_threshold_tokens !== undefined ? { context_threshold_tokens: b.orchestrator.context_threshold_tokens } : {}),
       }),
   };
   const r = ProjectFile.safeParse(next);
   if (!r.success) throw new ActionError(r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
-  const kinds = kindIssues(r.data.kinds);
+  const kinds = [...kindIssues(r.data.kinds), ...helperIssues(r.data.review_helper)];
   if (kinds.length) throw new ActionError(kinds.join("; "));
   r.data.defaults.checks = stepChecks(r.data.defaults.checks, []);
   const notes = r.data.conversations.notes_dir;
   if (notes !== undefined) r.data.conversations.notes_dir = notesDir(notes);
   store.updateProject(() => r.data, follow, own);
+}
+
+/** The review helper's settings that cannot run: an effort its runtime does not take (queue RH). */
+function helperIssues(h: { runtime: "claude" | "codex"; effort?: Effort }): string[] {
+  const issue = effortIssue(h.runtime, h.effort);
+  return issue ? [`review_helper.effort: ${issue}`] : [];
 }
 
 /** Changes the global settings (written only by the server: <NEXUS_HOME>/settings.yaml); every following project at once. */
@@ -815,7 +881,7 @@ export function updateGlobalSettings(patch: unknown): GlobalSettings {
     const issues = (e as { issues?: { path: (string | number)[]; message: string }[] }).issues;
     throw new ActionError(issues ? issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") : (e as Error).message);
   }
-  const kinds = kindIssues(next.kinds);
+  const kinds = [...kindIssues(next.kinds), ...helperIssues(next.review_helper)];
   if (kinds.length) throw new ActionError(kinds.join("; "));
   writeGlobalSettings(next);
   return next;

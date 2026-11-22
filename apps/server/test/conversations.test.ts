@@ -12,6 +12,7 @@ import { Orchestrator } from "../src/orchestrator.ts";
 import { CODEX_WEB_SEARCH, Conversations } from "../src/conversations.ts";
 import { CodexSession, webSearchText } from "../src/codex.ts";
 import type { AgentEvents, AgentProcess } from "../src/agent.ts";
+import type { AgentHostOptions } from "../src/agent-host.ts";
 import { longReply } from "./fake-behaviour.ts";
 import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
@@ -19,7 +20,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
 process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 
-function setup(notes?: string) {
+function setup(notes?: string, host: AgentHostOptions = {}) {
   const root = mkdtempSync(join(tmpdir(), "nexus-conv-"));
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_ARGS = join(root, "args.log");
@@ -28,7 +29,7 @@ function setup(notes?: string) {
   if (notes) updateSettings(store, { conversations: { notes_dir: notes } });
   const engine = new Engine(store, () => {});
   const orchestrator = new Orchestrator(store, engine, () => {});
-  const conversations = new Conversations(store, orchestrator, () => {});
+  const conversations = new Conversations(store, orchestrator, () => {}, host);
   const args = () => (existsSync(process.env.FAKE_ARGS!) ? readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>) : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms);
   const stop = () => { conversations.shutdown(); orchestrator.shutdown(); engine.shutdown(); };
@@ -47,7 +48,7 @@ test("a Claude partner asks nothing and may write only in the notes folder", asy
     const allowed = argv.slice(argv.indexOf("--allowedTools") + 1);
     assert.deepEqual(allowed, [
       "Read", "Grep", "Glob",
-      ...["nexus status", "nexus ideas status", "nexus help", "nexus tags", "git log", "git status", "git diff", "git show"].flatMap((p) => [`Bash(${p}:*)`, `PowerShell(${p}:*)`]),
+      ...["nexus status", "nexus ideas status", "nexus help", "nexus doc", "nexus tags", "git log", "git status", "git diff", "git show"].flatMap((p) => [`Bash(${p}:*)`, `PowerShell(${p}:*)`]),
       "Edit(Dev/Concepts/Gameplay/**)", "Bash(nexus covers:*)", "PowerShell(nexus covers:*)", "WebSearch",
     ], "nexus status, nexus help (to read about Nexus), nexus tags (the areas for a note) and git's reading commands on Bash and PowerShell, writes only to the notes folder and, with nexus covers, its own events: no run can start, nothing else is writable");
     assert.equal(argv[argv.indexOf("--disallowedTools") + 1], "NotebookEdit,WebFetch", "no .nexus deny rules for a partner (those are the workers'); at the default web level no page fetching");
@@ -192,7 +193,7 @@ test("the hand-over instruction keeps to this conversation's topics and asks for
     assert.ok(sent.includes("Summarize only the topics discussed in this conversation, unless the user asked you to include others."), "the scope rule");
     assert.ok(sent.includes("another topic in the notes folder, even a related one, is not part of this hand-over: name its file at most, as 'see also', without its content."));
     assert.ok(sent.includes("Name the dates of the Decided entries you cover."), "the dates rule");
-    assert.ok(sent.includes("Run nexus ideas status for the current effective state."));
+    assert.ok(sent.includes("Run nexus ideas status for the current effective state (a summary per entry; one entry's full JSON: nexus ideas status <file>.md#<date>), and read an entry with nexus doc <file>.md#<date>."));
     assert.ok(sent.includes("effective user dispositions and assessment invalidations in .nexus/idea-statuses.yaml"));
     assert.ok(sent.includes("Report conflicts; Open/Ideas remain undecided."));
     assert.ok(sent.includes("does not approve or start a queue."));
@@ -302,4 +303,54 @@ test("a Codex web search shows in the chat with what it did: its query, the page
   assert.equal(webSearchText({ type: "webSearch", action: { type: "openPage", url: "https://nodejs.org/en" } }), "Web page: https://nodejs.org/en");
   assert.equal(webSearchText({ type: "webSearch", action: { type: "findInPage", url: "https://x.test/", pattern: "LTS" } }), "Find in page: LTS (https://x.test/)");
   assert.equal(webSearchText({ type: "webSearch", query: "old shape" }), "Web search: old shape");
+});
+
+test("a message sent as a partner's turn ends, with its settings changed meanwhile, is answered before the restart (queue KM)", async () => {
+  // FAKE_LATE_NEXT: the first turn's result waits for the next message, which then runs as a turn of its own after it.
+  // The changed notes folder makes the process stale: it is restarted after its turn, but not while that message may
+  // still run (AgentProcess.settling): killed at the result, the process would take the message with it.
+  // The late turn takes a moment (FAKE-SLOW), as Claude Code's does: the kill came before its reply.
+  process.env.FAKE_LATE_NEXT = "1";
+  process.env.FAKE_CHAT_SLOW_MS = "300";
+  const x = setup();
+  const replies = (id: string) => x.store.readChat(id).entries.filter((e) => e.from === "partner" && e.kind === "message").length;
+  try {
+    const c = x.conversations.create({ title: "Late" });
+    x.conversations.say(c.id, "first");
+    await x.until("the first reply", () => replies(c.id) === 1);
+    delete process.env.FAKE_LATE_NEXT; // for the next process
+    updateSettings(x.store, { conversations: { notes_dir: "Dev/Late" } });
+    x.conversations.say(c.id, "FAKE-SLOW: second");
+    await x.until("the second message answered", () => replies(c.id) === 2);
+    assert.equal(x.store.readChat(c.id).entries.filter((e) => e.from === "partner" && e.kind === "message").at(-1)!.text, "slow reply");
+    assert.equal(x.args().length, 1, "answered by the process it was sent to");
+    await x.until("the old process ended", () => x.conversations.idle() && x.conversations.view(c.id).state === "exited");
+    x.conversations.say(c.id, "third");
+    await x.until("the third reply", () => replies(c.id) === 3);
+    assert.equal(x.args().length, 2, "a new process from the message after");
+    assert.ok((x.args()[1]!.argv as string[]).includes("Edit(Dev/Late/**)"), "on the changed settings");
+  } finally { delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_CHAT_SLOW_MS; x.stop(); }
+});
+
+test("a message read inside the partner's turn: the process settles with no late turn, in the host's lateTurnMs (queue LH)", async () => {
+  // FAKE_LATE_NEXT=inside: the first turn's result waits for the next message and reads it inside the turn, so no turn
+  // of the CLI's own follows; the moment it might have begun ends after the host's lateTurnMs, not Claude's 1.5 s.
+  process.env.FAKE_LATE_NEXT = "inside";
+  const x = setup(undefined, { lateTurnMs: 50 });
+  try {
+    const c = x.conversations.create({ title: "Inside" });
+    x.conversations.say(c.id, "first");
+    const proc = () => x.conversations["host"].get(c.id)?.proc;
+    const replies = () => x.store.readChat(c.id).entries.filter((e) => e.from === "partner" && e.kind === "message").length;
+    await x.until("the first reply, its turn still running", () => replies() === 1);
+    assert.equal(proc()?.state, "working");
+    let settled = false;
+    proc()!.on("settled", () => { settled = true; });
+    x.conversations.say(c.id, "second");
+    await x.until("the process settled", () => settled);
+    assert.equal(proc()!.state, "idle", "no late turn: idle, not working");
+    assert.equal(proc()!.settling, false);
+    assert.equal(replies(), 1, "no reply of a late turn");
+    assert.equal(x.args().length, 1, "the same process");
+  } finally { delete process.env.FAKE_LATE_NEXT; x.stop(); }
 });

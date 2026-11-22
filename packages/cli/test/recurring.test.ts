@@ -1,4 +1,4 @@
-// `nexus recurring set|list` (queue TQ, PROTOCOL.md "Recurring queues"): the orchestrator's set goes to the server as
+// `nexus recurring set|list` (queue TQ, docs/protocol/planning.md "Recurring queues"): the orchestrator's set goes to the server as
 // a recurring.set event, which carries no approval; approving, pausing and removing are the user's, refused from any
 // session; `list` shows each recurring's state. The server's part is played by a stand-in that records the event as
 // applied.

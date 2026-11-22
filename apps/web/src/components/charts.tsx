@@ -326,7 +326,7 @@ export function ChartCard<T extends string>({ title, heading, caption, views, in
 }
 
 /** A chart's table view: the same values, readable without the chart, numbers aligned. */
-export function DataTable({ head, rows }: { head: string[]; rows: (string | number)[][] }) {
+export function DataTable({ head, rows }: { head: string[]; rows: ReactNode[][] }) {
   return (
     <div className="scroll-thin max-h-56 overflow-auto">
       <table className="w-full border-collapse text-xs tabular-nums">

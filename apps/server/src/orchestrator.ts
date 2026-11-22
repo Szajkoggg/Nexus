@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, Effort, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type SessionFile, type SessionView,
+  ActionError, DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, Effort, acceptedByNexus, contextLimit, acceptedOn, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView,
 } from "@nexus/protocol";
 import type { AgentProcess } from "./agent.ts";
 import type { CodexPermissions } from "./codex.ts";
@@ -16,12 +16,14 @@ import { orchestratorAgentsFile } from "./helpers.ts";
 import { RESTARTED, STOPPED, chatView } from "./chats.ts";
 import type { UpdateNotice } from "./lifecycle.ts";
 import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
+import type { CrashRecord } from "./crash.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
-  acceptedNoteNotice, approvalNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
+  acceptedNoteNotice, approvalNotice, checkAcceptedNotice, checkDecisionNotice, checkNotCommandNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
+  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, tokenText, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, serverCrashNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
+import { ReviewHelpers, audited, type HelperOptions } from "./review-helper.ts";
 
 // Agent (formerly Task) lets it call subagents; they run within these same read-only permissions.
 const READ_ONLY_TOOLS = [
@@ -57,12 +59,12 @@ const REQUESTS: ReadonlySet<EventType> = new Set(["queue.drafted", "session.requ
 
 /**
  * The orchestrator's context care (contextCare), recorded in its session's applied.jsonl: the request for its summary
- * (the message: the context fill then, 0 to 1), and the fill of a fresh session at the end of its first turn.
+ * (the message: the context fill then, 0 to 1; `tokens`: its context tokens), and the context tokens of a fresh session
+ * at the end of its first turn.
  */
 const SUMMARY_ASKED = "context:asked";
 const FIRST_FILL = "context:first";
-/** The orchestrator's context threshold when the project has none (the setting's default). */
-const DEFAULT_CONTEXT_THRESHOLD = 0.85;
+/** A context fill (0 to 1) in whole percent. */
 const pct = (fill: number) => Math.round(fill * 100);
 /** How many chat entries the view sends: the current session's newest, and then the earlier sessions' of its line. */
 const VIEW_ENTRIES = 300;
@@ -74,17 +76,34 @@ type Summary = NonNullable<SessionView["context"]>;
 
 /**
  * A session the current orchestrator session went on from (context care), as the chat view sends it: its newest
- * entries, and its switch to the next: when, its context fill then (0 to 1), and the summary it wrote (none: null).
+ * entries, and its switch to the next: when, its context fill then (0 to 1) and its tokens (unknown before queue CT: null),
+ * and the summary it wrote (none: null).
  */
 interface EarlierSession {
   session: string;
   created_at: string;
   chat: ReturnType<typeof chatView>["chat"];
-  switch: { at: string; fill: number | null; summary: Summary | null };
+  switch: { at: string; fill: number | null; tokens: number | null; summary: Summary | null };
+}
+
+/** Who accepted a step, as the orchestrator's notices list it (queue RH, H9). */
+function acceptedBy(a: NonNullable<StepView["accepted"]>): string {
+  if (a.by === "helper") return `accepted by the review helper (${acceptedOn(a)})`;
+  if (a.by === "nexus") return "accepted by Nexus, a clean merge without a model";
+  return `accepted by the ${a.by}`;
 }
 
 /** A push notification for the user's devices (src/remote.ts `push`). */
 export interface UserNotice { title: string; body: string; url: string; tag: string; kind: NotifyKind }
+
+/** Where its news about Nexus itself comes from (Orchestrator.news), and how a notice reaches the user's devices. */
+interface News {
+  update?: () => UpdateNotice | undefined;
+  plan?: () => PlanNotice[];
+  changes?: () => DeployChanges[];
+  crash?: () => CrashRecord | undefined;
+  push?: (n: UserNotice) => void;
+}
 
 export class Orchestrator {
   private readonly host: AgentHost;
@@ -99,19 +118,26 @@ export class Orchestrator {
   private applying = false;
   /**
    * News about Nexus itself: the outcome of an update, for the session that asked for it (src/lifecycle.ts), and the
-   * changes for agents of each deploy, for every session older than it (src/deploy.ts).
+   * changes for agents of each deploy, for every session older than it (src/deploy.ts), and the server's last crash
+   * (src/crash.ts), for every session older than it too.
    */
   private stopped = false;
-  private readonly news: { update: () => UpdateNotice | undefined; plan: () => PlanNotice[]; changes: () => DeployChanges[]; push?: (n: UserNotice) => void };
+  private readonly news: Required<Omit<News, "push">> & Pick<News, "push">;
+  /**
+   * The review helpers (queue RH, src/review-helper.ts), which take its routine reviews; they run before its notices.
+   * Without them (`host.helpers` not given, as in most tests) the orchestrator reviews every step itself.
+   */
+  private readonly helpers?: ReviewHelpers;
 
-  /** `host`: how its process is made (tests give a stand-in). */
-  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: { update?: () => UpdateNotice | undefined; plan?: () => PlanNotice[]; changes?: () => DeployChanges[]; push?: (n: UserNotice) => void } = {}, host: AgentHostOptions & { nowMs?: () => number } = {}) {
+  /** `host`: how its process is made (tests give a stand-in); `helpers`: the review helpers' options, when they run. */
+  constructor(store: ProjectStore, engine: Engine, changed: () => void, news: News = {}, host: AgentHostOptions & { nowMs?: () => number; helpers?: HelperOptions } = {}) {
     this.store = store;
     this.engine = engine;
     this.changed = changed;
-    this.news = { update: news.update ?? (() => undefined), plan: news.plan ?? (() => []), changes: news.changes ?? (() => []), push: news.push };
+    this.news = { update: news.update ?? (() => undefined), plan: news.plan ?? (() => []), changes: news.changes ?? (() => []), crash: news.crash ?? (() => undefined), push: news.push };
     this.host = new AgentHost(store, ROLE_RECORDS.orchestrator, host);
     this.nowMs = host.nowMs ?? Date.now;
+    if (host.helpers) this.helpers = new ReviewHelpers(store, changed, () => engine.draining, host.helpers);
   }
 
   /** The orchestrator's hosted process (one at a time): the latest one started, until it exits or Nexus ends it. */
@@ -130,18 +156,23 @@ export class Orchestrator {
   }
 
   view() {
-    const s = this.session();
-    const o = this.store.readProject().orchestrator;
+    const head = this.head();
+    const s = head.session ?? undefined;
     // The newest 300 entries with their lines, and the session's pins (chats.ts); a fresh session has none.
     const own = s ? chatView(this.store, s.id, VIEW_ENTRIES) : { chat: [], pins: [] };
+    return { ...head, ...own, earlier: s ? this.earlier(s, own.chat.length) : [] };
+  }
+
+  /** What the chat view shows beside the chat (the live stream's `session` message sends it when it changes). */
+  head() {
+    const s = this.session();
+    const o = this.store.readProject().orchestrator;
     return {
       session: s ?? null,
       model: s ? s.model ?? null : o?.model ?? null,
       effort: s ? s.effort ?? null : o?.effort ?? null,
       state: this.proc?.state ?? "exited",
       runtime: s ? this.store.readRuntime(s.id) ?? null : null,
-      ...own,
-      earlier: s ? this.earlier(s, own.chat.length) : [],
     };
   }
 
@@ -166,7 +197,7 @@ export class Orchestrator {
     const asked = this.summaryAsked(old);
     const summary = this.summaryWritten(old, asked) ?? null;
     const next = this.sessionFile(old.continued_by);
-    return { at: next?.created_at ?? asked?.at ?? old.created_at, fill: asked ? Number(asked.message) : null, summary };
+    return { at: next?.created_at ?? asked?.at ?? old.created_at, fill: asked ? Number(asked.message) : null, tokens: asked?.tokens ?? null, summary };
   }
 
   /** A message from the user in the chat. */
@@ -273,11 +304,13 @@ export class Orchestrator {
   }
 
   private changedState(state: ProjectState): void {
+    // The review helpers first: a step one of them takes is not also told to the orchestrator (queue RH).
+    if (this.helpers?.onChange(state)) state = loadProjectState(this.store);
     let s = this.session();
     const notes = this.pendingNotes(state);
     if (!s) {
       // A step waiting for its review, or a note or rejection of the user's, starts it (after a reset, or before it ever ran).
-      if (this.engine.draining || (!notes.length && !state.queues.some((q) => q.steps.some(reviewedByOrchestrator)))) return;
+      if (this.engine.draining || (!notes.length && !state.queues.some((q) => q.steps.some((st) => this.forOrchestrator(state, q, st))))) return;
       s = this.ensure(false);
     }
     this.applyRequests(s);
@@ -388,13 +421,28 @@ ${n.text}` });
   }
 
   /** For good: an orchestrator shut down starts no process again (a late change, an agent's exit, may still come in). */
-  shutdown(): void { this.stopped = true; clearTimeout(this.heldTimer); this.host.shutdown(); }
+  shutdown(): void { this.stopped = true; clearTimeout(this.heldTimer); this.host.shutdown(); this.helpers?.shutdown(); }
 
-  /** Its process is still running (after shutdown: not yet exited). */
-  alive(): boolean { return !!this.proc && this.proc.state !== "exited"; }
+  /**
+   * A step whose review notice the orchestrator gets: waiting for its review, and not the integration step Nexus accepts
+   * itself (queue MI). With review helpers on (queue RH), only once the step is passed on: one a helper has, or will take
+   * at the next change (the state read here may be newer than the one the helpers saw), is not the orchestrator's yet.
+   */
+  private forOrchestrator(state: ProjectState, q: QueueView, st: StepView): boolean {
+    if (!reviewedByOrchestrator(st) || acceptedByNexus(q, st)) return false;
+    if (st.helper) return st.helper.state === "passed_on";
+    return !this.helpers?.takes(state);
+  }
 
-  /** Not in the middle of a turn. */
-  idle(): boolean { return !this.proc || this.proc.state !== "working"; }
+  /** Its process, or a review helper's, is still running (after shutdown: not yet exited). */
+  alive(): boolean { return (!!this.proc && this.proc.state !== "exited") || !!this.helpers?.alive(); }
+
+  /**
+   * Not in the middle of a turn, nor in the moment after one in which the runtime may still start a turn of its own
+   * (AgentProcess.settling): what waits for its idleness (a runtime switch, a restart on changed settings) is looked at
+   * again on `settled`.
+   */
+  idle(): boolean { return !this.proc || (this.proc.state !== "working" && !this.proc.settling); }
 
   // ---------------------------------------------------------------- the session
 
@@ -411,10 +459,9 @@ ${n.text}` });
     if (!start) return s;
     // Settings it was started with changed since (its model or effort, global or the project's own; a threshold its
     // briefing names): a new process from this message on (a working one ends after its turn, and this message goes
-    // into that turn), resuming the conversation.
-    if (this.proc && this.proc.state !== "exited" && this.host.stale(s.id, this.launcher(s))) {
-      if (this.proc.state === "working") this.host.restartAfterTurn(s.id); else this.host.retire(s.id);
-    }
+    // into that turn), resuming the conversation; an idle one ends now (retireStale).
+    if (this.proc?.state === "working" && this.host.stale(s.id, this.launcher(s))) this.host.restartAfterTurn(s.id);
+    else this.retireStale(s);
     if (!this.proc || this.proc.state === "exited") this.spawn(s);
     return s;
   }
@@ -545,7 +592,7 @@ ${n.text}` });
     const runtime: OrchestratorRuntime = s.runtime === "codex" ? "codex" : "claude";
     const { model, effort: wanted } = this.target(s);
     const effort = effortIssue(runtime, wanted) ? undefined : wanted;
-    const briefing = orchestratorBriefing(project.name, pct(project.defaults.context_reuse_threshold), project.languages, pct(o?.context_threshold ?? DEFAULT_CONTEXT_THRESHOLD), runtime);
+    const briefing = orchestratorBriefing(project.name, project.defaults.context_reuse_tokens, project.languages, o?.context_threshold_tokens ?? DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, runtime);
     const env = this.host.env(s.id);
     if (runtime === "codex") {
       // Its working directory is the project's root, which its sandbox keeps read-only (orchestratorPermissions). The
@@ -567,6 +614,15 @@ ${n.text}` });
       agentsFile: orchestratorAgentsFile(),
       env,
     } });
+  }
+
+  /**
+   * An idle process started with other settings than the project's now ends. A settling one is not idle: a turn of its
+   * own may still start, and ending it would cut that off; a message goes to it, and its settling's end (`settled`) or
+   * the next message looks again.
+   */
+  private retireStale(s = this.session()): void {
+    if (s && this.proc && this.proc.state !== "exited" && this.idle() && this.host.stale(s.id, this.launcher(s))) this.host.retire(s.id);
   }
 
   private spawn(s: SessionFile): void {
@@ -592,6 +648,7 @@ ${n.text}` });
         this.store.appendActivity(s.id, { at: now(), ...a });
       },
       turnEnd: () => this.changed(),
+      settled: () => { this.retireStale(); this.changed(); },
       exit: () => this.changed(),
     }));
   }
@@ -630,11 +687,12 @@ ${n.text}` });
 
   /**
    * The orchestrator's context care (decided by the user on 2026-11-15, queue CC): it is not compacted; it goes on in a
-   * fresh session started from a summary it writes on purpose. When its context is fuller than its threshold
-   * (orchestrator.context_threshold) at the end of a turn, its process idle, it is asked once for that summary (with
-   * `nexus context`); once that turn is over, a fresh session goes on from it (goOnFresh). Meanwhile notices, notes
-   * and the user's messages wait for the fresh session. A fresh session already that full at the end of its first turn
-   * is not switched again: another would be no emptier. True: what else this change would tell it waits.
+   * fresh session started from a summary it writes on purpose. When its context is beyond its threshold
+   * (orchestrator.context_threshold_tokens, at most 80 % of its model's window: contextLimit; an unknown window, never)
+   * at the end of a turn, its process idle and not settling, it is asked once for that summary (with `nexus context`);
+   * once that turn is over, a fresh session goes on from it (goOnFresh). Meanwhile
+   * notices, notes and the user's messages wait for the fresh session. A fresh session already that full at the end of
+   * its first turn is not switched again: another would be no emptier. True: what else this change would tell it waits.
    */
   private contextCare(state: ProjectState, s: SessionFile): boolean {
     const applied = this.store.readApplied(s.id).entries;
@@ -646,20 +704,25 @@ ${n.text}` });
       this.goOnFresh(s, asked);
       return true;
     }
-    if (this.proc?.state !== "idle") return false;
+    // Between turns only: not while a turn of the runtime's own may still start (AgentProcess.settling).
+    if (this.proc?.state !== "idle" || this.proc.settling) return false;
     const live = this.store.readRuntime(s.id);
-    const fill = live?.context_tokens && live.context_window ? live.context_tokens / live.context_window : undefined;
-    if (fill === undefined) return false;
+    const used = live?.context_tokens, window = live?.context_window;
+    const limit = contextLimit(state.project.orchestrator?.context_threshold_tokens ?? DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, window);
+    if (!used || !window || limit === undefined) return false;
+    // FIRST_FILL holds the tokens a continuing session had at the end of its first turn (before queue CT: its share of
+    // the window, a number up to 1).
     let first = applied.find((a) => a.event === FIRST_FILL);
     if (s.continues && !first) {
-      first = { at: now(), event: FIRST_FILL, ok: true, message: String(fill) };
+      first = { at: now(), event: FIRST_FILL, ok: true, message: String(used) };
       this.store.appendApplied(s.id, first);
     }
-    const threshold = state.project.orchestrator?.context_threshold ?? DEFAULT_CONTEXT_THRESHOLD;
-    if (fill <= threshold || (first && Number(first.message) > threshold) || this.runtimeFull(state)) return false;
-    this.store.appendApplied(s.id, { at: now(), event: SUMMARY_ASKED, ok: true, message: String(fill) });
-    this.store.appendChat(s.id, { at: now(), from: "nexus", text: `The orchestrator's context is ${pct(fill)} % full (its threshold is ${pct(threshold)} %): Nexus asked it for a summary, and it goes on in a fresh session.` });
-    this.deliver(orchestratorSummaryRequest(pct(fill), pct(threshold)));
+    const firstUsed = first ? (Number(first.message) <= 1 ? Number(first.message) * window : Number(first.message)) : undefined;
+    if (used <= limit || (firstUsed !== undefined && firstUsed > limit) || this.runtimeFull(state)) return false;
+    const fill = used / window;
+    this.store.appendApplied(s.id, { at: now(), event: SUMMARY_ASKED, ok: true, message: String(fill), tokens: used });
+    this.store.appendChat(s.id, { at: now(), from: "nexus", text: `The orchestrator's context is ${tokenText(used)} (${pct(fill)} % full; its threshold is ${tokenText(limit)}): Nexus asked it for a summary, and it goes on in a fresh session.` });
+    this.deliver(orchestratorSummaryRequest(tokenText(used), tokenText(limit)));
     return true;
   }
 
@@ -742,7 +805,7 @@ ${n.text}` });
     }
     if (e.type === "static_analysis.declined") return this.engine.declineStaticAnalysis(e.reason, e.session);
     if (e.type === "status.set") {
-      const message = orchestratorStatusChange(this.store, { queue: e.queue, step: e.step, to: e.to, reason: e.reason });
+      const message = orchestratorStatusChange(this.store, { queue: e.queue, step: e.step, to: e.to, reason: e.reason, continued_in: e.continued_in });
       // A cancel reaches the user as a push notification, like other notifications; nothing waits in their list.
       if (e.to.trim().toLowerCase() === "cancelled") {
         const p = this.store.readProject();
@@ -843,6 +906,9 @@ ${n.text}` });
         items.push({ key: `notify:static-analysis:${note.reminded_at}`, ...staticAnalysisNotice() });
       }
     }
+    // The server's last crash (src/crash.ts): told once to a session that ran before it, whatever the dashboard shows.
+    const crash = updateOnly ? undefined : this.news.crash();
+    if (crash && crash.at >= since) items.push({ key: `notify:crash:${crash.at}`, ...serverCrashNotice(crash) });
     for (const x of updateOnly ? [] : state.questions) {
       const asker = state.sessions.find((y) => y.id === x.session);
       if (x.state !== "open" || asker?.role !== "worker" || x.asked_at < since) continue;
@@ -872,8 +938,26 @@ ${n.text}` });
       // A step waiting for its review: told whenever it entered review (also to a session started after that), once
       // per round.
       for (const st of q.steps) {
-        if (!reviewedByOrchestrator(st)) continue;
+        // Not the integration step Nexus ran without a model and accepts itself (queue MI), nor one a review helper has.
+        if (!this.forOrchestrator(state, q, st)) continue;
         items.push({ key: `notify:review:${q.id}:${st.id}:${st.finished_at}`, ...reviewNotice(q, st, state.away) });
+      }
+      // The checks Nexus ran (src/check-runs.ts): a failure accepted (and its fix queue), and a disputed failure that
+      // waits for the orchestrator's decision. Each told once.
+      for (const [step, entry] of Object.entries(q.check_runs?.steps ?? {})) {
+        const st = q.steps.find((x) => x.id === step);
+        if (!st) continue;
+        for (const set of entry.sets) {
+          // A check that is no command (queue EF): told once per queue and check, to convert it.
+          for (const c of set.checks) {
+            if (!c.not_command || (set.ended_at ?? set.requested_at) < since) continue;
+            items.push({ key: `notify:checknotcommand:${q.id}:${c.name}`, ...checkNotCommandNotice(q, st, c.name) });
+          }
+          const d = set.dispute;
+          if (!d || d.at < since) continue;
+          if (set.state === "accepted") items.push({ key: `notify:checkaccepted:${q.id}:${step}:${set.done}`, ...checkAcceptedNotice(q, st, set) });
+          else if (d.base?.state === "unrunnable" && !d.decided) items.push({ key: `notify:checkdecision:${q.id}:${step}:${set.done}`, ...checkDecisionNotice(q, st, set) });
+        }
       }
       // A metric's value beyond its warning threshold: told once, if it came after the threshold was set.
       for (const st of q.steps) for (const m of st.metrics) {
@@ -939,7 +1023,7 @@ ${n.text}` });
     if (!fresh.length) return;
     // The orchestrator's own runtime beyond the usage threshold: nothing starts its turn. Each notice waits in its
     // inbox (once), not told yet; the reviews it would do (levels 2 and 3) wait with them. Told, all of them, at the
-    // first change once that runtime is free again (PROTOCOL.md, "Fallback when usage runs out").
+    // first change once that runtime is free again (docs/protocol/runtimes.md, "Fallback when usage runs out").
     const inbox = this.store.readInbox(s.id).entries;
     const held = (key: string) => `notice-${key}`;
     if (this.runtimeFull(state)) {
@@ -950,14 +1034,56 @@ ${n.text}` });
       return;
     }
     this.ensure();
+    // What rides with a notice told anyway (queue RH): the steps accepted since by others, the review helper's
+    // send-backs, its acceptances picked for an audit. With the last notice that has a fact; none starts a turn.
+    const riding = updateOnly ? undefined : this.riders(state, told, since);
+    const last = fresh.findLast((i) => !i.quiet);
     for (const i of fresh) {
       if (inbox.some((m) => m.id === held(i.key))) this.store.appendDelivered(s.id, { at: now(), kind: "inbox", id: held(i.key), via: "turn" });
+      const rides = riding && i === last ? riding : undefined;
       if (i.quiet) this.markTold(s, i.more!.keys);
-      else this.markTold(s, [i.key, ...(i.more?.keys ?? [])]);
+      else this.markTold(s, [i.key, ...(i.more?.keys ?? []), ...(rides?.keys ?? [])]);
       // The user sees the fact; the instruction after it, and any changes for agents, are for the orchestrator only.
       if (!i.quiet) this.store.appendChat(s.id, { at: now(), from: "nexus", text: i.fact });
-      this.deliver(noticeText(i, i.more?.text));
+      this.deliver(rides ? `${noticeText(i, i.more?.text)}\n\n${rides.text}` : noticeText(i, i.more?.text));
     }
+  }
+
+  /**
+   * What the orchestrator learns of reviews it did not do (queue RH, H9-H11), not told yet in this session's line: the
+   * steps accepted since by the review helper, Nexus or the user, and the helper's send-backs, oldest first; and the
+   * helper's acceptances picked for an audit (`audited`). Undefined when there is nothing.
+   */
+  private riders(state: ProjectState, told: ReadonlySet<string>, since: string): { text: string; keys: string[] } | undefined {
+    const role = (session: string) => state.sessions.find((x) => x.id === session)?.role;
+    const lines: { at: string; key: string; text: string }[] = [];
+    const audits: { key: string; text: string }[] = [];
+    const rate = state.project.review_helper.audit_rate;
+    for (const q of state.queues) for (const st of q.steps) {
+      const a = st.accepted;
+      if (a && a.by !== "orchestrator" && a.at >= since) {
+        const key = `notify:accepted:${a.event}`;
+        if (!told.has(key)) lines.push({ at: a.at, key, text: `step ${st.id} of queue ${q.id}: ${acceptedBy(a)}` });
+        const audit = `notify:audit:${a.event}`;
+        if (a.by === "helper" && !st.audit && !told.has(audit) && audited(a.event, rate)) {
+          const packet = a.session ? normPath(join(this.store.sessionDir(a.session), "packet.md")) : "(none)";
+          audits.push({ key: audit, text: `Audit: review again step ${st.id} of queue ${q.id}, which the review helper accepted (its packet: ${packet}; the step's work is in its queue's checkout). Judge it as you would review it, then answer: nexus review audit ${q.id} ${st.id} agree|disagree --reason "why". A disagreement does not reopen the step: if the work needs a fix, draft it as a revision.` });
+        }
+      }
+      for (const e of st.timeline) {
+        if (e.type !== "review.sent_back" || e.at < since || role(e.session) !== "helper") continue;
+        const b = st.sent_back.find((x) => x.id === e.id);
+        const key = `notify:helpersentback:${e.id}`;
+        if (b && !told.has(key)) lines.push({ at: e.at, key, text: `step ${st.id} of queue ${q.id}: sent back by the review helper${b.to_user ? ", which handed it to the user (the send-back limit)" : `, round ${b.round}`}: ${e.text.split("\n")[0]}` });
+      }
+    }
+    if (!lines.length && !audits.length) return undefined;
+    lines.sort((a, b) => a.at.localeCompare(b.at) || a.key.localeCompare(b.key));
+    const parts = [
+      ...(lines.length ? [`Since your last notice (for your overview; nothing to do):\n${lines.map((l) => `- ${l.text}`).join("\n")}`] : []),
+      ...audits.map((x) => x.text),
+    ];
+    return { text: parts.join("\n\n"), keys: [...lines.map((l) => l.key), ...audits.map((x) => x.key)] };
   }
 }
 

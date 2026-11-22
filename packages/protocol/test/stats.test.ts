@@ -9,7 +9,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ProjectStore, approveQueue, loadProjectState, projectMetrics, sinceTime, statsReport, statsText, stepStats, usageDays, type Event, type StepDef, type TurnRecord,
+  ProjectStore, approveQueue, loadProjectState, projectMetrics, sinceTime, statsReport, statsText, stepStats, switchReport, switchReportText, usageDays, type Event, type StepDef, type TurnRecord,
 } from "../src/index.ts";
 
 const at = (h: number, m = 0) => new Date(Date.UTC(2026, 10, 15, h, m)).toISOString();
@@ -199,4 +199,60 @@ test("the usage windows day by day: a 5-hour window's daily peak, a weekly windo
   assert.deepEqual(r.windows[0]!.values, [null, 0.9, null, 0.3], "the highest of the day; none on a day without a turn");
   assert.deepEqual(r.windows[1]!.values, [0, 0.35, 0, 0.02], "the 10th's reading reset on the 12th; the 13th's on the 14th");
   assert.deepEqual(r.windows[2]!.values, [null, null, null, 0.1]);
+});
+
+test("steps after a context switch against those in the session of the step before: first-round acceptance, send-backs, check-fix rounds", () => {
+  const root = mkdtempSync(join(tmpdir(), "nexus-stats-switch-"));
+  const store = ProjectStore.init(root, { id: "s", name: "s", root });
+  for (const id of ["s1", "s2", "s3", "s4"]) store.writeSession({ protocol: 1, id, project: "s", role: "worker", runtime: "claude", cwd: root, launched_by: "nexus", created_at: at(0), queue: "B" });
+  store.writeSession({ protocol: 1, id: "o", project: "s", role: "orchestrator", runtime: "claude", cwd: root, launched_by: "nexus", created_at: at(0) });
+  store.writeQueue({ protocol: 1, id: "B", title: "B", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: ["B1", "B2", "B3", "B4", "B5", "B6"].map((id) => step(id)) });
+  approveQueue(store, "B");
+  const emit = (session: string, h: number, m: number, body: Record<string, unknown>) =>
+    store.appendEvent({ v: 1, id: `e${String(++seq).padStart(4, "0")}`, at: at(h, m), session, queue: "B", ...body } as Event);
+  const ids: Record<string, string> = {};
+  const round = (session: string, id: string, h: number, then: "accept" | "send-back") => {
+    emit(session, h, 0, { type: "step.started", step: id });
+    const done = `e${String(seq + 1).padStart(4, "0")}`;
+    emit(session, h, 10, { type: "step.done", step: id, summary: "s" });
+    ids[id] = done;
+    emit("o", h, 20, then === "accept" ? { type: "review.accepted", step: id } : { type: "review.sent_back", step: id, text: "fix" });
+  };
+  round("s1", "B1", 1, "accept"); // the run's first step: other
+  round("s1", "B2", 2, "accept"); // same session as B1
+  round("s2", "B3", 3, "send-back"); // after a context switch, sent back once
+  round("s2", "B3", 4, "accept");
+  round("s2", "B4", 5, "accept"); // same session as B3, one check-fix round
+  round("s3", "B5", 6, "accept"); // after a context switch, accepted first
+  round("s4", "B6", 7, "accept"); // a fresh session after a runtime switch: other
+  store.writeRun("B", {
+    protocol: 1, session: "s4", state: "finished", step: "B6", started_at: at(1), updated_at: at(7), revision: 1,
+    switches: [
+      { at: at(3), from: "s1", to: "s2", step: "B3", why: "context", fill: 0.7, summary: "written" },
+      { at: at(6), from: "s2", to: "s3", step: "B5", fill: 0.8, summary: "asked" }, // older record without why: context
+      { at: at(7), from: "s3", to: "s4", step: "B6", why: "runtime", summary: "written" },
+    ],
+  });
+  store.writeChecks("B", { protocol: 1, steps: { B4: { by: "nexus", sets: [
+    // Shorthand for one check-fix round: its failed set's done stands outside the timeline, so the step counts one
+    // round of work, and the acceptance follows a passed set (a verdict counts only after the checks let the step into
+    // its review: queue LH).
+    { done: "e-before", round: 1, fix: 0, requested_at: at(5, 11), state: "failed", checks: [] },
+    { done: ids.B4!, round: 1, fix: 1, requested_at: at(5, 15), state: "passed", checks: [] },
+  ] } } });
+
+  const stats = stepStats([loadProjectState(store)], []);
+  assert.deepEqual(stats.map((x) => [x.step, x.session_from, x.send_backs, x.check_fix_rounds]), [
+    ["B1", "other", 0, 0], ["B2", "same", 0, 0], ["B3", "switch", 1, 0], ["B4", "same", 0, 1], ["B5", "switch", 0, 0], ["B6", "other", 0, 0],
+  ]);
+  const r = switchReport(stats, { project: "s" });
+  assert.deepEqual(r.switched, { steps: 2, few: true, decided: 2, first_accepted: 1, first_rate: 0.5, sent_back: 1, send_back_rate: 0.5, send_backs: 1, check_fix_rounds: 0, check_fix_avg: 0 });
+  assert.deepEqual(r.same, { steps: 2, few: true, decided: 2, first_accepted: 2, first_rate: 1, sent_back: 0, send_back_rate: 0, send_backs: 0, check_fix_rounds: 1, check_fix_avg: 0.5 });
+  assert.equal(r.other, 2);
+  assert.equal(switchReport(stats, { since: at(5) }).switched.steps, 1, "--since keeps B5 only");
+  const text = switchReportText(r);
+  assert.match(text, /^Steps after a context switch and without one \(project s\)/);
+  assert.match(text, /- after a context switch \(a fresh session\): 2 steps \(few data\); accepted in the first round 1 of 2 \(50 %\); sent back 1 of 2 \(50 %; 1 send-back\); 0 check-fix rounds \(0 per step\)/);
+  assert.match(text, /- without a switch \(the session of the step before\): 2 steps \(few data\); accepted in the first round 2 of 2 \(100 %\); sent back 0 of 2 \(0 %; 0 send-backs\); 1 check-fix round \(0.5 per step\)/);
+  assert.match(text, /Not compared: 2 steps/);
 });

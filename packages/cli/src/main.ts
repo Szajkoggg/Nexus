@@ -2,11 +2,11 @@
 // Every agent-side command validates its input and appends one event to the session's own log.
 import { readFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import YAML from "yaml";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
-  Event, isOpenQuestion, orchestratorOverview, planLines, stopLines, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, stepValuesText, newId, normPath, now, readRegistry, writeRegistry,
+  Event, isOpenQuestion, runGoing, orchestratorOverview, planLines, stopLines, switchLines, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, stepValuesText, newId, normPath, now, readRegistry, writeRegistry,
   PICTURE_ROLES, REVIEW_HELP, checkPicture, levelNow, pictureSize, recommendedOption, stepDefs,
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
   STAT_DIMENSIONS, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
@@ -15,16 +15,24 @@ import {
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
   type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
   noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, ideaStatuses, reportSourceHash,
+  capacityLines, latestCheckSet, readCapacity, reviewStats, reviewStatsText, switchReport, switchReportText, helperAbout, helperText, NEXUS_PASS_ON, PassOnReason,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
-import { HELP_TOPICS, topicList } from "./help.ts";
+import { ideaStatusFor, ideaStatusSummary, noteOf } from "./ideas-summary.ts";
+import { docHeadings, headingsText, pickHeadings, sectionOptions, sectionText } from "./doc.ts";
+import { CONTEXT_SUMMARY_WORDS, HELP_TOPICS, topicList } from "./help.ts";
 
 const HELP = `nexus — report to and manage Nexus (protocol 1)
 
 Agent commands (session from NEXUS_SESSION or --session):
-  nexus status                                  current queue, step, notes and open questions (without a
-                                                session: the queues at work, then the approved ones not running)
+  nexus status [--all] [--queue <id>]           current queue, step, notes and open questions (without a
+                                                session: the queues at work, then the approved ones not running).
+                                                An orchestrator's: the open queues, the finished ones counted, the
+                                                live worker sessions, those of open queues and the 10 latest others
+                                                (cards cut short), what waits for the user, the machine; --all: every
+                                                queue and session, cards whole (to choose an older session to
+                                                continue); --queue: one queue, its sessions and what waits about it
   nexus step start <step>
   nexus step progress <step> <text> [--pct N]
   nexus step done <step> --summary <text> [--commit <sha>] [--activities a,b]   (what you actually did: nexus tags)
@@ -35,14 +43,21 @@ Agent commands (session from NEXUS_SESSION or --session):
                     Files are copied into .nexus/queues/<queue>/review/<step>/ (write them outside the working tree).
                     Read nexus help review before preparing review material.
   nexus check <step> <name> --ok|--fail [--summary <text>] [--duration <seconds>]   (how long the check ran; it is
-                    the metric check:<name>)
+                    the metric check:<name>); refused for a check Nexus runs itself (its step's opening says so)
+  nexus check <step> <name> --unrelated --evidence <text>   a check Nexus ran fails, not because of your work: Nexus
+                    runs it on the queue's base commit (end your turn without nexus step done)
+  nexus check decide <queue> <step> accept|fix --reason <text>   (orchestrator only) a disputed failure Nexus could not
+                    run on the base: accept (the step goes to its review) or fix (a check-fix round)
   nexus metric record <name> <value> [--step <step>]   (worker only) a value of one of the project's metrics, for your
                     step at work, with the HEAD commit; a negative value goes after --: nexus metric record delta -- -5
   nexus metric list                   the project's metrics: unit, how shown, target, warning threshold
-  nexus stats [--project <id>] [--since <date>] [--by model|effort|kind|activity|area|size|origin]
+  nexus stats [--project <id>] [--since <date>] [--by model|effort|kind|activity|area|size|origin] [--reviews] [--switches]
                                       how steps went, by group: steps, accepted in the first round, average rounds,
                                       stops and failures, median working time, estimated use of the usage windows
-                                      (default: every registered project, by model)
+                                      (default: every registered project, by model); --reviews instead: the reviews'
+                                      quality (the user's signals, send-backs, the review helper's passed-on share,
+                                      the audit); --switches instead: the steps after a context switch
+                                      against those that went on in the same session
   nexus stop <step> --condition <text> --reason <text>   the condition met, as the queue words it; the reason, short
   nexus ask <text> [--step <step>] [--option <text>]... [--recommend <option>] [--can-continue]
   nexus withdraw <qid> --reason <text>
@@ -52,7 +67,15 @@ Agent commands (session from NEXUS_SESSION or --session):
                     entries of the notes it passes on (the notes folder may be left out: tags.md#2026-11-14)
   nexus ideas matches                 the suggestions for matching earlier queues to the notes' entries, and the
                                       user's decisions (deciding is the user's, in the dashboard)
-  nexus ideas status                  effective dispositions, implementation assessments, conflicts and history (JSON; read only)
+  nexus ideas status [<file>.md[#<date>]] [--full]   (read only) a summary: per note and entry the reference, the
+                                      effective decision, the linked queues and the problems (stale, broken reference,
+                                      conflict, unfinished work); with a reference: that entry's (or note's) full JSON;
+                                      --full: everything as JSON (large: every entry's text and evidence). The notes
+                                      folder may be left out; an entry's text: nexus doc <file>.md#<date>
+  nexus doc <file.md>[#<section>]     (any session; read only) a Markdown file's headings, with their levels and lines;
+                                      with #<section>: that one section (to the next heading of its level or higher),
+                                      named by its heading or its anchor, or a date (tags.md#2026-11-14: that dated
+                                      entry); the notes folder may be left out; an unknown section lists the sections
   nexus log <text> [--level info|warn|error]
   nexus answer <qid> <text> [--escalate [--recommend <option>]] [--continue|--wait]     (orchestrator only)
   nexus queue draft <file.yaml|->                                 (orchestrator only) create or change a queue
@@ -77,15 +100,22 @@ Agent commands (session from NEXUS_SESSION or --session):
                                       and the project's (nexus-templates/ in its repository); a project's replaces a
                                       global one of the same id, a global one Nexus's
   nexus template show <id>            a template's parameters and its YAML
-  nexus review accept <queue> <step> [--note <text>]             (orchestrator only) a step waiting for your review
-  nexus review send-back <queue> <step> <what to fix>             (orchestrator only) back to its worker
+  nexus review accept <queue> <step> [--note <text>]             (orchestrator, or the step's review helper at level 2)
+                                      a step waiting for your review
+  nexus review send-back <queue> <step> <what to fix>             (orchestrator, or the step's review helper) back to its worker
+  nexus review audit <queue> <step> agree|disagree --reason <text>   (orchestrator only) an audit of the review
+                                      helper's acceptance a notice gave you; a disagreement does not reopen the step
+  nexus review pass-on <queue> <step> --why <reasons> --findings <text>   (the step's review helper only) to the
+                                      orchestrator; reasons: criterion, deviation, question, limit, doubt, level
   nexus review ask-user <queue> <step> <why>                      (orchestrator only) hand the review to the user
   nexus review provisional <queue> <step> [--note <text>]        (orchestrator only) level 3: accept provisionally;
                                       the run goes on, the user confirms it or asks a fix on their return
-  nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift --reason <text>   (orchestrator only)
-                                      housekeeping: skip a pending, stopped or failed step; close a halted run of a
-                                      queue whose steps are all done or skipped; cancel a queue that is not running;
-                                      propose that the user lift a stop. Done, approving and lifting are the user's
+  nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift [--continued-in <refs>] --reason <text>
+                                      (orchestrator only) housekeeping: skip a pending, stopped or failed step; close a
+                                      halted run of a queue whose steps are all done or skipped; cancel a queue that is
+                                      not running; propose that the user lift a stop. Done, approving and lifting are the
+                                      user's. --continued-in FL4,FL5 (steps, QX/QX2, queues) with skipped: the step's own
+                                      work is done and went on there, or they did it; also on a step skipped already
   nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>... | --next | --at "YYYY-MM-DD HH:MM" | --at usage-reset]   (orchestrator only; start --after: into the plan, when those queues are done (repeat it for each); --next: into the plan with none before it; --at: at that local time, or when the runtime's usage window resets)
   nexus run <queue> cancel-start --reason <text>   (orchestrator only: takes the queue out of the plan; not one the user put in)
   nexus plan propose <queue> [--after <queue>]... --reason <text>   (orchestrator only) propose to the user a new list of
@@ -116,6 +146,8 @@ Setup:
 
 The server (NEXUS_PORT, default 4317):
   nexus server status                 version, the steps running in each project, and an update in progress
+  nexus server perf                   the server's measurements of itself since its start: event loop delay, the
+                                      requests by route, the measured operations, the latest blocks over 200 ms
   nexus server update [--now] [--ref <commit|branch>]
                                       let running steps finish (or stop them with --now), move the live worktree to
                                       <ref> (default main), build, restart; queues held for it go on by themselves
@@ -144,6 +176,7 @@ const { values: o, positionals: args } = parseArgs({
     "use-session": { type: "string" }, model: { type: "string" }, effort: { type: "string" }, after: { type: "string", multiple: true }, next: { type: "boolean" }, at: { type: "string" }, deadline: { type: "string" },
     topics: { type: "string" }, files: { type: "string" }, file: { type: "string" }, level: { type: "string" },
     escalate: { type: "boolean" }, continue: { type: "boolean" }, wait: { type: "boolean" },
+    unrelated: { type: "boolean" }, evidence: { type: "string" },
     id: { type: "string" }, name: { type: "string" }, prefix: { type: "string" },
     "dry-run": { type: "boolean" }, replace: { type: "boolean" },
     role: { type: "string" }, runtime: { type: "string" }, title: { type: "string" }, from: { type: "string" },
@@ -151,8 +184,8 @@ const { values: o, positionals: args } = parseArgs({
     project: { type: "string" }, since: { type: "string" }, by: { type: "string" },
     unit: { type: "string" }, show: { type: "string" }, target: { type: "string" }, "warn-above": { type: "string" }, "warn-below": { type: "string" },
     set: { type: "string", multiple: true }, template: { type: "string" }, every: { type: "string" }, "after-queues": { type: "string" },
-    maintenance: { type: "string" }, findings: { type: "string" },
-    help: { type: "boolean", short: "h" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
+    maintenance: { type: "string" }, findings: { type: "string" }, why: { type: "string" }, "continued-in": { type: "string" },
+    help: { type: "boolean", short: "h" }, full: { type: "boolean" }, all: { type: "boolean" }, reviews: { type: "boolean" }, switches: { type: "boolean" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
   },
 });
 
@@ -174,7 +207,12 @@ function store(): ProjectStore {
 
 function session(st: ProjectStore): SessionFile {
   const id = need(o.session ?? process.env.NEXUS_SESSION, "session (NEXUS_SESSION or --session; `nexus attach` creates one)");
-  try { return st.readSession(id); } catch { throw new UsageError(`unknown session ${id}`); }
+  let s: SessionFile;
+  try { s = st.readSession(id); } catch { throw new UsageError(`unknown session ${id}`); }
+  // What this call writes is stamped after what its session wrote and was told, and after what the server had seen
+  // when it handed the agent its work (docs/design/state.md, "Clock steps"): reading them takes their times up.
+  st.readEvents(id); st.readInbox(id); st.observeClock();
+  return s;
 }
 
 /** The queue a step belongs to: --queue, else the session's queue, else the only queue with that step. */
@@ -201,6 +239,45 @@ function emit(st: ProjectStore, s: SessionFile, body: Record<string, unknown>): 
   if (!r.success) throw new UsageError(r.error.issues.map((i) => `${i.path.join(".") || "event"}: ${i.message}`).join("; "));
   st.appendEvent(r.data);
   return r.data;
+}
+
+/**
+ * `nexus check <step> <name> --unrelated --evidence`: the worker says a check Nexus ran fails not because of its work;
+ * Nexus runs it on the queue's base commit (check.disputed). Only in a check-fix round, for a check that failed.
+ */
+function checkUnrelated(): void {
+  const st = store(); const s = session(st);
+  const step = need(args[1], "<step>"); const name = need(args[2], "<name>");
+  const evidence = o.evidence?.trim();
+  if (!evidence) throw new UsageError("--evidence says what shows the failure is not your work's (for example: it fails on the base too)");
+  const queue = queueFor(st, s, step);
+  checkStep(st, queue, step);
+  const q = loadProjectState(st).queues.find((x) => x.id === queue);
+  const view = q?.steps.find((x) => x.id === step);
+  const set = q && view && latestCheckSet(q, view);
+  if (view?.checks_by !== "nexus" || view.status !== "running" || !set || set.state !== "failed") {
+    throw new UsageError(`step ${step} has no failed checks of Nexus's to dispute now (it is ${view?.status ?? "unknown"}): --unrelated is for a check-fix round`);
+  }
+  const failed = set.checks.filter((c) => c.ok === false).map((c) => c.name);
+  if (!failed.includes(name)) throw new UsageError(`"${name}" is not one of the checks that failed (${failed.map((n) => `"${n}"`).join(", ")})`);
+  if (set.dispute) throw new UsageError(`a failure of this round was disputed already (${set.dispute.name}); fix what fails`);
+  emit(st, s, { type: "check.disputed", queue, step, name, evidence });
+  console.log(`ok: check.disputed ${queue}/${step}: Nexus runs "${name}" on the queue's base commit; end your turn now, without nexus step done`);
+}
+
+/** `nexus check decide <queue> <step> accept|fix --reason`: the orchestrator's decision on a disputed failure (check.decided). */
+function checkDecide(): void {
+  const st = store(); const s = session(st);
+  if (s.role !== "orchestrator") throw new UsageError("only the orchestrator decides a disputed check");
+  const queue = need(args[2], "<queue>"); const step = need(args[3], "<step>"); const verdict = need(args[4], "accept|fix");
+  if (verdict !== "accept" && verdict !== "fix") throw new UsageError(`the decision is accept or fix, not ${verdict}`);
+  const reason = o.reason?.trim();
+  if (!reason) throw new UsageError("--reason says why (it is recorded with the decision)");
+  checkStep(st, queue, step);
+  const view = loadProjectState(st).queues.find((q) => q.id === queue)?.steps.find((x) => x.id === step);
+  if (view?.checking?.phase !== "decision") throw new UsageError(`step ${queue}/${step} has no disputed check waiting for your decision`);
+  emit(st, s, { type: "check.decided", queue, step, verdict, reason });
+  console.log(`ok: check.decided ${queue}/${step}: ${verdict}`);
 }
 
 function stepEvent(type: string, step: string | undefined, extra: (s: SessionFile) => Record<string, unknown> = () => ({})): void {
@@ -244,13 +321,20 @@ function waitApplied(st: ProjectStore, session: string, event: string, ms = 15_0
  * level 3) accept it provisionally.
  */
 function reviewDecision(action: "accept" | "send-back" | "ask-user" | "provisional"): void {
-  const st = store(); const s = orchestrator(st);
+  const st = store(); const s = session(st);
+  // A review helper accepts and sends back the step it was started for; the rest is the orchestrator's (queue RH).
+  if (s.role === "helper" && action !== "accept" && action !== "send-back") throw new UsageError(`a review helper does not ${action}: accept, send back, or pass it on (nexus review pass-on)`);
+  if (s.role !== "helper" && s.role !== "orchestrator") throw new UsageError("only an orchestrator session may do this");
   const queue = need(args[2], "<queue>"); const step = need(args[3], "<step>");
   checkStep(st, queue, step);
   const state = loadProjectState(st);
   const view = state.queues.find((q) => q.id === queue)!.steps.find((x) => x.id === step)!;
   if (view.status !== "review") throw new UsageError(`step ${queue}/${step} is not waiting for review (it is ${view.status})`);
   if (view.review_with !== "orchestrator") throw new UsageError(`step ${queue}/${step} waits for the user's review, not yours`);
+  if (s.role === "helper") {
+    helperStep(state, s, queue, step);
+    if (action === "accept" && view.level !== 2) throw new UsageError(`step ${queue}/${step} is at review level ${view.level}: its judgement is the orchestrator's. Send it back if a criterion you can check fails, else pass it on: nexus review pass-on ${queue} ${step} --why level --findings "..."`);
+  }
   if (action === "accept") {
     emit(st, s, { type: "review.accepted", queue, step, text: o.note?.trim() || undefined });
     console.log(`ok: ${queue}/${step} accepted; the run goes on`);
@@ -267,6 +351,72 @@ function reviewDecision(action: "accept" | "send-back" | "ask-user" | "provision
   // The server carries out a send-back (the worker's inbox, or the user beyond the limit); this waits for its result.
   if (action === "send-back") report(waitApplied(st, s.id, e.id));
   else console.log(`ok: ${queue}/${step} waits for the user's review`);
+}
+
+/** A review helper decides only the step and round it was started for, while that review is still its own. */
+function helperStep(state: ReturnType<typeof loadProjectState>, s: SessionFile, queue: string, step: string): void {
+  const a = helperAbout(s);
+  if (!a || a.queue !== queue || a.step !== step) throw new UsageError(`you were started to review ${a ? `${a.queue}/${a.step}` : "no step"}, not ${queue}/${step}`);
+  const view = state.queues.find((q) => q.id === queue)!.steps.find((x) => x.id === step)!;
+  if (view.helper?.session !== s.id || view.helper.state !== "running") throw new UsageError(`the review of ${queue}/${step} is no longer yours (${view.helper?.state === "passed_on" ? "it was passed on" : "another review round or reviewer has it"})`);
+}
+
+/**
+ * `nexus review pass-on <queue> <step> --why <reasons> --findings <text>`: a review helper passes the step it reviews on
+ * to the orchestrator (review.passed_on), with why and what it found (docs/protocol/review.md, "The review helper").
+ */
+function passOn(): void {
+  const st = store(); const s = session(st);
+  if (s.role !== "helper") throw new UsageError("only a review helper passes a step on (the orchestrator decides it: nexus review accept|send-back|ask-user|provisional)");
+  const queue = need(args[2], "<queue>"); const step = need(args[3], "<step>");
+  checkStep(st, queue, step);
+  const state = loadProjectState(st);
+  const view = state.queues.find((q) => q.id === queue)!.steps.find((x) => x.id === step)!;
+  if (view.status !== "review" || view.review_with !== "orchestrator") throw new UsageError(`step ${queue}/${step} is not waiting for the orchestrator's review`);
+  helperStep(state, s, queue, step);
+  const given = list(o.why);
+  const helperReasons = PassOnReason.options.filter((r) => !NEXUS_PASS_ON.has(r));
+  const bad = given.filter((r) => !helperReasons.includes(r as PassOnReason));
+  if (!given.length || bad.length) throw new UsageError(`--why takes one or more of ${helperReasons.join(", ")}, comma-separated${bad.length ? ` (not ${bad.join(", ")})` : ""}`);
+  const findings = need(o.findings?.trim(), "--findings: what you checked and what you could not");
+  emit(st, s, { type: "review.passed_on", queue, step, round: helperAbout(s)!.round, reasons: [...new Set(given)], text: findings });
+  console.log(`ok: ${queue}/${step} passed on to the orchestrator; end your turn now`);
+}
+
+/**
+ * `nexus review audit <queue> <step> agree|disagree --reason <text>`: the orchestrator's audit of a review helper's
+ * acceptance it was given in a notice (review.audited; docs/protocol/review.md, "The review helper"). It does not reopen the step.
+ */
+function reviewAudit(): void {
+  const st = store(); const s = orchestrator(st);
+  const queue = need(args[2], "<queue>"); const step = need(args[3], "<step>"); const verdict = need(args[4], "agree|disagree");
+  if (verdict !== "agree" && verdict !== "disagree") throw new UsageError(`the verdict is agree or disagree, not ${verdict}`);
+  const reason = o.reason?.trim();
+  if (!reason) throw new UsageError("--reason says why (it is recorded with the audit)");
+  checkStep(st, queue, step);
+  const view = loadProjectState(st).queues.find((q) => q.id === queue)!.steps.find((x) => x.id === step)!;
+  const a = view.accepted;
+  if (a?.by !== "helper") throw new UsageError(`step ${queue}/${step} was not accepted by the review helper`);
+  if (view.audit) throw new UsageError(`step ${queue}/${step} was audited already (${view.audit.verdict})`);
+  const key = `notify:audit:${a.event}`;
+  const given = st.sessionIds().some((id) => { try { return st.readSession(id).role === "orchestrator" && st.readApplied(id).entries.some((x) => x.event === key); } catch { return false; } });
+  if (!given) throw new UsageError(`no audit of step ${queue}/${step} was given to you: Nexus picks the acceptances to audit and names them in a notice`);
+  emit(st, s, { type: "review.audited", queue, step, accepted: a.event, verdict, text: reason });
+  console.log(`ok: audit of ${queue}/${step} recorded (${verdict})${verdict === "disagree" ? "; the step stays accepted: if its work needs a fix, draft it as a revision" : ""}`);
+}
+
+/**
+ * A review helper's session runs only what reads and its own review commands (H15): the CLI refuses it every other
+ * command, so a helper reports a refusal in its verdict instead of asking or writing anything else.
+ */
+function helperGate(cmd: string): void {
+  const sid = o.session ?? process.env.NEXUS_SESSION;
+  if (!sid) return;
+  let role: string | undefined;
+  try { role = store().readSession(sid).role; } catch { return; }
+  if (role !== "helper") return;
+  if (cmd === "status" || cmd === "help" || cmd === "doc" || (cmd === "review" && ["accept", "send-back", "pass-on"].includes(args[1] ?? ""))) return;
+  throw new UsageError(`a review helper only reads and decides its review (nexus status, nexus help, nexus doc, nexus review accept|send-back|pass-on), not nexus ${[cmd, args[1]].filter(Boolean).join(" ")}; pass the step on with --why doubt, naming what you could not do`);
 }
 
 function report(r: { ok: boolean; message: string } | undefined): void {
@@ -420,6 +570,26 @@ function printUpdate(u: Record<string, any>): void {
   if (u.error) console.log(`  error: ${u.error}`);
 }
 
+interface PerfDelay { mean_ms: number; p50_ms: number; p99_ms: number; max_ms: number }
+/** `nexus server perf`: GET /api/server/perf (docs/protocol/api.md, "Server API"), the longest first. */
+type PerfReport = { since: string; block_ms: number; loop: PerfDelay; loop_window: PerfDelay & { since: string }; routes: { route: string; count: number; total_ms: number; mean_ms: number; max_ms: number; sync_max_ms: number; slow: number }[]; spans: { what: string; count: number; total_ms: number; mean_ms: number; max_ms: number }[]; blocks: { at: string; ms: number; during: { what: string; ms: number }[] }[]; sections?: { what: string; count: number; mean_ms: number; max_ms: number; git_calls: number; git_ms: number; git: { what: string; count: number }[] }[] };
+function printPerf(p: PerfReport): void {
+  // A server from before queue SV answers this path with its dashboard page, not with measurements.
+  if (!p?.loop) throw new UsageError("this Nexus server does not measure itself yet (it predates nexus server perf); it does after an update");
+  const d = (x: PerfDelay) => `p50 ${x.p50_ms} ms, p99 ${x.p99_ms} ms, max ${x.max_ms} ms`;
+  console.log(`measured since ${p.since}`);
+  console.log(`event loop delay: ${d(p.loop)}; since ${p.loop_window.since}: ${d(p.loop_window)}`);
+  console.log("requests by total time (count, mean, max, longest synchronous part, slow over the block limit):");
+  for (const r of p.routes.slice(0, 15)) console.log(`  ${r.route}  ${r.count}x  mean ${r.mean_ms} ms  max ${r.max_ms} ms  sync ${r.sync_max_ms} ms  slow ${r.slow}`);
+  console.log("measured operations by total time (count, mean, max):");
+  for (const s of p.spans.slice(0, 15)) console.log(`  ${s.what}  ${s.count}x  mean ${s.mean_ms} ms  max ${s.max_ms} ms`);
+  // A server from before queue GB has no sections.
+  if (p.sections?.length) console.log("measured sections (count, mean, max, synchronous git calls within them):");
+  for (const s of p.sections ?? []) console.log(`  ${s.what}  ${s.count}x  mean ${s.mean_ms} ms  max ${s.max_ms} ms  git ${s.git_calls}x ${s.git_ms} ms${s.git.length ? ` (${s.git.map((g) => `${g.what} ${g.count}`).join(", ")})` : ""}`);
+  console.log(`blocks over ${p.block_ms} ms: ${p.blocks.length ? "" : "none"}`);
+  for (const b of p.blocks.slice(0, 10)) console.log(`  ${b.at}  ${b.ms} ms: ${b.during.map((s) => `${s.what} ${Math.round(s.ms)} ms`).join("; ") || "nothing measured"}`);
+}
+
 const commands: Record<string, () => void | Promise<void>> = {
   async server() {
     const sub = args[1] ?? "status";
@@ -436,6 +606,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       printPlan(s.plan);
       return printUpdate(s.update);
     }
+    if (sub === "perf") return printPerf((await server("GET", "/api/server/perf")) as PerfReport);
     let by: { project: string; session: string } | undefined;
     if (sub === "update" || sub === "cancel" || sub === "cancel-plan") {
       // Restarting Nexus restarts every agent's runtime: the user's call, which an orchestrator may carry out when
@@ -486,7 +657,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       if (what === "off") return printAway((await server("POST", "/api/server/away", { until: null })).away);
       throw new UsageError("nexus server away [on --until <8:00|ISO time> | off]");
     }
-    throw new UsageError("nexus server status|update|cancel|cancel-plan|away");
+    throw new UsageError("nexus server status|perf|update|cancel|cancel-plan|away");
   },
 
   status() {
@@ -495,7 +666,15 @@ const commands: Record<string, () => void | Promise<void>> = {
     const sid = o.session ?? process.env.NEXUS_SESSION;
     const s = sid ? state.sessions.find((x) => x.id === sid) : undefined;
     console.log(`project ${state.project.name} (${state.project.id})`);
-    if (s?.role === "orchestrator" || s?.role === "conversation") return console.log(orchestratorOverview(state));
+    // An orchestrator's (and a partner's) overview: short by default, everything with --all, one queue with --queue
+    // (queue ND); the machine's lines under it, as in every other session's status.
+    if (s?.role === "orchestrator" || s?.role === "conversation") {
+      if (o.queue !== undefined && !state.queues.some((q) => q.id === o.queue)) throw new UsageError(`unknown queue ${o.queue}`);
+      const machine = capacityLines(readCapacity(), new Date());
+      console.log(orchestratorOverview(state, { all: !!o.all, queue: o.queue }));
+      if (machine.length) console.log(`\n${machine.join("\n")}`);
+      return;
+    }
     if (s) console.log(`session ${s.id}: ${s.role}, ${s.runtime}, queue ${s.queue ?? "-"}`);
     // Without a queue of its own: the queues at work, then the approved ones not running (ready to start or resume).
     const queues = s?.queue ? state.queues.filter((q) => q.id === s.queue) : [
@@ -506,24 +685,34 @@ const commands: Record<string, () => void | Promise<void>> = {
       console.log(`\nqueue ${q.id} [${q.status}] ${q.title}${q.approved ? "" : ` (needs approval: revision ${q.revision})`}`);
       if (q.status_reason) console.log(`  why: ${q.status_reason.slice(0, 300)}`);
       for (const line of stopLines(q)) console.log(line);
-      if (q.run && q.status !== "running") {
+      // A run that is not going shows too, also under a queue still "running" in the derivation (one the user stopped).
+      if (q.run && (q.status !== "running" || !runGoing(q.run))) {
         const why = q.run.reason ? ` (${q.run.reason.replace(/\s+/g, " ").slice(0, 200)})` : "";
         console.log(`  run: ${q.run.state}${q.run.step ? ` at ${q.run.step}` : ""}${why}`);
       }
       // Its place in the plan, and why it has not started (also: waiting for its checkout or for a place under the limit).
       for (const line of planLines(q)) console.log(line);
+      for (const line of switchLines(q)) console.log(line);
       for (const step of q.steps) {
         const unread = step.notes.filter((n) => !n.read_at && n.to !== "orchestrator");
         const own = stepValuesText(step);
-        console.log(`  ${step.id.padEnd(5)} ${step.status.padEnd(8)} ${step.title}${own ? `  [on ${own}]` : ""}${unread.length ? `  (${unread.length} unread note${unread.length > 1 ? "s" : ""})` : ""}`);
+        const status = step.continued ? `${step.status} → ${step.continued.in.join(", ")}` : step.status;
+        console.log(`  ${step.id.padEnd(5)} ${status.padEnd(8)} ${step.title}${helperText(step)}${own ? `  [on ${own}]` : ""}${unread.length ? `  (${unread.length} unread note${unread.length > 1 ? "s" : ""})` : ""}`);
         const tags = tagsText(step.tags);
         if (tags) console.log(`        tags: ${tags}`);
+        // The checks Nexus runs: where they are, and a fix round apart from the review rounds.
+        const c = step.checking;
+        if (c) console.log(`        checks by Nexus: ${c.phase === "queued" ? "waiting for the machine" : c.phase === "running" ? `running${c.check ? ` ${c.check}` : ""}` : c.phase === "base" ? `running ${c.check ?? "the disputed check"} on the queue's base commit` : "a disputed failure waits for the orchestrator's decision"} since ${shownTime(c.since)}`);
+        else if (step.status === "running" && step.check_fix) console.log(`        check-fix round ${step.check_fix} of ${state.project.defaults.check_fix_limit}${step.check_limit ? " (beyond the limit)" : ""}`);
         const checks = checksLine(step.checks);
         if (checks) console.log(`        checks: ${checks}`);
       }
       const open = q.questions.filter(isOpenQuestion);
       for (const x of open) console.log(`  question ${x.qid} [${x.state}]: ${x.text}`);
     }
+    // The workstation's heavy slot, across projects (the server's capacity.yaml): what runs, what waits and behind what.
+    const machine = capacityLines(readCapacity(), new Date());
+    if (machine.length) console.log(`\n${machine.join("\n")}`);
     // The session's inbox: messages and answers not yet seen. Shown here is delivered, so each is recorded as read.
     for (const m of s?.inbox.filter((x) => !x.read_at) ?? []) {
       if (m.type === "answer") {
@@ -532,8 +721,10 @@ const commands: Record<string, () => void | Promise<void>> = {
         console.log(`\nanswer from the ${m.from} to ${m.qid}${q ? ` ("${q.text}")` : ""}${how}:\n${m.text}`);
       } else if (m.type === "message") {
         console.log(`\nmessage from the ${m.from}${m.step ? ` about ${m.queue}/${m.step}` : ""} (${m.at}):\n${m.text}`);
+      } else if (m.type === "check_failed") {
+        console.log(`\n${m.queue}/${m.step}: the checks Nexus ran failed (check-fix round ${m.fix}):\n${m.text}`);
       } else if (m.type === "send_back") {
-        console.log(`\n${m.queue}/${m.step} sent back by the ${m.from} (round ${m.round}):\n${m.text}${m.from === "user" ? "\n(The user's words win over the step's acceptance criteria where they conflict.)" : ""}`);
+        console.log(`\n${m.queue}/${m.step} sent back by the ${m.from === "helper" ? "review helper" : m.from} (round ${m.round}):\n${m.text}${m.from === "user" ? "\n(The user's words win over the step's acceptance criteria where they conflict.)" : ""}`);
       } else {
         console.log(`\nSTOP requested by the ${m.from}${m.text ? `: ${m.text}` : ""}. Finish the current action, then stop and report.`);
       }
@@ -561,6 +752,8 @@ const commands: Record<string, () => void | Promise<void>> = {
 
   review() {
     if (args[1] === "accept" || args[1] === "send-back" || args[1] === "ask-user" || args[1] === "provisional") return reviewDecision(args[1]);
+    if (args[1] === "pass-on") return passOn();
+    if (args[1] === "audit") return reviewAudit();
     if (args[1] !== "add") throw new UsageError("nexus review add <step> <path|url>... (orchestrators: nexus review accept|send-back|ask-user|provisional <queue> <step>)");
     const st = store(); const s = session(st);
     const step = need(args[2], "<step>");
@@ -596,8 +789,16 @@ const commands: Record<string, () => void | Promise<void>> = {
   },
 
   check() {
+    if (args[1] === "decide") return checkDecide();
+    if (o.unrelated) return checkUnrelated();
     if (o.ok === o.fail) throw new UsageError("give exactly one of --ok or --fail");
     const name = need(args[2], "<name>");
+    // A check Nexus runs itself after the step's done is not the worker's to report (docs/protocol/checks.md, "Checks run by Nexus").
+    const st = store(); const step = need(args[1], "<step>");
+    const queue = queueFor(st, session(st), step);
+    if (st.readChecks(queue)?.steps[step]?.by === "nexus") {
+      throw new UsageError(`Nexus runs the checks of step ${step} itself after your nexus step done, and sends you their output only if one fails; do not report them. A failure that is not your work's: nexus check ${step} "<name>" --unrelated --evidence "<what shows it>"`);
+    }
     const duration = o.duration === undefined ? undefined : Number(o.duration);
     if (duration !== undefined && (o.duration!.trim() === "" || !Number.isFinite(duration) || duration < 0)) {
       throw new UsageError(`--duration takes the check's time in seconds (for example 12 or 3.5), not "${o.duration}"`);
@@ -634,7 +835,11 @@ const commands: Record<string, () => void | Promise<void>> = {
     let queue: string | undefined;
     try { queue = queueFor(st, s, o.step); } catch { queue = undefined; }
     emit(st, s, { type: "context.summary", queue, step: o.step, text, topics: list(o.topics), files: list(o.files) });
-    console.log("ok: context summary recorded");
+    // The standard's length (nexus help context): recorded anyway, with a word to shorten the next one.
+    const words = text.split(/\s+/).filter(Boolean).length;
+    console.log(words > CONTEXT_SUMMARY_WORDS
+      ? `ok: context summary recorded; warning: it is ${words} words, longer than the standard's ${CONTEXT_SUMMARY_WORDS} (nexus help context): keep what only you know, leave out what the queue, the steps' summaries and nexus status say`
+      : "ok: context summary recorded");
   },
 
   report() {
@@ -669,7 +874,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (sub === "accept" || sub === "reject") throw new UsageError("accepting or rejecting a match of a queue to a note is the user's, in the dashboard (Ideas, Overview, To match)");
     if (sub !== "matches" && sub !== "status") throw new UsageError("nexus ideas matches | status (user decisions are dashboard-only)");
     const st = store();
-    if (sub === "status") { console.log(JSON.stringify(ideaStatuses(st, loadProjectState(st)), null, 2)); return; }
+    if (sub === "status") { ideasStatus(st); return; }
     const items = ideaMatches(st, loadProjectState(st)).items;
     const open = items.filter((m) => !m.decision);
     console.log(`${items.length} suggestion(s) for ${new Set(items.map((m) => m.queue)).size} queue(s); ${open.length} wait for the user`);
@@ -701,6 +906,35 @@ const commands: Record<string, () => void | Promise<void>> = {
     console.log(`ok: this hand-over covers ${refs.join(", ")}`);
   },
 
+  /**
+   * `nexus doc <file.md>[#<section>]` (any session, or none; read only): the file's headings, or one section of it
+   * (docs/protocol/cli.md, "The `nexus` CLI"). The notes folder may be left out, as with nexus covers.
+   */
+  doc() {
+    const given = need(args[1], "<file.md>[#<section>] (nexus doc docs/DESIGN.md, nexus doc tags.md#2026-11-14)");
+    const at = given.indexOf("#");
+    const path = at < 0 ? given : given.slice(0, at);
+    const name = at < 0 ? undefined : given.slice(at + 1);
+    const file = docFile(need(path, "<file.md> before the #"));
+    const lines = readFileSync(file, "utf8").split("\n");
+    const hs = docHeadings(lines);
+    if (name === undefined) { console.log(hs.length ? headingsText(hs) : `${normPath(file)} has no headings`); return; }
+    if (!name.trim()) throw new UsageError(`no section named after the # (${sectionOptions(hs)})`);
+    let picked;
+    try { picked = pickHeadings(hs, name); } catch (e) { throw new UsageError(`${path}: ${(e as Error).message}`); }
+    if (!picked.length) throw new UsageError(`${path} has no section "${name}" (${sectionOptions(hs)})`);
+    // A picked heading inside a section already printed (a dated entry under another of its date) is not printed twice.
+    let until = 0;
+    const parts: string[] = [];
+    for (const h of picked) {
+      if (h.line <= until) continue;
+      const text = sectionText(lines, hs, h);
+      parts.push(text);
+      until = h.line + text.split("\n").length - 1;
+    }
+    console.log(parts.join("\n\n"));
+  },
+
   log() {
     const st = store(); const s = session(st);
     emit(st, s, { type: "log", level: (o.level ?? "info") as "info", text: need(args[1], "<text>") });
@@ -713,7 +947,9 @@ const commands: Record<string, () => void | Promise<void>> = {
       const queue = need(args[2], "<queue>");
       const to = need(args[3], "skipped|finished|cancelled|propose-lift");
       // The server checks it against the queue's state and gives the reason when it refuses.
-      const e = emit(st, s, { type: "status.set", queue, step: o.step, to, reason: need(o.reason, "--reason") });
+      const continued = list(o["continued-in"]);
+      if (o["continued-in"] !== undefined && !continued.length) throw new UsageError("--continued-in names where the step's work went on: FL4,FL5 (steps), QX/QX2, QX");
+      const e = emit(st, s, { type: "status.set", queue, step: o.step, to, reason: need(o.reason, "--reason"), ...(continued.length ? { continued_in: continued } : {}) });
       report(waitApplied(st, s.id, e.id));
       return;
     }
@@ -872,7 +1108,7 @@ const commands: Record<string, () => void | Promise<void>> = {
    * runs in, if it is not registered) and <NEXUS_HOME>/turns.jsonl. Reads only.
    */
   stats() {
-    const by = statDimension(o.by);
+    const by = o.reviews ? "model" : statDimension(o.by);
     if (!by) throw new UsageError(`--by is one of ${STAT_DIMENSIONS.join(", ")}, not ${o.by}`);
     const since = o.since === undefined ? undefined : sinceTime(o.since);
     if (o.since !== undefined && !since) throw new UsageError(`--since takes a date (2026-11-14) or a time, not "${o.since}"`);
@@ -883,6 +1119,10 @@ const commands: Record<string, () => void | Promise<void>> = {
     const states = [...stores].filter(([id]) => !o.project || id === o.project).flatMap(([id, st]) => {
       try { return [loadProjectState(st)]; } catch (e) { console.error(`nexus: project ${id} left out: ${(e as Error).message}`); return []; }
     });
+    // --reviews: the reviews' quality on three levels (queue RH), instead of the steps by a dimension.
+    if (o.reviews) return console.log(reviewStatsText(reviewStats(states, { project: o.project, since })));
+    // --switches: the steps after context care's switch against those that went on in the same session (queue CT).
+    if (o.switches) return console.log(switchReportText(switchReport(stepStats(states, []), { project: o.project, since })));
     console.log(statsText(statsReport(stepStats(states, readTurns().entries), { by, project: o.project, since })));
   },
 
@@ -1106,6 +1346,55 @@ function draftFromTemplate(): void {
   console.log(`ok: draft ${shown} from template ${t.id} (${t.layer}); complete it, then: nexus queue draft ${shown}`);
 }
 
+/**
+ * `nexus ideas status [<ref>] [--full]`: by default a short summary (per note and entry: the reference, the effective
+ * decision, the linked queues, the problems); with a reference (a note's entry, or a whole note; the notes folder may
+ * be left out) the JSON of its entries; with --full the whole JSON, every entry's snapshot included.
+ */
+function ideasStatus(st: ProjectStore): void {
+  const statuses = ideaStatuses(st, loadProjectState(st));
+  const given = args[2]?.replaceAll("\\", "/");
+  if (given !== undefined) {
+    if (o.full) throw new UsageError("give either a reference or --full");
+    const dir = st.readProject().conversations.notes_dir;
+    const ref = dir && !given.startsWith(`${dir}/`) ? `${dir}/${given}` : given;
+    const narrowed = ideaStatusFor(statuses, ref);
+    if (!narrowed.entries.length) {
+      const note = noteOf(ref);
+      const dates = statuses.entries.filter((e) => noteOf(e.ref) === note).map((e) => e.ref.slice(note.length + 1));
+      throw new UsageError(dates.length ? `${note} has no Decided entry ${ref.slice(note.length)} (its dates: ${dates.join(", ")})` : `no note ${note} with Decided entries (nexus ideas status lists them)`);
+    }
+    console.log(JSON.stringify(narrowed, null, 2));
+    return;
+  }
+  console.log(o.full ? JSON.stringify(statuses, null, 2) : ideaStatusSummary(statuses));
+}
+
+/**
+ * The file `nexus doc` reads: an absolute path as given; otherwise the first that exists of the path from the working
+ * directory, from the project's root, and in the project's notes folder (tags.md for docs/ideas/tags.md).
+ */
+function docFile(path: string): string {
+  const p = path.replaceAll("\\", "/");
+  if (isAbsolute(p)) {
+    if (!existsSync(p)) throw new UsageError(`no such file: ${p}`);
+    return p;
+  }
+  const tried = [resolve(p)];
+  const dir = process.env.NEXUS_DIR ?? findNexusDir();
+  if (dir) {
+    try {
+      const project = new ProjectStore(dir).readProject();
+      tried.push(join(project.root, p));
+      const notes = project.conversations.notes_dir;
+      if (notes && !p.startsWith(`${notes}/`)) tried.push(join(project.root, notes, p));
+    } catch { /* no project here: the working directory only */ }
+  }
+  const found = tried.find((f) => existsSync(f) && statSync(f).isFile());
+  if (!found) throw new UsageError(`no such file: ${p} (looked at ${[...new Set(tried.map((f) => normPath(f)))].join(", ")})`);
+  return found;
+}
+
 function guessKind(p: string): ReviewItem["kind"] {
   if (/\.(png|jpe?g|gif|webp|svg)$/i.test(p)) return /sheet/i.test(p) ? "sheet" : "image";
   if (/\.(md|html?|pdf|txt)$/i.test(p)) return "doc";
@@ -1118,6 +1407,7 @@ try {
   if (!cmd || o.help) { console.log(HELP); process.exit(0); }
   const run = commands[cmd];
   if (!run) throw new UsageError(`unknown command "${cmd}" (nexus --help)`);
+  helperGate(cmd);
   await run();
 } catch (e) {
   if (e instanceof UsageError) { console.error(`nexus: ${e.message}`); process.exit(2); }

@@ -1,4 +1,4 @@
-// Which notifications a device gets (PROTOCOL.md, "Push"): each device has its own settings, kept with its push
+// Which notifications a device gets (docs/protocol/api.md, "Push"): each device has its own settings, kept with its push
 // subscription in <NEXUS_HOME>/push.json (the in-tab fallback keeps them in the browser). Each kind of notification can
 // be turned off; quiet hours (in the device's time zone) hold back everything, and what they hold back is not sent
 // later; "urgent breaks through" lets a stopped queue, a failed step and a failed update through the quiet hours. The

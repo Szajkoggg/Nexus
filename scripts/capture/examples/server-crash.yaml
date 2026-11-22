@@ -1,0 +1,11 @@
+# The notice of the server's last crash (queue KM): an uncaught exception ended the previous server, and the one
+# running now shows it at the top of the page until it is closed. On the demo project of scripts/capture/seed-crash.ts.
+#   node scripts/capture.ts scripts/capture/examples/server-crash.yaml --step <queue>/<step> --no-before
+seed: scripts/capture/seed-crash.ts
+views:
+  - key: server-crashed-notice@1440
+    route: "#/demo"
+    label: "A szerver leállásának jelzése az oldal tetején, asztali nézet"
+  - key: server-crashed-notice@390
+    route: "#/demo"
+    label: "A szerver leállásának jelzése telefonon, a Várakozik fülön"

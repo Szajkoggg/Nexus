@@ -11,7 +11,8 @@
 //              (queue TS1). A load run looks for races, not for slowness; with --wait-ms 10000 it looks for both.
 //
 // Each run is reported with what failed and the "timed out waiting for …" lines it printed, and a failed run's whole
-// output is kept in a file the report names; the end says how many runs passed. Only the processes this script started are ended (by their own handles). The environment of a Nexus
+// output is kept in a file the report names; the end says how many runs passed. The files' stores read through the
+// server's model of the files, as in npm test (apps/server/test/model-reads.ts). Only the processes this script started are ended (by their own handles). The environment of a Nexus
 // session (NEXUS_HANDOVER, NEXUS_DIR, NEXUS_SESSION) is cleared for the runs, as the test helpers expect.
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -35,7 +36,7 @@ env.NEXUS_TEST_WAIT_MS = o["wait-ms"];
 let logs;
 
 const one = (n) => new Promise((resolve) => {
-  const args = ["--test", ...(o.pattern ? [`--test-name-pattern=${o.pattern}`] : []), ...files];
+  const args = ["--import", new URL("../apps/server/test/model-reads.ts", import.meta.url).href, "--test", ...(o.pattern ? [`--test-name-pattern=${o.pattern}`] : []), ...files];
   const t = Date.now();
   const p = spawn(process.execPath, args, { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   let out = "";

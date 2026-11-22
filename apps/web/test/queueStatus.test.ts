@@ -91,3 +91,25 @@ test("a run waiting for the approval at a step's end says so, after which step; 
   // Mid-step a newer revision waits: the queue needs approval, the step goes on.
   assert.deepEqual(pick(queueStatus(q({ ...waiting, steps: st("S1:running S2:pending"), run: { state: "running", step: "S1" }, approved: false }))), ["approval", "needs approval (revision 3)"]);
 });
+
+test("a run held at the limit, back from waiting, shows the planned start's words for it: waits: limit", () => {
+  const held = queueStatus(q({ status: "running", steps: st("H1:done H2:pending"), run: { state: "running", step: "H1", held: { reason: "waits: 2 queues run, the limit is 2" } } }));
+  assert.deepEqual(pick(held), ["waiting", "waits: limit reached · H1"]);
+  assert.equal(shortStatus(held), "waits: limit");
+});
+
+test("the checks Nexus runs after a step's done: running, waiting for the machine, on the base, a check-fix round, a dispute (queue EC)", () => {
+  const at = (step: QueueLike["steps"][number], run: QueueLike["run"] = { state: "running", step: step.id }) => queueStatus(q({ status: "running", steps: [{ id: "A1", status: "done" }, step], run }));
+  assert.deepEqual(pick(at({ id: "A2", status: "checking", checking: { phase: "running" } })), ["running", "checks running · A2"]);
+  assert.deepEqual(pick(at({ id: "A2", status: "checking", checking: { phase: "queued" } })), ["running", "checks wait for the machine · A2"]);
+  assert.deepEqual(pick(at({ id: "A2", status: "checking", checking: { phase: "base" } })), ["running", "checks on the base commit · A2"]);
+  assert.deepEqual(pick(at({ id: "A2", status: "running", check_fix: 1, check_fix_limit: 3 })), ["running", "check fix 1 of 3 · A2"]);
+  assert.deepEqual(pick(at({ id: "A2", status: "running", check_fix: 2 })), ["running", "check fix 2 · A2"]);
+  // A run paused with its checks interrupted (a restart) reads paused, like any.
+  assert.deepEqual(pick(at({ id: "A2", status: "checking", checking: { phase: "queued" } }, { state: "paused", step: "A2" })), ["paused", "paused · A2"]);
+  // A disputed failure the base could not settle waits for the orchestrator, not for permission.
+  const decision = at({ id: "A2", status: "waiting", checking: { phase: "decision" } });
+  assert.deepEqual(pick(decision), ["waiting", "a check dispute waits for the orchestrator · A2"]);
+  assert.equal(shortStatus(decision), "check dispute");
+  assert.equal(shortStatus(at({ id: "A2", status: "checking", checking: { phase: "queued" } })), "1/2", "at work on the rail");
+});

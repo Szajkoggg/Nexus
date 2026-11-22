@@ -34,22 +34,43 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   ids and YAML keys stay English. What agents write to the user (chat, step summaries, questions, progress lines)
   follows the reader's language too. The user talks in Hungarian; with no reader's language set, agents that talk with
   the user reply in the language the user writes in.
-- **Commits**: on `main` in this checkout, one or more per step, each with a subject line and a body that says why.
-  Stage explicit paths (never `git add -A`). Do not push.
-- **Before every commit**: `npm run typecheck`, `npm run lint` and the tests of the files you changed pass; the whole
-  suite (`npm test`) runs at the end of a step, as the queue's checks, not before each commit, and may first wait (up
-  to 15 minutes) for another checkout's full run to end. If the dashboard changed: `npm run build -w @nexus/web`. Fix a
-  lint finding rather than silence it (docs/DESIGN.md, "Static analysis").
+- **Commits**: one or more per step, each with a subject line and a body that says why. Stage explicit paths (never
+  `git add -A`). Where they go depends on the queue: a queue without a worktree of its own commits on `main` in this
+  checkout; a queue with its own worktree commits on its own branch in that worktree, its integration step merges the
+  base into that branch, and the base then only moves to the result by a fast-forward. A survey-only run commits
+  nothing. Agents never rebase and never push.
+- **Before every commit**: `npm run typecheck`, `npm run lint` and the tests of the files you changed pass
+  (`npm run test:files -- <files>`). If the dashboard changed: `npm run build -w @nexus/web`. Fix a lint finding rather
+  than silence it (docs/design/checks.md, "Static analysis"). The whole suite (`npm test`) is no commit's check: it runs at the
+  end of a step, as the queue's checks, and Nexus runs them itself after the worker's `nexus step done`, waiting for the
+  machine as long as another full run takes; the worker neither runs nor waits for them, and gets their output only when
+  one fails (a check-fix round, docs/protocol/checks.md "Checks run by Nexus"). Only where a step's opening does not say Nexus
+  runs its checks (a step an older server opened, work started by hand) does the worker run them at the step's end and
+  report them with `nexus check`; its full run waits for another checkout's to end, never starting beside it.
 - **Run control and lifecycle code** (after a queue that touched it the orchestrator offers the `lifecycle` template):
   the engine, the scheduler and the runtime adapters, in `apps/server/src`: `engine.ts`, `scheduler.ts`,
-  `agent-host.ts`, `claude.ts`, `codex.ts`, `recurring.ts`.
+  `agent-host.ts`, `claude.ts`, `codex.ts`, `recurring.ts`, `lifecycle.ts` (updates, restarts), `handover.ts` (the
+  hand-over), `deploy-plan.ts` (the planned update), `check-runs.ts` (the checks Nexus runs, resumed after a restart),
+  `capacity.ts` (the machine's grants to processes, freed when a process ends) and `integration.ts` (the merges Nexus
+  makes without a model).
+- **Load tool**: `node scripts/load-tests.mjs` runs test files repeatedly beside busy-loop processes (README.md, "Running");
+  it is Nexus's tool for reproducing a failure under load, and the one Nexus's own fix queues use.
 - **Tests**: behaviour in the engine, orchestrator, conversations or lifecycle gets a test against the fake runtimes
   (`apps/server/test/fake-claude.ts`, `fake-codex.ts`, steered by `fake-behaviour.ts`); protocol logic gets a unit
   test. Tests never call a model.
 - **Real runtimes**, only when a fake cannot answer the question (a new CLI flag, a protocol detail): the smallest probe,
   with a small model (Claude: `haiku`; Codex: `gpt-6-luna`), in a temporary directory, and say what it cost.
-- **Documentation**: a change to a file format, event, API or CLI updates PROTOCOL.md in the same commit; a design
-  decision or a finding from building goes to DESIGN.md; what the user does differently goes to README.md.
+- **Documentation**: a change to a file format, event, API or CLI updates the protocol in the same commit; a design
+  decision or a finding from building goes to the design; what the user does differently goes to README.md.
+  PROTOCOL.md and DESIGN.md are indexes with a table of contents; the text is in topic files
+  (docs/protocol/, docs/design/). New text goes into the topic file its section belongs to (find it in the contents,
+  or `nexus doc docs/DESIGN.md` or `nexus doc docs/PROTOCOL.md` and the file named there). A new topic goes into a new file, listed in the
+  contents. A topic file that has grown past about 40 KB is split along its headings, and the contents with it.
+  `scripts/test/doc-layout.test.ts` checks the contents and every relative link and anchor, and warns about a
+  large file; it also checks the prose (outside code blocks): a backticked repository path (`scripts/capture.ts`) must exist,
+  and a backticked `nexus <command> [<subcommand>]` must be one the CLI's help names. A name the text means although it
+  does not exist (another project's file, a layout not taken) goes into `ABSENT_ON_PURPOSE` in `scripts/doc-layout.ts`,
+  with why. Cite a section as `docs/protocol/<file>.md, "Section"` (or docs/design/) or `<file>#anchor`, never by line number.
 - **Agents: lines**: a commit that changes something agents rely on (a CLI command, a briefing, the protocol, or a
   file an agent reads or writes) carries a line `Agents: <what changed>` in its message, one per change, written for
   an orchestrator whose briefing is older. At a deploy, every project's orchestrator is told these lines.

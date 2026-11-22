@@ -1,4 +1,4 @@
-// A seed for the capture tool: a test project "nexus" whose plan looks like Nexus's own (PROTOCOL.md, "The plan"), for
+// A seed for the capture tool: a test project "nexus" whose plan looks like Nexus's own (docs/protocol/planning.md, "The plan"), for
 // the plan view's design and build (queue PL and the build after it): 15 queues, several with more than one
 // predecessor, lines that skip columns, and a group of finished queues. Run by scripts/capture.ts as
 // `node <this> <data dir>` with NEXUS_HOME set to the development instance's; it writes only there.

@@ -1,4 +1,4 @@
-// A survey run in a worktree of its own (PROTOCOL.md, "Cleaning up a survey's worktree"), against the fake runtimes and
+// A survey run in a worktree of its own (docs/protocol/git.md, "Cleaning up a survey's worktree"), against the fake runtimes and
 // temporary git repositories: it works in its worktree and has no integration step (it leaves no commit, so nothing goes
 // back to main); once done, Nexus removes its worktree and branch, whatever merge_back says, only when the worktree is
 // clean. Untracked files left keep it, and the user is told what is left (a "cleanup" item); a stopped or failed survey

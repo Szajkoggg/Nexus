@@ -1,4 +1,4 @@
-// The run's state transitions and the guards of starting and resuming a queue (DESIGN.md, "The run's state
+// The run's state transitions and the guards of starting and resuming a queue (docs/design/engine.md, "The run's state
 // transitions"). Every write of run.yaml that sets a state goes through one of the transitions here: each returns the
 // next run record and owns which fields it sets and clears. They are pure; the engine writes the result (adding
 // ended_at and updated_at) and keeps the side effects (timers, processes, messages to the agent).
@@ -44,14 +44,14 @@ export function toUnheld(run: RunFile): RunFile {
  */
 export function toPausedByUser(run: RunFile, reason: string, o: { pausing?: boolean; rejected?: string } = {}): RunFile {
   return {
-    ...run, state: o.pausing ? "pausing" : "paused", reason, resume_after_restart: undefined, resume_at: undefined,
+    ...run, state: o.pausing ? "pausing" : "paused", reason, resume_after_restart: undefined, resume_at: undefined, held: undefined,
     ...(o.rejected ? { rejected: o.rejected } : {}),
   };
 }
 
 /** Held for an update of Nexus (pausing while a turn is at work, else paused): the next server resumes it by itself. */
 export function toHeldForUpdate(run: RunFile, reason: string, o: { pausing?: boolean } = {}): RunFile {
-  return { ...run, state: o.pausing ? "pausing" : "paused", reason, resume_after_restart: true };
+  return { ...run, state: o.pausing ? "pausing" : "paused", reason, resume_after_restart: true, held: undefined };
 }
 
 /**
@@ -59,7 +59,7 @@ export function toHeldForUpdate(run: RunFile, reason: string, o: { pausing?: boo
  * run whose turn failed, a run a server restart caught (with their own reason).
  */
 export function toPaused(run: RunFile, reason?: string): RunFile {
-  return { ...run, state: "paused", ...(reason !== undefined ? { reason } : {}) };
+  return { ...run, state: "paused", held: undefined, ...(reason !== undefined ? { reason } : {}) };
 }
 
 /**
@@ -68,7 +68,7 @@ export function toPaused(run: RunFile, reason?: string): RunFile {
  * held, it stays so across a restart.
  */
 export function toApprovalWait(run: RunFile, revision: number): RunFile {
-  return { ...run, state: "approval_wait", reason: `waits for approval of revision ${revision}`, nudged: false, resume_after_restart: undefined, resume_at: undefined };
+  return { ...run, state: "approval_wait", reason: `waits for approval of revision ${revision}`, nudged: false, resume_after_restart: undefined, resume_at: undefined, held: undefined };
 }
 
 /** At a step's end under a newer approved revision: the run goes on by it. */
@@ -78,22 +78,36 @@ export function toRevision(run: RunFile, revision: number): RunFile {
 
 /** Halted: needs the user. No wait and no hold for an update; `failure` names the runtime's failure that halted it. */
 export function toHalted(run: RunFile, reason: string, failure?: string): RunFile {
-  return { ...run, state: "halted", reason, resume_after_restart: undefined, resume_at: undefined, ...(failure !== undefined ? { failure } : {}) };
+  return { ...run, state: "halted", reason, resume_after_restart: undefined, resume_at: undefined, held: undefined, ...(failure !== undefined ? { failure } : {}) };
 }
 
 /** Finished: no step left. Nothing of a pause, wait, retry or failure is kept (nothing reads them on a finished run). */
 export function toFinished(run: RunFile): RunFile {
-  return { ...run, state: "finished", reason: undefined, retries: undefined, failure: undefined, resume_at: undefined, resume_after_restart: undefined };
+  return { ...run, state: "finished", reason: undefined, retries: undefined, failure: undefined, resume_at: undefined, resume_after_restart: undefined, held: undefined };
 }
 
 /** Waiting for the usage window to reset at `until`; it goes on by itself, so no hold for an update. */
 export function toUsageWait(run: RunFile, reason: string, until: string): RunFile {
-  return { ...run, state: "usage_wait", reason, resume_at: until, resume_after_restart: undefined };
+  return { ...run, state: "usage_wait", reason, resume_at: until, resume_after_restart: undefined, held: undefined };
 }
 
 /** A turn failed for a passing reason: tried again at `at`, the `tries`-th time in a row (a hold for an update stays). */
 export function toRetryWait(run: RunFile, o: { tries: number; failure: string; reason: string; at: string }): RunFile {
-  return { ...run, state: "retry_wait", retries: o.tries, failure: o.failure, reason: o.reason, resume_at: o.at };
+  return { ...run, state: "retry_wait", retries: o.tries, failure: o.failure, reason: o.reason, resume_at: o.at, held: undefined };
+}
+
+/**
+ * Held at the limit on queues running at once (`held`): a running run back from waiting that would open a new turn or
+ * its next step while a limit is full. It stays running and says why (its `reason` too); a run held already keeps the
+ * time it became ready (`since`: its place in the order the coordinator lets held runs go on).
+ */
+export function toLimitHeld(run: RunFile, reason: string, at: string): RunFile {
+  return { ...run, reason, held: { since: run.held?.since ?? at, kind: "limit", reason } };
+}
+
+/** A place under the limit is free: the held run goes on, its reason cleared. */
+export function toLimitReleased(run: RunFile): RunFile {
+  return { ...run, reason: undefined, held: undefined };
 }
 
 // ---------------------------------------------------------------- guards

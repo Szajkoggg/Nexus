@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>25B The Merging back waiting item: Merge back right on it</title>
+<link rel="stylesheet" href="dash-mock.css">
+<!-- Queue UF (UF1). Compared with the capture waiting-merging-back@492 (scripts/capture/seed-merge-wait.ts, the Waiting
+     tab scrolled to its end): the same item. New here, marked with a dashed outline: the card has its way on, as a
+     stopped queue's card has Continue: Merge into main… and Open. Merge into main… opens its question in the card
+     (shown open here), the same question and the same server action as the queue panel's; Open goes to the
+     integration step as a tap on the card does today. The item's text itself is UF3's (the path moves to the end). -->
+<style>
+  .pcontent { display: flex; flex-direction: column; justify-content: flex-end; padding-bottom: 16px; }
+  .digest { border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 0 12px 12px; }
+  .tile { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; line-height: 1.35; }
+  .tile b { display: block; font-size: 20px; font-weight: 600; }
+  .ev { padding: 8px 10px; border-top: 1px solid var(--line); font-size: 13px; }
+  .ev:first-child { border-top: 0; }
+  .ask { border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); border-radius: 8px; padding: 12px; }
+  .pbtn { min-height: 44px; padding: 0 16px; }
+</style></head>
+<body>
+<div class="phone">
+  <div class="ptop">
+    <span class="pproj">Demo app <span class="badge" style="background: color-mix(in srgb, var(--warn) 25%, transparent); color: var(--warn)">1</span> <span class="fg2">⌄</span></span>
+    <span class="grow"></span><span class="fg2" style="font-size: 18px">⌕</span><span class="fg2" style="font-size: 18px; margin-left: 14px">⚙</span>
+  </div>
+  <div class="pcontent">
+    <div class="digest">
+      <div class="label" style="padding: 12px 0 8px">What happened, newest first</div>
+      <div style="border: 1px solid var(--line); border-radius: 8px">
+        <div class="ev"><div class="row xs fg3">21 Nov 22:45 <span class="mono">W</span><span class="grow"></span>Demo app</div><span class="ok">● queue done</span> Statistics backend</div>
+        <div class="ev"><div class="row xs fg3">21 Nov 22:10 <span class="mono">W.refactor</span><span class="grow"></span>Demo app</div><span class="ok">● done</span> Two helpers merged into one; behaviour unchanged, checks pass.</div>
+        <div class="ev"><div class="row xs fg3">21 Nov 21:35 <span class="mono">W2</span><span class="grow"></span>Demo app</div><span class="ok">● done</span> W2 done.</div>
+        <div class="ev"><div class="row xs fg3">21 Nov 21:00 <span class="mono">W1</span><span class="grow"></span>Demo app</div><span class="ok">● done</span> W1 done.</div>
+      </div>
+      <div class="btn primary" style="width: 100%; min-height: 44px; margin-top: 12px">Go through them one by one →</div>
+      <p class="xs fg3" style="margin-top: 6px">Opens the first of the 1 waiting; each answer or decision moves on to the next.</p>
+      <p class="xs fg" style="border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px">Usage: no agent turns</p>
+    </div>
+
+    <div class="row" style="margin: 22px 0 12px"><span class="semi warn" style="letter-spacing: .05em; text-transform: uppercase; font-size: 14px">Waiting for you · 1</span><span class="grow"></span><span class="xs fg3">all projects, newest first</span></div>
+    <div class="card">
+      <div style="padding: 12px 14px 8px">
+        <div class="row xs"><span class="kind merge">Merging back</span><span class="fg3">Demo app · <span class="mono">W/W.integrate</span></span><span class="grow"></span><span class="fg3">just now</span></div>
+        <p class="clamp2" style="margin-top: 6px; font-size: 15px">queue W: the checkout of main has uncommitted changes: commit or stash them, then merge (C:/Users/User/AppData/Local/Temp/nexus-capture-…</p>
+      </div>
+      <!-- new: the item's way on -->
+      <div class="new" style="margin: 0 14px 12px">
+        <div class="row">
+          <span class="btn line pbtn" style="background: var(--surface-3)">Merge into main…</span>
+          <span class="btn open pbtn">Open</span>
+        </div>
+        <div class="ask" style="margin-top: 8px">
+          <p class="sm warn">Merge <span class="mono">nexus/W</span> into <span class="mono">main</span>?</p>
+          <p class="xs fg2" style="margin-top: 4px">main moves forward to the commit the integration step tested (a fast-forward), never by a merge commit. If main moved on since, the integration step runs again instead. Refused if the checkout of main has uncommitted changes or a step is at work there. Nothing is pushed.</p>
+          <div class="row" style="margin-top: 8px"><span class="btn primary pbtn">Merge</span><span class="btn pbtn">Cancel</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <nav class="pbar">
+    <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v11H9l-5 4z"/></svg>Orchestrator</div>
+    <div class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13l2-8h12l2 8v6H4z"/><path d="M4 13h5l1 2h4l1-2h5"/></svg><span class="badge">1</span>Waiting</div>
+    <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 6h14M5 12h14M5 18h9"/></svg>Queues</div>
+    <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9V16h7v-2.1A6 6 0 0 0 12 3z"/></svg>Ideas</div>
+    <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Stats</div>
+  </nav>
+</div>
+</body></html>

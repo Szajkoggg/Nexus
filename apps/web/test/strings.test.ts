@@ -1,6 +1,7 @@
 // No user-facing text is written into the dashboard's components: JSX text and the text props (title, aria-label,
 // placeholder, alt, and the label, hint and button props of our own components) come from the catalogue
-// (src/messages/en.ts) through t() or rich(), apart from the exceptions below.
+// (src/messages/en.ts) through t() or rich(), apart from the exceptions below. The runtimes' names (product names,
+// the same in every language) are written once, in src/runtimes.ts (the last test).
 // The check reads the .tsx files with TypeScript's parser; a literal it finds is reported with its file and line.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -16,8 +17,6 @@ const PROPS = new Set(["title", "aria-label", "placeholder", "alt", "label", "hi
 /** Text that stays as it is in every language, with why; allowed anywhere in a literal. */
 const EXCEPTIONS: Record<string, string> = {
   Nexus: "the product's name",
-  "Claude Code": "a product's name (the runtime choice)",
-  Codex: "a product's name (the runtime choice)",
   "/login": "the sign-in page's path, after the address (Remote access)",
   "/../…worktrees": "an example path, the default worktrees folder beside the project (Settings)",
 };
@@ -115,4 +114,30 @@ test("the check finds JSX text and text props, and lets keys and exceptions thro
 test("no user-facing string literal is left in the components", () => {
   const found = tsxFiles(SRC).flatMap((f) => findLiterals(f, readFileSync(f, "utf8")));
   assert.deepEqual(found, [], `texts to move to src/messages/en.ts (or list as an exception):\n${found.join("\n")}`);
+});
+
+/** The runtimes' shown names, written only in src/runtimes.ts. */
+const RUNTIME_NAMES = new Set(["Claude Code", "Claude", "Codex"]);
+
+/** The string literals and JSX texts of a source file that are a runtime's name, as "file:line". */
+function runtimeNamesIn(file: string, source: string): string[] {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const found: string[] = [];
+  const visit = (n: ts.Node): void => {
+    if ((ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isJsxText(n)) && RUNTIME_NAMES.has(n.text.trim())) {
+      found.push(`${relative(SRC, file).replaceAll("\\", "/")}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1}`);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return found;
+}
+
+test("the runtimes' names are written in one place, src/runtimes.ts", () => {
+  const sample = `const a = <option value="codex">Codex</option>;\nconst b = r === "claude" ? "Claude Code" : r;`;
+  assert.deepEqual(runtimeNamesIn(join(SRC, "sample.tsx"), sample), ["sample.tsx:1", "sample.tsx:2"]);
+  const sources = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? (e.name === "messages" ? [] : sources(join(dir, e.name))) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : []);
+  const found = sources(SRC).filter((f) => !f.endsWith("runtimes.ts")).flatMap((f) => runtimeNamesIn(f, readFileSync(f, "utf8")));
+  assert.deepEqual(found, [], `use runtimeName() or RUNTIME_OPTIONS from src/runtimes.ts:\n${found.join("\n")}`);
 });

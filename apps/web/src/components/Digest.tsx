@@ -96,9 +96,10 @@ function Line({ e }: { e: DigestEvent }) {
         <span className="flex items-center gap-2 text-xs text-fg-3">
           {/* Its own width: a time of another day ("14 Nov 22:45") is wider than a clock, and must not run into the id. */}
           <span className="min-w-10 shrink-0"><Clock at={e.at} /></span>
-          <span className="min-w-0 truncate font-mono">{e.step ?? e.queue}</span>
+          {/* The id whole (cut only past 60 %), never pushed onto the time; a long project name gives way first. */}
+          <span className="max-w-[60%] shrink-0 truncate font-mono" title={e.step ?? e.queue}>{e.step ?? e.queue}</span>
           <span className="flex-1" />
-          <span className="shrink-0 truncate">{e.project_name}</span>
+          <span className="min-w-0 truncate" title={e.project_name}>{e.project_name}</span>
         </span>
         <span className="mt-0.5 line-clamp-2 text-[13px] leading-snug">
           <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${DOT[o.tone]}`} />

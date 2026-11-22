@@ -3,13 +3,15 @@ import type { AttentionItem, ProjectSummary, QueueView } from "../api.ts";
 import { attentionKey, mergeAttention, type WaitingItem } from "@nexus/protocol/attention";
 import { TimeAgo } from "./ui.tsx";
 import { t, type Key } from "../i18n.ts";
-import { OPEN_BUTTON, stopVersion, useStopActions } from "./Stop.tsx";
+import { OPEN_BUTTON, STOP_BUTTON, stopVersion, useStopActions } from "./Stop.tsx";
 import { stepThatMatters } from "./QueueRow.tsx";
 import { BatchRows } from "./Levels.tsx";
 import { nav } from "../nav.ts";
 import { PlanRow } from "./Plan.tsx";
 import { TagProposalRow } from "./Tags.tsx";
 import { RecurringRow } from "./Recurring.tsx";
+import { useMergeBack } from "./details/git.tsx";
+import { mergeWaitText } from "../waiting.ts";
 
 const KIND: Record<AttentionItem["kind"], { key: Key; tone: string }> = {
   question: { key: "waiting.kind.question", tone: "text-warn bg-warn/15" },
@@ -30,9 +32,15 @@ const KIND: Record<AttentionItem["kind"], { key: Key; tone: string }> = {
 export const kindLabel = (kind: AttentionItem["kind"]) => ({ text: t(KIND[kind].key), tone: KIND[kind].tone });
 
 const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "");
-/** An item's text: the return batch's in the interface language, the others as the server words them. */
-/** A waiting item's text, plain (no Markdown links or emphasis). */
-export const textOf = (a: AttentionItem) => (a.kind === "provisional" ? t("waiting.batchText", { count: a.provisional?.length ?? 0 }) : plain(a.text));
+/**
+ * A waiting item's text, plain (no Markdown links or emphasis): the return batch's in the interface language, a
+ * "Merging back" one without its queue and its checkout's path (mergeWaitText; the path is its tooltip, titleOf), the
+ * others as the server words them.
+ */
+export const textOf = (a: AttentionItem) =>
+  a.kind === "provisional" ? t("waiting.batchText", { count: a.provisional?.length ?? 0 }) : a.kind === "merge" ? mergeWaitText(plain(a.text), a.queue).text : plain(a.text);
+/** A waiting item's tooltip: a "Merging back" item's checkout path, out of its text. */
+const titleOf = (a: AttentionItem) => (a.kind === "merge" ? mergeWaitText(plain(a.text), a.queue).path : undefined);
 
 /** Where an item leads: a stopped queue's item opens the queue, whose stop box has what the step left; others their step. */
 export const attentionTarget = (a: AttentionItem): string | undefined => (a.lift ? undefined : a.step);
@@ -84,6 +92,30 @@ function StopRow({ project, a, onOpen, onChanged, pushAccepted, queue }: {
 }
 
 /**
+ * A "Merging back" card's way on (docs/design/dashboard.md, "Merge back where it waits"): Merge into main… with its
+ * question in the card, the queue panel's question and action (useMergeBack), and Open, the integration step. Nothing
+ * for an item that names no base (nothing to merge into).
+ */
+function MergeRow({ a, ...rest }: { project: string; a: AttentionItem; onOpen: () => void; onChanged?: () => void; className?: string }) {
+  return a.queue && a.merge ? <MergeActions {...rest} queue={a.queue} merge={a.merge} integrated={!!a.step} /> : null;
+}
+
+function MergeActions({ project, queue, merge: { into, branch }, integrated, onOpen, onChanged, className = "px-3.5 pb-3" }: {
+  project: string; queue: string; merge: NonNullable<AttentionItem["merge"]>; integrated: boolean; onOpen: () => void; onChanged?: () => void; className?: string;
+}) {
+  const merge = useMergeBack({ project, queue, into, branch, integrated, onChanged });
+  return (
+    <div className={className}>
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={merge.ask} className={STOP_BUTTON}>{merge.label}</button>
+        <button onClick={onOpen} className={OPEN_BUTTON}>{t("common.open")}</button>
+      </div>
+      {merge.panel && <div className="mt-2">{merge.panel}</div>}
+    </div>
+  );
+}
+
+/**
  * What waits for the user in this project, on its page. A stopped queue's card names the queue and has Continue; its
  * reason is shown once, at the stopped step in the queue's card below (only when that card shows no stopped step,
  * here). `queues` gives the titles and that.
@@ -107,7 +139,7 @@ export function AttentionPanel({ project, items, queues, pushAccepted, onOpen, o
                 <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold ${kindLabel(a.kind).tone}`}>{kindLabel(a.kind).text}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block font-mono text-xs text-fg-3">{whereOf(a)}</span>
-                  <span className="line-clamp-2 text-sm text-fg">{reasonBelow ? q!.title : textOf(a)}</span>
+                  <span className="line-clamp-2 text-sm text-fg" title={reasonBelow ? undefined : titleOf(a)}>{reasonBelow ? q!.title : textOf(a)}</span>
                   {a.lift && <LiftProposal lift={a.lift} />}
                 </span>
                 {a.at && <span className="shrink-0 text-xs text-fg-3"><TimeAgo at={a.at} /></span>}
@@ -115,6 +147,7 @@ export function AttentionPanel({ project, items, queues, pushAccepted, onOpen, o
               {a.lift && a.queue && (
                 <StopRow project={project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} onChanged={onChanged} pushAccepted={pushAccepted} queue={q} />
               )}
+              {a.kind === "merge" && <MergeRow project={project} a={a} onOpen={() => onOpen(a)} onChanged={onChanged} />}
               {a.kind === "provisional" && <BatchRows project={project} item={a} onOpen={(queue, step) => nav.item(project, queue, step)} onChanged={onChanged} />}
               {a.kind === "plan" && <PlanRow project={project} a={a} onChanged={onChanged} />}
               {a.kind === "tags" && <TagProposalRow project={project} a={a} onChanged={onChanged} />}
@@ -154,10 +187,11 @@ export function WaitingList({ projects, onOpen, onChoose }: {
                 <span className="min-w-0 flex-1 truncate text-fg-3">{a.project_name}{a.queue && <> · <span className="font-mono">{whereOf(a)}</span></>}</span>
                 {a.at && <span className="shrink-0 text-fg-3"><TimeAgo at={a.at} /></span>}
               </span>
-              <span className="mt-1.5 line-clamp-3 text-[15px] leading-snug text-fg">{textOf(a)}</span>
+              <span className="mt-1.5 line-clamp-3 text-[15px] leading-snug text-fg" title={titleOf(a)}>{textOf(a)}</span>
               {a.lift && <LiftProposal lift={a.lift} />}
             </button>
             {a.lift && a.queue && <StopRow project={a.project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} />}
+            {a.kind === "merge" && <MergeRow project={a.project} a={a} onOpen={() => onOpen(a)} />}
             {a.kind === "provisional" && <BatchRows project={a.project} item={a} onOpen={(queue, step) => nav.item(a.project, queue, step)} />}
             {a.kind === "plan" && <PlanRow project={a.project} a={a} />}
             {a.kind === "tags" && <TagProposalRow project={a.project} a={a} />}
@@ -198,10 +232,11 @@ export function WaitingCards({ projects, current, onOpen }: { projects: ProjectS
               <span className="min-w-0 flex-1 truncate font-mono text-fg-3">{a.project !== current && <span className="font-sans">{a.project_name} · </span>}{whereOf(a)}</span>
               {a.at && <span className="shrink-0 text-fg-3"><TimeAgo at={a.at} /></span>}
             </span>
-            <span className="mt-1 line-clamp-2 text-sm leading-snug text-fg">{textOf(a)}</span>
+            <span className="mt-1 line-clamp-2 text-sm leading-snug text-fg" title={titleOf(a)}>{textOf(a)}</span>
             {a.lift && <LiftProposal lift={a.lift} />}
           </button>
           {a.lift && a.queue && <div className="-mt-1"><StopRow project={a.project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} /></div>}
+          {a.kind === "merge" && <MergeRow project={a.project} a={a} onOpen={() => onOpen(a)} className="-mt-1 px-3 pb-2.5" />}
           {a.kind === "provisional" && <div className="-mx-0.5"><BatchRows project={a.project} item={a} onOpen={(queue, step) => nav.item(a.project, queue, step)} /></div>}
           {a.kind === "plan" && <div className="-mx-3.5 -mb-3"><PlanRow project={a.project} a={a} /></div>}
           {a.kind === "tags" && <TagProposalRow project={a.project} a={a} className="px-3 pb-2.5" />}

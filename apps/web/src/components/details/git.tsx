@@ -1,13 +1,14 @@
 // Git in a step's and a queue's panel: the step's commits per round, the integration step's merge back, a finished
 // worktree's merge and cleanup, the queue's branch, and what became of pushing an accepted step.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { BranchView, StepCommitsView } from "@nexus/protocol/api";
 import { act, actResult, enc, HttpError, projectUrl, useAction, useQuery, type ProjectState, type QueueView, type StepView } from "../../api.ts";
-import { integrationState, showsWorktreeActions } from "../../details.ts";
+import { integrationState, mergeBackInto, mergeBackPath, showsWorktreeActions } from "../../details.ts";
 import { rich, t } from "../../i18n.ts";
 import { Button, ReadError, Section, TimeAgo } from "../ui.tsx";
 import { Fold } from "./review.tsx";
 import { usePage } from "../../page.ts";
+import { nav } from "../../nav.ts";
 
 /** The commits of each round of the step (server: src/gitinfo.ts); nothing outside a git repository. */
 export function StepCommits({ project, queue, step, toggle }: {
@@ -15,7 +16,7 @@ export function StepCommits({ project, queue, step, toggle }: {
   /** The review's one line: "Commits · 3", which opens and closes the list. */
   toggle?: { open: boolean; onToggle: () => void };
 }) {
-  const { data, error } = useQuery<StepCommitsView | null>(projectUrl(project, `/queues/${enc(queue)}/steps/${enc(step)}/commits`), usePage().version);
+  const { data, error } = useQuery<StepCommitsView | null>(projectUrl(project, `/queues/${enc(queue)}/steps/${enc(step)}/commits`), usePage().queueVersion(queue));
   if (!data && error) {
     return toggle
       ? <span className="text-danger" title={t("common.readFailed", { reason: error })}>{t("details.commits")} ✗</span>
@@ -59,7 +60,7 @@ export function StepCommits({ project, queue, step, toggle }: {
 }
 
 /**
- * The integration step's box (PROTOCOL.md, "The integration step", "Merge back and clean up"): what it does, and how
+ * The integration step's box (docs/protocol/git.md, "The integration step", "Merge back and clean up"): what it does, and how
  * the merge back stands: done (by Nexus or you), waiting (and why), run again because the base moved on, or the user's
  * when the project's merge_back is off.
  */
@@ -67,6 +68,8 @@ export function IntegrationBox({ project, queue, step }: { project: ProjectState
   const { base, merged, waiting, again } = integrationState(queue, step);
   const code = (s: string, key: string) => <span key={key} className="font-mono">{s}</span>;
   const own = project.project.defaults.merge_back;
+  const into = mergeBackInto(queue, project.project.root);
+  const merge = useMergeBack({ project: project.project.id, queue: queue.id, into: into ?? base, branch: queue.branch, integrated: true });
   return (
     <div className={`mb-5 rounded-lg border px-4 py-3 text-sm ${waiting ? "border-warn/40 bg-warn/5" : "border-line"}`}>
       <p className="text-xs text-fg-3">{rich("integration.box", { base: code(base, "base"), branch: code(queue.branch ?? t("details.worktree.itsBranch"), "branch") })}</p>
@@ -83,8 +86,66 @@ export function IntegrationBox({ project, queue, step }: { project: ProjectState
         <p className="mt-1.5 text-fg-2">{own ? t("integration.byNexusSoon") : t("integration.yours")}</p>
       )}
       {again > 0 && !merged && <p className="mt-1 text-xs text-fg-3">{t("integration.again", { count: again })}</p>}
+      {/* The merge back right here, the queue panel's question and action; the worktree and its cleanup stay there. */}
+      {into && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <Button variant="quiet" onClick={merge.ask}>{merge.label}</Button>
+          <button onClick={() => nav.item(project.project.id, queue.id)} className="text-xs text-accent hover:underline">{t("integration.toQueue", { queue: queue.id })}</button>
+        </div>
+      )}
+      {into && merge.panel && <div className="mt-3">{merge.panel}</div>}
     </div>
   );
+}
+
+/**
+ * Merge back, wherever it is offered (the queue's Worktree section, the integration step's box, the "Merging back"
+ * waiting card): `ask` opens the question in place, `panel` is the question (which branch goes into which base, what
+ * happens) with Merge and Cancel, then what the server said. One action for all of them: `POST …/queues/:queue/merge`,
+ * judged by the server (a refusal gives its reason in red).
+ */
+export function useMergeBack({ project, queue, into, branch, integrated, onChanged }: {
+  project: string; queue: string;
+  /** The base branch it goes into. */
+  into: string;
+  /** The queue's branch; absent: "its branch". */
+  branch?: string;
+  /** The queue has an integration step: its tested commit is what the base moves to. */
+  integrated: boolean;
+  onChanged?: () => void;
+}): { label: string; ask: () => void; close: () => void; panel?: ReactNode } {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; text: string }>();
+  const code = (x: string, key: string) => <span key={key} className="font-mono">{x}</span>;
+  const go = () => {
+    setBusy(true); setResult(undefined);
+    actResult<{ message?: string }>(project, "POST", mergeBackPath(queue))
+      .then((r) => { setResult({ ok: true, text: r?.message ?? t("details.worktree.done") }); setAsking(false); onChanged?.(); },
+        (e: Error) => { setResult({ ok: false, text: e.message }); if (e instanceof HttpError) onChanged?.(); })
+      .finally(() => setBusy(false));
+  };
+  const panel = (asking || result) && (
+    <>
+      {asking && (
+        <div className="rounded-lg border border-warn/30 bg-warn/10 p-3">
+          <p className="text-sm text-warn">{rich("details.worktree.mergeQuestion", { branch: code(branch ?? t("details.worktree.itsBranch"), "branch"), base: code(into, "base") })}</p>
+          <p className="mt-1 text-xs text-fg-2">{t(integrated ? "details.worktree.mergeTextIntegrated" : "details.worktree.mergeText", { base: into })}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button disabled={busy} onClick={go}>{t(busy ? "details.worktree.working" : "details.worktree.merge")}</Button>
+            <Button variant="quiet" onClick={() => setAsking(false)}>{t("common.cancel")}</Button>
+          </div>
+        </div>
+      )}
+      {result && <p className={`break-all text-xs ${asking ? "mt-2" : ""} ${result.ok ? "text-ok" : "text-danger"}`}>{result.text}</p>}
+    </>
+  );
+  return {
+    label: t("details.worktree.mergeInto", { base: into }),
+    ask: () => { setAsking(true); setResult(undefined); },
+    close: () => setAsking(false),
+    panel: panel || undefined,
+  };
 }
 
 /**
@@ -94,17 +155,18 @@ export function IntegrationBox({ project, queue, step }: { project: ProjectState
  */
 export function WorktreeActions({ project, root, queue }: { project: string; root: string; queue: QueueView; }) {
   const { reload: onChanged } = usePage();
-  const [ask, setAsk] = useState<"merge" | "cleanup">();
+  const [ask, setAsk] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string }>();
   const g = queue.git;
+  const into = mergeBackInto(queue, root);
+  const merge = useMergeBack({ project, queue: queue.id, into: into ?? "", branch: queue.branch, integrated: queue.steps.some((s) => s.integration), onChanged });
   if (!showsWorktreeActions(queue, root)) return null;
   const branch = queue.branch ?? t("details.worktree.itsBranch");
-  const base = g?.base?.branch !== false ? g?.base?.ref : undefined;
-  const go = (what: "merge" | "cleanup") => {
+  const go = () => {
     setBusy(true); setResult(undefined);
-    actResult<{ message?: string }>(project, "POST", `/queues/${enc(queue.id)}/${what}`)
-      .then((r) => { setResult({ ok: true, text: r?.message ?? t("details.worktree.done") }); setAsk(undefined); onChanged(); },
+    actResult<{ message?: string }>(project, "POST", `/queues/${enc(queue.id)}/cleanup`)
+      .then((r) => { setResult({ ok: true, text: r?.message ?? t("details.worktree.done") }); setAsk(false); onChanged(); },
         (e: Error) => { setResult({ ok: false, text: e.message }); if (e instanceof HttpError) onChanged(); })
       .finally(() => setBusy(false));
   };
@@ -125,26 +187,18 @@ export function WorktreeActions({ project, root, queue }: { project: string; roo
         ? <p className="mt-1.5 text-sm text-fg">{rich("details.worktree.cleaned", { branch: <span key="branch" className="font-mono">{g.cleaned.branch}</span> })} <span className="text-xs text-fg-3">· <TimeAgo at={g.cleaned.at} /></span></p>
         : (
           <div className="mt-2 flex flex-wrap gap-2">
-            {base && !g?.merged && queue.maintenance !== "survey" && <Button variant="quiet" onClick={() => { setAsk("merge"); setResult(undefined); }}>{t("details.worktree.mergeInto", { base: base ?? "" })}</Button>}
-            <Button variant="quiet" onClick={() => { setAsk("cleanup"); setResult(undefined); }}>{t("details.worktree.cleanUpAsk")}</Button>
+            {into && <Button variant="quiet" onClick={() => { merge.ask(); setAsk(false); setResult(undefined); }}>{merge.label}</Button>}
+            <Button variant="quiet" onClick={() => { setAsk(true); setResult(undefined); merge.close(); }}>{t("details.worktree.cleanUpAsk")}</Button>
           </div>
         )}
+      {merge.panel && !g?.cleaned && <div className="mt-3">{merge.panel}</div>}
       {ask && !g?.cleaned && (
         <div className="mt-3 rounded-lg border border-warn/30 bg-warn/10 p-3">
-          {ask === "merge" ? (
-            <>
-              <p className="text-sm text-warn">{rich("details.worktree.mergeQuestion", { branch: <span key="branch" className="font-mono">{branch}</span>, base: <span key="base" className="font-mono">{base}</span> })}</p>
-              <p className="mt-1 text-xs text-fg-2">{t(queue.steps.some((s) => s.integration) ? "details.worktree.mergeTextIntegrated" : "details.worktree.mergeText", { base: base ?? "" })}</p>
-            </>
-          ) : (
-            <>
-              <p className="text-sm text-warn">{t("details.worktree.cleanUpQuestion")}</p>
-              <p className="mt-1 text-xs text-fg-2">{rich("details.worktree.cleanUpText", { branch: <span key="branch" className="font-mono">{branch}</span> })}</p>
-            </>
-          )}
+          <p className="text-sm text-warn">{t("details.worktree.cleanUpQuestion")}</p>
+          <p className="mt-1 text-xs text-fg-2">{rich("details.worktree.cleanUpText", { branch: <span key="branch" className="font-mono">{branch}</span> })}</p>
           <div className="mt-2 flex flex-wrap gap-2">
-            <Button disabled={busy} onClick={() => go(ask)}>{t(busy ? "details.worktree.working" : ask === "merge" ? "details.worktree.merge" : "details.worktree.cleanUp")}</Button>
-            <Button variant="quiet" onClick={() => setAsk(undefined)}>{t("common.cancel")}</Button>
+            <Button disabled={busy} onClick={go}>{t(busy ? "details.worktree.working" : "details.worktree.cleanUp")}</Button>
+            <Button variant="quiet" onClick={() => setAsk(false)}>{t("common.cancel")}</Button>
           </div>
         </div>
       )}
@@ -155,7 +209,7 @@ export function WorktreeActions({ project, root, queue }: { project: string; roo
 
 /** The queue's branch: ahead and behind of its base and of its remote-tracking ref (as last fetched: never fetched here). */
 export function BranchLine({ project, queue }: { project: string; queue: string }) {
-  const { data: b, error } = useQuery<BranchView | null>(projectUrl(project, `/queues/${enc(queue)}/git`), usePage().version);
+  const { data: b, error } = useQuery<BranchView | null>(projectUrl(project, `/queues/${enc(queue)}/git`), usePage().queueVersion(queue));
   if (!b && error) return <div className="mt-3 rounded-lg bg-surface-2 p-3"><span className="text-sm text-fg-3">{t("details.branch")} </span><ReadError error={error} className="inline" /></div>;
   if (!b) return null;
   const counts = (x: { ahead: number; behind: number }) => (

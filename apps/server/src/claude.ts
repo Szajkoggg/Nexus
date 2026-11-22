@@ -20,6 +20,11 @@ export interface ClaudeTurnSigns {
   refusal?: boolean;
 }
 
+/**
+ * How long after a turn's end a turn the CLI starts by itself, for `next` messages it had not read in the turn, may
+ * still begin: it follows within milliseconds (seen live after a stop, settleStop); this leaves room for a busy machine.
+ */
+const LATE_TURN_MS = 1500;
 const CLAUDE_PASSING = new Set(["overloaded", "server_error", "rate_limit", "connection"]);
 
 /**
@@ -93,6 +98,11 @@ function httpCode(status: unknown): string | undefined {
 export interface ClaudeOptions {
   /** Only AgentHost sets this, for worker sessions. */
   ownProcesses?: boolean;
+  /**
+   * Only AgentHost sets this: the session's role. Its process then runs in a job of its own on Windows, so the server
+   * can tell its connections from the user's (worker-process.ts agentOwning; docs/design/security.md).
+   */
+  agentRole?: string;
   cwd: string;
   /** Claude's own session id (a UUID). New sessions are created with it; existing ones resumed. */
   uuid: string;
@@ -108,12 +118,17 @@ export interface ClaudeOptions {
   appendSystemPrompt?: string;
   /**
    * Where the briefing is written for the CLI to read (--append-system-prompt-file), anew at each start: AgentHost
-   * gives the session's own file. Not on the command line, which Windows limits to 32,767 characters in all (DESIGN.md,
+   * gives the session's own file. Not on the command line, which Windows limits to 32,767 characters in all (docs/design/engine.md,
    * "The orchestrator's briefing and the command line").
    */
   briefingFile?: string;
   /** More settings for the session (--settings, as JSON): a thinking partner's WebFetch guard hook. */
   settings?: string;
+  /**
+   * How long after a turn's end a turn of the CLI's own may still begin (LATE_TURN_MS by default): the settling and a
+   * stop's settle last that long. Tests that start the late turn themselves, after Nexus looked, hold it open.
+   */
+  lateTurnMs?: number;
   env: Record<string, string>;
 }
 
@@ -152,6 +167,8 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
   private stops = 0;
   /** Messages sent into the running turn (`next`) since its start. */
   private nextInTurn = 0;
+  /** While settling (AgentProcess.settling): ends the moment after a turn that had `next` messages sent into it. */
+  private late?: NodeJS.Timeout;
   /**
    * The background work the CLI reports running (system background_tasks_changed: its whole list each time, seen with
    * Claude Code 2.1.323: a Bash command or a sub-agent started with run_in_background). When it ends, the CLI starts a
@@ -210,6 +227,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
       cwd: this.options.cwd,
       env: agentEnv(this.options.env),
       owned: this.options.ownProcesses,
+      agent: this.options.agentRole,
     });
     this.proc = child;
     child.on("spawn", () => { if (child === this.proc && child.pid) this.emit("facts", { pid: child.pid }); });
@@ -263,6 +281,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     this.state = "exited";
     this.background = [];
     clearTimeout(this.settle);
+    this.stopSettling();
     this.exitCode = code;
     if (code && this.lastStderr.trim()) this.emit("activity", { kind: "error", text: this.lastStderr.trim().slice(-500) });
     this.emit("exit", code);
@@ -298,7 +317,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     if (priority === "next" && this.state === "working") this.nextInTurn++;
     const msg = { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, ...(priority ? { priority } : {}) };
     this.write(JSON.stringify(msg) + "\n");
-    if (priority !== "next" || this.state === "idle") this.state = "working";
+    if (priority !== "next" || this.state === "idle") { this.state = "working"; this.stopSettling(); }
   }
 
   /**
@@ -335,15 +354,48 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
    */
   private settleStop(): void {
     clearTimeout(this.settle);
-    const wait = this.nextInTurn ? 1500 : 0;
+    const wait = this.nextInTurn ? this.lateTurnMs : 0;
     this.nextInTurn = 0;
-    this.settle = setTimeout(() => {
+    // Decided after this loop turn's I/O, as startSettling's end (queue LH): a stalled loop runs the timer first.
+    const settle = setTimeout(() => setImmediate(() => {
+      if (this.settle !== settle) return; // cleared, or another stop's since
       if (this.state !== "idle") return; // a turn of the CLI's own runs (it is being interrupted): its result settles
       this.stopping = false;
       const held = this.held;
       this.held = [];
       for (const t of held) this.send(t);
-    }, wait);
+    }), wait);
+    this.settle = settle;
+  }
+
+  private get lateTurnMs(): number { return this.options.lateTurnMs ?? LATE_TURN_MS; }
+
+  /** See AgentProcess.settling. */
+  get settling(): boolean { return this.late !== undefined; }
+
+  /**
+   * After a turn that had `next` messages sent into it: one written to the CLI just as its turn ended (before Nexus read
+   * the result) was not read in it and runs as a turn of its own, which starts within milliseconds (as after a stop,
+   * settleStop, seen live); nothing in the stream tells such a turn from one that read them all. Until that turn starts
+   * or LATE_TURN_MS pass, the process is settling (queue OF: a summary request sent in that moment, as if between turns).
+   */
+  private startSettling(): void {
+    this.stopSettling();
+    // The moment's end is decided after this loop turn's I/O (setImmediate runs after the poll phase): after a stall of
+    // the server's loop longer than the moment, the expired timer runs before the output that came meanwhile, and a late
+    // turn the CLI started in time would be taken for none (queue LH; a side finding of queue CI3A). Its start stops the
+    // settling (stopSettling clears `late`), so the deferred end finds it gone.
+    const late = setTimeout(() => setImmediate(() => {
+      if (this.late !== late) return;
+      this.late = undefined;
+      if (this.state === "idle") this.emit("settled");
+    }), this.lateTurnMs);
+    this.late = late;
+  }
+
+  private stopSettling(): void {
+    clearTimeout(this.late);
+    this.late = undefined;
   }
 
   /** Ends the session after the running turn: closing stdin lets the CLI finish and exit. */
@@ -409,8 +461,9 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
         if (m.subtype === "init") {
           this.signs = {};
           this.state = "working";
+          this.stopSettling();
           // A turn the CLI starts by itself while a stop settles (unread messages of the stopped turn): stopped too.
-          if (this.stopping) { clearTimeout(this.settle); this.interrupt(); }
+          if (this.stopping) { clearTimeout(this.settle); this.settle = undefined; this.interrupt(); }
           this.emit("facts", { model: m.model });
           this.emit("activity", { kind: "turn_start", text: `turn started (${m.model})` });
         }
@@ -458,6 +511,8 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
       }
       case "result": {
         this.state = "idle";
+        // Settling before anything is emitted: the turn's end is acted on as it is emitted.
+        if (!this.stopping && this.nextInTurn) this.startSettling();
         const models = Object.values((m.modelUsage ?? {}) as Record<string, { contextWindow?: number }>);
         this.emit("facts", { contextWindow: models.find((x) => x.contextWindow)?.contextWindow, costUsd: m.total_cost_usd });
         // The authoritative list: anything the messages did not report (a hook's or a path rule's denial, for one).
@@ -472,7 +527,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
         const total = typeof m.total_cost_usd === "number" ? m.total_cost_usd : undefined;
         const costUsd = total !== undefined && this.costSoFar !== undefined ? Math.max(0, Math.round((total - this.costSoFar) * 1e9) / 1e9) : undefined; // to a nano-dollar: no float residue
         if (total !== undefined) this.costSoFar = total;
-        // Sub-agents' tokens: in modelUsage's running total, not in result.usage (DESIGN.md, "Sub-agent tokens").
+        // Sub-agents' tokens: in modelUsage's running total, not in result.usage (docs/design/usage.md, "Sub-agent tokens").
         const tokens = claudeTurnTokens(m.usage);
         const modelTotal = claudeModelTotals(m.modelUsage);
         const sub = subagentTokens(modelTotal, this.modelSoFar, tokens);

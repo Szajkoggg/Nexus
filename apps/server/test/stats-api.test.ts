@@ -1,4 +1,4 @@
-// The statistics over the API (PROTOCOL.md, "Statistics"): GET /api/stats across projects or of one, grouped and since
+// The statistics over the API (docs/protocol/stats.md, "Statistics"): GET /api/stats across projects or of one, grouped and since
 // a time, narrowed by a tag, GET /api/usage/days, and GET /api/projects/:id/metrics; an unknown project is 404, an
 // unknown grouping 400. A real server process
 // on a free port with a temporary NEXUS_HOME, two projects and a made-up turns.jsonl; no runtime is started.

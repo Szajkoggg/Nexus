@@ -1,4 +1,4 @@
-// Searching a project's whole history (queue SR; docs/PROTOCOL.md, "Searching a project"): the queues, the steps'
+// Searching a project's whole history (queue SR; docs/protocol/api.md, "Searching a project"): the queues, the steps'
 // outcomes, questions and answers, the chats, the reports, the review comments and the step notes. No index: the
 // server reads the files (apps/server/src/search.ts) and these pure functions decide what an entry offers, whether it
 // matches and what the hit shows. Matching ignores case and accents; with several words, an item matches when it

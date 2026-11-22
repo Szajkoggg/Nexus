@@ -160,6 +160,8 @@ test("failed checks of the integration step hold it, and the user is told", () =
   const item = loadProjectState(x.store).attention.find((a) => a.kind === "merge");
   assert.equal(item?.queue, "Q");
   assert.equal(item?.text, w!.reason);
+  const view = loadProjectState(x.store).queues.find((v) => v.id === "Q")!;
+  assert.deepEqual(item?.merge, { into: "main", ...(view.branch ? { branch: view.branch } : {}) }, "what the card's Merge back asks: the queue's branch into its base");
   q.look();
   assert.equal(x.store.readGit("Q")!.merge!.waiting!.since, w!.since, "told once per reason");
 });

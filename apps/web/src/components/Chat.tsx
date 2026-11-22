@@ -2,8 +2,10 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ChatEntry, RuntimeFile, SessionFile, SessionView } from "@nexus/protocol";
 import type { NumberedEntry } from "@nexus/protocol/chat";
+import { tokenCount } from "@nexus/protocol/tokens";
 import { PinButton, PinsBar, SearchBar, SearchButton, StopButton, type PinView, type SearchState } from "./ChatTools.tsx";
-import { act, actResult, enc, projectUrl, request, useAction, useQuery, type Version } from "../api.ts";
+import { act, actResult, enc, projectUrl, request, useAction, useLiveRead } from "../api.ts";
+import { applyConversation, applyConversations, applyOrchestrator } from "../liveViews.ts";
 import { Button, Clock, Composer, Menu, ReadError, TimeAgo, type MenuEntry } from "./ui.tsx";
 import { CopyButton, ReplyTools } from "./MessageTools.tsx";
 import { messageSource, replyTools } from "../messageTools.ts";
@@ -25,6 +27,7 @@ import { fileHref } from "../hash.ts";
 import { clearChatTarget, useChatTarget } from "../chatTarget.ts";
 import { SearchField } from "./Search.tsx";
 import { IdeasMatching, IdeasOverview, IdeasSwitch, type IdeasPanelView } from "./Ideas.tsx";
+import { RUNTIME_OPTIONS } from "../runtimes.ts";
 
 // ---------------------------------------------------------------- the endpoints this file reads and writes
 
@@ -52,22 +55,22 @@ interface View { session: SessionFile | null; state: "working" | "idle" | "exite
 
 /**
  * A session the orchestrator's current one went on from, oldest first: its newest entries, and its switch to the next
- * (when, its context fill then from 0 to 1, the summary it wrote or null).
+ * (when, its context fill then from 0 to 1 and its tokens, unknown from an older server; the summary it wrote or null).
  */
 interface EarlierSession {
   session: string; created_at: string; chat: NumberedEntry[];
-  switch: { at: string; fill: number | null; summary: NonNullable<SessionView["context"]> | null };
+  switch: { at: string; fill: number | null; tokens?: number | null; summary: NonNullable<SessionView["context"]> | null };
 }
 
-/** Where the server keeps the orchestrator's latest summary for a fresh session (PROTOCOL.md, "Layout"). */
+/** Where the server keeps the orchestrator's latest summary for a fresh session (docs/protocol/files.md, "Layout"). */
 const SUMMARY_FILE = ".nexus/orchestrator/summary.md";
 
 /** A chat's search, open or not: its button is in the chat's header, or in the desktop column's for the orchestrator. */
 interface Search { open: boolean; set: (open: boolean) => void }
 
 /** The orchestrator's chat of a project: its data, and why it could not be read (shown in its place, ChatPanel). */
-export function useOrchestrator(project: string | undefined, version: Version) {
-  return useQuery<View>(project ? projectUrl(project, "/orchestrator") : undefined, version);
+export function useOrchestrator(project: string | undefined) {
+  return useLiveRead<View>(project ? projectUrl(project, "/orchestrator") : undefined, project, applyOrchestrator);
 }
 
 /** A chat: what it is (its header; on a desktop's orchestrator chat, in the middle column's header), the messages, and the composer. */
@@ -370,12 +373,13 @@ function usePlace(key: string, full: readonly ChatEntry[], ready: boolean, showT
   return { scroller, onScroll, unread, jump, follow };
 }
 
-/** What a chat's session is doing, its model, effort and how full its context is: "ready · opus-5-5 · 38% context". */
+/** What a chat's session is doing, its model, effort and its context: "ready · opus-5-5 · 212k tokens of context (21%)". */
 function statusLine(view: View | undefined, status: string): string {
   const rt = view?.runtime;
-  const pct = rt?.context_tokens && rt.context_window ? Math.round((100 * rt.context_tokens) / rt.context_window) : undefined;
+  const context = rt?.context_tokens && rt.context_window
+    ? t("chat.context", { tokens: tokenCount(rt.context_tokens), pct: Math.round((100 * rt.context_tokens) / rt.context_window) }) : undefined;
   const model = rt?.model ? rt.model.replace(/^claude-/, "") : view?.model;
-  return `${status}${model ? ` · ${model}` : ""}${view?.effort ? ` · ${t("run.effort", { effort: view.effort })}` : ""}${pct !== undefined ? ` · ${t("chat.context", { pct })}` : ""}`;
+  return `${status}${model ? ` · ${model}` : ""}${view?.effort ? ` · ${t("run.effort", { effort: view.effort })}` : ""}${context ? ` · ${context}` : ""}`;
 }
 
 /**
@@ -444,7 +448,7 @@ function FreshSessionLine({ project, sw, latest }: { project: string; sw: Earlie
         <span className="h-px flex-1 bg-line-strong" />
       </div>
       <div className="mt-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center">
-        <span>{pct === undefined ? t("chat.freshStarted") : t("chat.freshFull", { pct })} · <Clock at={sw.at} /></span>
+        <span>{pct === undefined ? t("chat.freshStarted") : typeof sw.tokens === "number" ? t("chat.freshTokens", { tokens: tokenCount(sw.tokens), pct }) : t("chat.freshFull", { pct })} · <Clock at={sw.at} /></span>
         {sw.summary
           ? <button onClick={() => setOpen(!open)} aria-expanded={open} className={`${link} max-lg:min-h-11`}>{open ? t("chat.freshHideSummary") : t("chat.freshShowSummary")}</button>
           : <span>{t("chat.freshNoSummary")}</span>}
@@ -653,8 +657,7 @@ function AboutStep({ project, c, className = "" }: { project: string; c: Session
  * conversations, each a link into it.
  */
 export function StepChat({ project, queue, step }: { project: string; queue: string; step: string }) {
-  const { version } = usePage();
-  const list = useQuery<ConversationItem[]>(projectUrl(project, "/conversations"), version).data;
+  const list = useLiveRead<ConversationItem[]>(projectUrl(project, "/conversations"), project, applyConversations).data;
   const { busy, error, run } = useAction();
   const mine = (list ?? []).filter((c) => !c.archived && c.about?.queue === queue && c.about.step === step);
   const go = (fresh: boolean) => run(async () => {
@@ -738,15 +741,15 @@ function Conversations({ project, name, defaultRuntime, inline, desk, switcher }
   /** The Ideas panel's switch (to the overview), in the column's header on a desktop, atop the list on the phone. */
   switcher: (wide: boolean) => ReactNode;
 }) {
-  const { reload: onChanged, version } = usePage();
-  const { data: list, error: listError } = useQuery<ConversationItem[]>(projectUrl(project, "/conversations"), version);
+  const { reload: onChanged } = usePage();
+  const { data: list, error: listError } = useLiveRead<ConversationItem[]>(projectUrl(project, "/conversations"), project, applyConversations);
   usePlaces(); // the list's unread dots follow each conversation's place
   // The open conversation (or the new-conversation form) is a layer above the panel: Back returns to the list.
   const layer = layerValue(useNav(), "conversation");
   const creating = layer === "new";
   const open = creating ? undefined : layer;
   const [showArchived, setShowArchived] = useState(false);
-  const { data: view, error: viewError } = useQuery<ConversationView>(open ? projectUrl(project, `/conversations/${enc(open)}`) : undefined, version);
+  const { data: view, error: viewError } = useLiveRead<ConversationView>(open ? projectUrl(project, `/conversations/${enc(open)}`) : undefined, project, applyConversation);
   // On the phone's tab the list or one conversation at a time; on a desktop both, side by side.
   const side = !desk;
   const current = list?.find((c) => c.id === open);
@@ -887,7 +890,7 @@ function NewConversation({ project, defaultRuntime, onBack, onCreated }: {
         <div className="flex flex-wrap gap-3">
           <label className="text-sm text-fg">{t("run.field.runtime")}
             <select value={runtime} onChange={(e) => { setRuntime(e.target.value as "claude" | "codex"); setModel(""); setEffort(""); }} className={`mt-1 ${field}`}>
-              <option value="claude">Claude Code</option><option value="codex">Codex</option>
+              {RUNTIME_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </label>
           <label className="text-sm text-fg">{t("run.field.model")}

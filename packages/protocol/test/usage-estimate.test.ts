@@ -1,13 +1,13 @@
-// The estimate of a turn's use of the usage windows (usage-estimate.ts; DESIGN.md, "Estimating a turn's use"), on a
+// The estimate of a turn's use of the usage windows (usage-estimate.ts; docs/design/usage.md, "Estimating a turn's use"), on a
 // made-up turns.jsonl read back as the server would read it: a turn alone, two overlapping turns with different tokens,
 // an overlapping Codex turn (Codex's windows are apart from Claude Code's), a window that reset during the turn, missing
-// window data, a partial overlap, sub-agent tokens, and a turn whose tokens are unknown.
+// window data, a partial overlap, sub-agent tokens, and a turn whose tokens are unknown; and the token weights by runtime.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TOKEN_WEIGHTS, readTurns, usageEstimates, weightedTokens, type TurnRecord, type WindowEstimate } from "../src/index.ts";
+import { PRICE_WEIGHTS, TOKEN_WEIGHTS, readTurns, tokenWeights, usageEstimates, weightedTokens, type TurnRecord, type WindowEstimate } from "../src/index.ts";
 
 const at = (hm: string) => `2026-11-15T${hm}:00.000Z`;
 const tok = (input: number, extra: Partial<NonNullable<TurnRecord["tokens"]>> = {}) => ({ input, output: 0, cache_read: 0, cache_creation: 0, ...extra });
@@ -80,8 +80,30 @@ test("a partly overlapping turn counts with the part of its tokens within; sub-a
   assert.deepEqual(e.get("interrupted")!.five_hour, { none: "tokens" });
 });
 
-test("the token weights: output above input, a cache write a little above, a cache read a tenth", () => {
-  assert.deepEqual(TOKEN_WEIGHTS, { input: 1, output: 5, cache_read: 0.1, cache_creation: 1.25 });
-  assert.equal(weightedTokens({ tokens: { input: 10, output: 2, cache_read: 100, cache_creation: 4 } }), 10 + 10 + 10 + 5);
-  assert.equal(weightedTokens({}), undefined);
+test("the token weights by runtime: Claude Code's cache read at 0.02 (measured), Codex's and any other runtime's at the price ratio", () => {
+  assert.deepEqual(TOKEN_WEIGHTS, {
+    claude: { input: 1, output: 5, cache_read: 0.02, cache_creation: 1.25 },
+    codex: { input: 1, output: 5, cache_read: 0.1, cache_creation: 1.25 },
+  });
+  assert.deepEqual(PRICE_WEIGHTS, { input: 1, output: 5, cache_read: 0.1, cache_creation: 1.25 });
+  for (const runtime of ["external", "gemini", "constructor", "toString"]) assert.equal(tokenWeights(runtime), PRICE_WEIGHTS, runtime);
+  const tokens = { input: 10, output: 2, cache_read: 100, cache_creation: 4 };
+  assert.equal(weightedTokens({ runtime: "claude", tokens }), 10 + 10 + 2 + 5);
+  assert.equal(weightedTokens({ runtime: "claude", tokens, subagent_tokens: tokens }), 2 * (10 + 10 + 2 + 5));
+  assert.equal(weightedTokens({ runtime: "codex", tokens }), 10 + 10 + 10 + 5);
+  assert.equal(weightedTokens({ runtime: "external", tokens }), 10 + 10 + 10 + 5, "an unknown runtime: the price ratios");
+  assert.equal(weightedTokens({ runtime: "claude" }), undefined);
+});
+
+test("the shares follow the runtime's weights: a turn of cache reads takes less of Claude Code's window than of Codex's", () => {
+  // Two turns side by side on each runtime: one of 100k cache reads, one of 2000 uncached input tokens; each window grows
+  // by 4 points. Claude Code: 2000 against 2000 weighted (half each); Codex: 10 000 against 2000 (five sixths).
+  const pair = (runtime: TurnRecord["runtime"], window: string, reset: string): TurnRecord[] => ["reads", "input"].map((kind) =>
+    turn(`${runtime}-${kind}`, "17:00", "17:10", {
+      runtime, tokens: kind === "reads" ? tok(0, { cache_read: 100_000 }) : tok(2000),
+      windows_start: { [window]: win(0.5, reset) }, windows_end: { [window]: win(0.54, reset) },
+    }));
+  const turns = [...pair("claude", "five_hour", "21:00"), ...pair("codex", "primary", "21:00")];
+  const out = usageEstimates(turns).map((e) => Object.values(e).map(share)[0]);
+  assert.deepEqual(out, [0.02, 0.02, Math.round((0.04 * 5) / 6 * 1e6) / 1e6, Math.round(0.04 / 6 * 1e6) / 1e6]);
 });

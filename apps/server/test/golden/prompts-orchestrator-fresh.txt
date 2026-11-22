@@ -3,7 +3,7 @@
 Hello.
 == its turn ended with its context 90 % full: the summary is asked for
 -- to orchestrator 1
-[Nexus] Your context is 90 % full (the threshold is 85 %): Nexus goes on with you in a fresh orchestrator session, which starts from your summary, your current briefing and `nexus status`. Write that summary now with `nexus context "<summary>" --topics a,b --files x,y`: the decisions made with the user and why, the open items, the plan (what runs, what comes next and what it waits for), and what you promised the user. Leave out what `nexus status` and the files show anyway. Then end your turn; do not start anything else.
+[Nexus] Your context holds 900 tokens (the threshold is 800 tokens): Nexus goes on with you in a fresh orchestrator session, which starts from your summary, your current briefing and `nexus status`. Write that summary now with `nexus context "<summary>" --topics a,b --files x,y` by its standard (`nexus help context`, about 1,000 to 2,000 words at most): the decisions made with the user and why, with the ways dropped, the open items, the traps found, the plan (what runs, what comes next and what it waits for), and what you promised the user. Leave out what `nexus status` and the files show anyway. Then end your turn; do not start anything else.
 == the user writes meanwhile: the message waits for the fresh session
 == the summary written, the turn over: the fresh session starts from it
 -- to orchestrator 2
@@ -33,7 +33,7 @@ Open questions (0)
 Worker sessions (0)
 == the chat lines Nexus wrote: the old session's, then the fresh one's
 user: Hello.
-nexus: The orchestrator's context is 90 % full (its threshold is 85 %): Nexus asked it for a summary, and it goes on in a fresh session.
+nexus: The orchestrator's context is 900 tokens (90 % full; its threshold is 800 tokens): Nexus asked it for a summary, and it goes on in a fresh session.
 user: Also: the release is on Friday.
 nexus: The orchestrator goes on in a fresh session (<fresh session>).
 nexus: A fresh orchestrator session: the previous one's context was 90 % full. It starts from the summary the previous session wrote (.nexus/orchestrator/summary.md), its current briefing and nexus status.

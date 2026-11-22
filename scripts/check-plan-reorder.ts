@@ -1,6 +1,6 @@
 // A scripted browser check of the plan's reorder (queue PV3): on a development instance with the fake runtimes and
 // the test project of scripts/capture/seed-plan.ts, it moves queues in the dashboard's plan, once with "After…" and
-// once by dragging, and checks that the plan files say what the rule says (PROTOCOL.md, "The plan"): the moved queue
+// once by dragging, and checks that the plan files say what the rule says (docs/protocol/planning.md, "The plan"): the moved queue
 // waits for the one chosen, and those that waited for it wait for its old predecessors, set by the user.
 //
 //   node scripts/check-plan-reorder.ts

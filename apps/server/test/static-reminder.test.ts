@@ -1,4 +1,4 @@
-// The static analysis reminder (PROTOCOL.md, "Static analysis reminder") against the fake runtimes, on a clock the test
+// The static analysis reminder (docs/protocol/planning.md, "Static analysis reminder") against the fake runtimes, on a clock the test
 // moves: a project without static analysis tells its orchestrator once a month; one with static analysis never; after
 // the user's no (`nexus static-analysis decline`, an event of the orchestrator's) nothing comes for 90 days.
 import { test } from "node:test";
@@ -10,31 +10,11 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, loadProjectState, newId, now, routeAnswers, type Event } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import type { Clock } from "../src/scheduler.ts";
+import { TestClock } from "./test-clock.ts";
 import { until as waitUntil, LONGER } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const DAY = 24 * 3600_000;
-
-/** A clock that moves only when told; its timers fire in order as it passes them. */
-class TestClock implements Clock {
-  t = Date.now();
-  private timers: { at: number; fn: () => void }[] = [];
-  now() { return this.t; }
-  setTimeout(fn: () => void, ms: number) { const h = { at: this.t + ms, fn }; this.timers.push(h); return h; }
-  clearTimeout(h: unknown) { this.timers = this.timers.filter((x) => x !== h); }
-  advance(ms: number) {
-    const end = this.t + ms;
-    for (;;) {
-      const next = this.timers.filter((x) => x.at <= end).sort((a, b) => a.at - b.at)[0];
-      if (!next) break;
-      this.timers = this.timers.filter((x) => x !== next);
-      this.t = next.at;
-      next.fn();
-    }
-    this.t = end;
-  }
-}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const REMINDER = /^This project has no static analysis set up/;

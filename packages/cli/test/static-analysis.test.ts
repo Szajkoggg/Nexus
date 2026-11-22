@@ -1,4 +1,4 @@
-// `nexus static-analysis [status]|decline` (queue MT, PROTOCOL.md "Static analysis reminder"): status reads the project
+// `nexus static-analysis [status]|decline` (queue MT, docs/protocol/planning.md "Static analysis reminder"): status reads the project
 // and the server's note; the orchestrator's decline goes to the server as a static_analysis.declined event (played here
 // by a stand-in that records it as applied); a worker's decline is refused.
 import { test } from "node:test";

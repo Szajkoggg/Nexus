@@ -276,19 +276,19 @@ test("note references are pinned by the approval; a revision that changes them n
 test("an imported queue's source reads as a list of one, and its hash is the one it had before the list", () => {
   const { root, st } = project();
   const yaml = {
-    protocol: 1, id: "I", title: "Imported", revision: 1, status: "approved", stop_conditions: ["s"], checks: ["c"], steps,
+    protocol: 1, id: "I", title: "Imported", revision: 1, status: "approved", stop_conditions: ["s"], checks: ["node c"], steps,
     approvals: [], history: [], source: { path: "QUEUE.md", imported_at: "2026-11-12T00:00:00Z" },
   };
   const parsed = QueueFile.parse(yaml);
   assert.deepEqual(parsed.source, [{ path: "QUEUE.md", imported_at: "2026-11-12T00:00:00Z" }]);
-  const old = "sha256:" + createHash("sha256").update(JSON.stringify({ steps, stop_conditions: ["s"], checks: ["c"] })).digest("hex");
+  const old = "sha256:" + createHash("sha256").update(JSON.stringify({ steps, stop_conditions: ["s"], checks: ["node c"] })).digest("hex");
   assert.equal(revisionHash(parsed), old);
   // Written in the old form by hand and read through the store: the same.
   mkdirSync(join(root, ".nexus/queues/I"), { recursive: true });
   writeFileSync(join(root, ".nexus/queues/I/queue.yaml"), YAML.stringify(yaml));
   assert.equal(revisionHash(st.readQueue("I")), old);
   // A revision with a note reference keeps the import record before it.
-  applyDraft(st, { id: "I", title: "Imported", stop_conditions: ["s"], checks: ["c"], steps, source: ["docs/ideas/plan.md#2026-11-14"] });
+  applyDraft(st, { id: "I", title: "Imported", stop_conditions: ["s"], checks: ["node c"], steps, source: ["docs/ideas/plan.md#2026-11-14"] });
   assert.deepEqual(st.readQueue("I").source, [{ path: "QUEUE.md", imported_at: "2026-11-12T00:00:00Z" }, "docs/ideas/plan.md#2026-11-14"]);
 });
 
@@ -571,7 +571,8 @@ test("outcomes quote accepted substantive rounds, retain provenance and never us
   st.appendEvent({ v: 1, id: newId(), at: "2026-11-14T23:10:00Z", session: "o", queue: "OLD", type: "queue.report", path: join(st.queueDir("OLD"), "report.md"), summary: "Closing refactoring is complete." } as Event);
   assert.equal(outcome().kind, "accepted-steps");
   assert.equal(outcome().text, "Done.");
-  const state = loadProjectState(st);
+  // A copy to bend: the state loadProjectState hands out is shared and frozen (docs/design/model.md).
+  const state = structuredClone(loadProjectState(st));
   // Exercise extraction against the state contract for reopened and provisional current rounds.
   state.queues[0]!.steps[0]!.status = "running";
   assert.equal(ideaOutcomeForTest(st, state.queues[0]!).kind, "unavailable");
@@ -622,7 +623,8 @@ test("report event fingerprints distinguish current, changed and missing sources
 
 test("outcome fallback samples distinct substantive steps and reports empty, closing-only and stale evidence", () => {
   const { st } = finished();
-  const q = loadProjectState(st).queues[0]!;
+  // A copy to bend: the state loadProjectState hands out is shared and frozen (docs/design/model.md).
+  const q = structuredClone(loadProjectState(st).queues[0]!);
   const base = q.steps[0]!;
   q.steps = [
     { ...base, id: "A", summary: "Files such as plan.md keep their links. Checks passed." },

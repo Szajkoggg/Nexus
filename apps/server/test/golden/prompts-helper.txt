@@ -1,0 +1,97 @@
+-- to orchestrator 1
+Hello.
+== H1: the worker sends it back after the helper's send-back, and the helper accepts round 2
+== the review helper's briefing
+You are Nexus's review helper for the project "Pilot": a short-lived session that reviews one step of a queue in the orchestrator's place, from the packet you get as your only message, and ends with your verdict. There is no chat and nobody to ask.
+
+What you may do:
+- Read the packet, the diff file it names, and the checkout (to check a criterion: a document that should say something, a test that should exist). Use read-only git (git log, git show, git diff, git status), nexus status, nexus help and nexus doc (a Markdown file's headings, or one section: nexus doc <file.md#section>).
+- Never run a build, a test or a check: the packet has the results of the checks Nexus ran. Never change a file.
+- Decide exactly once, with one of the three commands the packet names: accept, send back, or pass on to the orchestrator. Then end your turn with a one-line reply.
+
+How to decide:
+- Judge the step against its acceptance criteria and review notes, one by one, from the packet and the checkout. Do not accept by default.
+- Send it back (nexus review send-back) when a criterion you can check is not met, saying exactly what to fix.
+- Pass it on (nexus review pass-on, --why with one or more reasons, comma-separated) when: a criterion cannot be settled from the packet and the checkout (the look, the feel, the user's judgement, a measurement nobody took): criterion; the worker's summary reports a deviation from the plan (in what it left out or what differs): deviation; the worker asked a question during the step: question; the send-back limit is reached: limit; you doubt your verdict: doubt; at review level 3, when the criteria you can check are met: level.
+- At review level 2, accept (nexus review accept, --note with your findings) when every criterion is checkable and met. At level 3 you never accept: the judgement is the orchestrator's.
+- Your findings (--note, --findings, or the send-back's text) say briefly what you checked and what you could not, in English: the orchestrator starts from them and does not check again what you found.
+- When an action is refused, do not work around it through another tool or command that reaches the same end: pass the step on with doubt, naming what you could not do (nexus help refusals).
+== H2: its packet, with the review notes, the checks reported and the diff's summary
+[Nexus] Review step H2 of queue QH, round 1: "Step H2".
+
+Goal:
+Goal of H2.
+
+Acceptance:
+- H2 is done
+- The look is calm
+
+Review notes:
+The calm look: compare with the mockup.
+
+Checks reported this round (final: run nothing yourself):
+- npm test: ok (reported by the worker) - 112 pass
+
+Review material:
+- none
+
+The worker's summary:
+H2 done; the colours differ from the plan (left out: the dark theme).
+
+The step's change, aaa2222..bbb1111:
+ src/a.ts | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+The whole diff: <root>/sessions/h-3/diff.patch (read the parts you need).
+
+Review level 2. Every criterion checkable and met: nexus review accept QH H2 --note "what you checked". A criterion you can check not met: nexus review send-back QH H2 "what to fix". Otherwise: nexus review pass-on QH H2 --why <reasons> --findings "what you checked and what you could not".
+== H2 passed on by the helper (a criterion, a deviation): the review notice, with H1's acceptance and its audit riding with it
+-- to orchestrator 1
+[Nexus] Queue QH revision 1 approved. If the plan puts it next, start it now; otherwise tell the user why not.
+-- to orchestrator 1
+[Nexus] Step H2 of queue QH is done and waits for your review: H2 done; the colours differ from the plan (left out: the dark theme). 
+
+The review helper passed it to you: a criterion it cannot settle from what the step left behind; the worker's summary reports a deviation from the plan. Its findings (what it checked and what it could not; no need to check that again): H2 is done: checked in the diff. The calm look cannot be judged from the packet; the summary leaves out the dark theme.
+
+Round 1. Goal:
+Goal of H2.
+
+Acceptance:
+- H2 is done
+- The look is calm
+
+Checks reported this round:
+- npm test: ok, 1 min 35 s (112 pass)
+
+Review material:
+- none
+
+Commits: bbb1111
+
+Decide with one of: nexus review accept QH H2 [--note "..."] (the run goes on); nexus review send-back QH H2 "what to fix"; nexus review ask-user QH H2 "why" (the user decides). Tell the user briefly what you decided.
+
+Since your last notice (for your overview; nothing to do):
+- step H1 of queue QH: sent back by the review helper, round 2: The test for the empty list is missing.
+- step H1 of queue QH: accepted by the review helper (Claude Code, claude-sonnet-5-5, medium)
+
+Audit: review again step H1 of queue QH, which the review helper accepted (its packet: <root>/.nexus/sessions/h-2/packet.md; the step's work is in its queue's checkout). Judge it as you would review it, then answer: nexus review audit QH H1 agree|disagree --reason "why". A disagreement does not reopen the step: if the work needs a fix, draft it as a revision.
+== H3 (level 3) passed on by Nexus without a helper: its runtime is beyond the usage threshold
+-- to orchestrator 1
+[Nexus] Step H3 of queue QH is done and waits for your review: H3 done. 
+
+Nexus passed it to you without the review helper: the review helper could not run (its runtime is beyond the usage threshold, or failed). The review helper's runtime is beyond the usage threshold: five_hour at 95 %.
+
+Round 1. Goal:
+Goal of H3.
+
+Acceptance:
+- H3 is done
+
+Checks reported this round:
+- none
+
+Review material:
+- none
+
+Commits: ccc1111
+
+Review level 3: judge all of it; the queue goes on. Decide with one of: nexus review accept QH H3 [--note "..."] (nothing in it is the user's); nexus review provisional QH H3 --note "what the user should look at" (something in it is the user's, such as the look: the run goes on, and the user confirms it or asks a fix on their return); nexus review send-back QH H3 "what to fix" (beyond the limit of send-backs the step goes to the user and its queue waits); nexus review ask-user QH H3 "why" (you cannot decide: the queue waits for the user). Do not accept by default: judge it against its acceptance criteria. Tell the user briefly what you decided.

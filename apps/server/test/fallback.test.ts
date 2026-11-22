@@ -1,4 +1,4 @@
-// Fallback at a step boundary when a runtime's usage runs out (PROTOCOL.md, "Fallback when usage runs out"), against
+// Fallback at a step boundary when a runtime's usage runs out (docs/protocol/runtimes.md, "Fallback when usage runs out"), against
 // the fake runtimes and usage windows written into usage.json (or reported by the fake Claude Code's turn): the next
 // step opens on the first free entry of its chain; a `wait` rule waits; back on its own runtime once the window reset
 // (also without a fresh reading); a window never reported is free; Claude Code's 7-day window counts; both full: the

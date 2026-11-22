@@ -1,4 +1,4 @@
-// A seed for the capture tool: templates and recurring queues (PROTOCOL.md, "Queue templates", "Recurring queues").
+// A seed for the capture tool: templates and recurring queues (docs/protocol/planning.md, "Queue templates", "Recurring queues").
 // Project "demo" has a template of its own (nexus-templates/), two queues, and three recurring queues the user approved:
 // a weekly survey whose last run is done (made up for a time Nexus missed), one after every 5 queues, and one paused. Project "fresh" has one
 // the orchestrator just set (waiting for the user's approval) and one that changed since the user approved it. Run by
@@ -81,7 +81,7 @@ for (const [id, title] of [["SRCH", "Search in the step list"], ["EXP", "Export 
 }
 recurring(demo.st, demo.root, { id: "deps", template: "maintenance", params: { scope: "dependencies (outdated, vulnerable)" }, every: "mon 03:00", maintenance: "survey",
   last: { queue: run, at: ago(8000), due: mondayBefore(8000), caught_up: mondayBefore(8000) } }, "now");
-recurring(demo.st, demo.root, { id: "notes", template: "maintenance", params: { scope: "AGENTS.md, DESIGN.md and PROTOCOL.md against the code" }, after_queues: 5,
+recurring(demo.st, demo.root, { id: "notes", template: "maintenance", params: { scope: "AGENTS.md, DESIGN.md and PROTOCOL.md (and their topic files) against the code" }, after_queues: 5,
   maintenance: "fix_small", baseline: [] }, "now");
 recurring(demo.st, demo.root, { id: "release", template: "release-notes", params: { version: "the next minor" }, every: "monthly 1 09:00", paused: true }, "now");
 

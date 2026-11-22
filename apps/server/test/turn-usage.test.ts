@@ -1,6 +1,6 @@
 // Each turn's tokens and cost, as the adapters report them on turnEnd: per turn, never the runtime's running totals.
 // Claude Code: result.usage is the turn's, total_cost_usd runs on. Codex: tokenUsage.total runs on, `last` is one
-// model request's. Against the fakes, which report them as the real runtimes do (checked live; see DESIGN.md).
+// model request's. Against the fakes, which report them as the real runtimes do (checked live; see docs/design/runtimes.md, "Findings from building phase 3").
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";

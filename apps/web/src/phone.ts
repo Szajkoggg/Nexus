@@ -1,5 +1,5 @@
 // The phone layout: below 1024 px (phones and narrow windows) the dashboard has a top line and a bottom bar with four
-// tabs instead of the header; see "The phone" in DESIGN.md.
+// tabs instead of the header; see "The phone" in docs/design/dashboard.md.
 import { useEffect, useState } from "react";
 
 export const PHONE = "(max-width: 1023.98px)";

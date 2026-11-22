@@ -1,4 +1,4 @@
-// The planned deploy (PROTOCOL.md, "Planned deploys"; queue PD): what it waits for (a step, a queue, or a time), where
+// The planned deploy (docs/protocol/api.md, "Planned deploys"; queue PD): what it waits for (a step, a queue, or a time), where
 // it stands, and Cancel. One plan for the whole server, so it shows wherever the server's state does: at the top of
 // the right rail, the phone's Waiting tab, and the Nexus section of the global settings.
 import { request, useAction } from "../api.ts";

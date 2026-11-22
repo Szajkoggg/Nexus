@@ -2,109 +2,19 @@
 // (src/coordinator.ts), against the fake runtimes: projects whose engines share one coordinator, as the server's do.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import {
-  DEFAULT_MAX_RUNNING, ProjectStore, approveQueue, ensureGlobalSettings, loadProjectState, newId, readGlobalSettings, routeAnswers, updateGlobalSettings, updateSettings,
-  type Event, type StepDef,
-} from "@nexus/protocol";
-import { Engine, type Clock } from "../src/engine.ts";
+import { join } from "node:path";
+import { DEFAULT_MAX_RUNNING, ensureGlobalSettings, loadProjectState, readGlobalSettings, updateGlobalSettings } from "@nexus/protocol";
 import { Coordinator } from "../src/coordinator.ts";
-import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
-
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
-// Queues in checkouts of their own (plain folders here, no git) end with the integration step, which is not this
-// file's subject: its fake reports it done.
-process.env.FAKE_INTEGRATE = "done";
+import { doneByHand, going, world } from "./coordinator-world.ts";
+import { gatedCleanup } from "./gated-cleanup.ts";
+import { TestClock } from "./test-clock.ts";
+import { LONGER, holdWork } from "./wait.ts";
 
 const MIN = 60_000;
 
-/** A clock that moves only when told; its timers fire in order as it passes them (as in schedules.test.ts). */
-class TestClock implements Clock {
-  t = Date.now();
-  private timers: { at: number; fn: () => void }[] = [];
-  now() { return this.t; }
-  setTimeout(fn: () => void, ms: number) { const h = { at: this.t + ms, fn }; this.timers.push(h); return h; }
-  clearTimeout(h: unknown) { this.timers = this.timers.filter((x) => x !== h); }
-  advance(ms: number) {
-    const end = this.t + ms;
-    for (;;) {
-      const next = this.timers.filter((x) => x.at <= end).sort((a, b) => a.at - b.at)[0];
-      if (!next) break;
-      this.timers = this.timers.filter((x) => x !== next);
-      this.t = next.at;
-      next.fn();
-    }
-    this.t = end;
-  }
-}
-
-/** A queue: its steps' fake behaviours; `own`: in a worktree of its own (a folder), else the project's checkout. */
-type Spec = string[] | { steps: string[]; own?: boolean; level?: 1 | 2 | 3 };
-
-/**
- * Projects sharing one coordinator, each with its engine, under one NEXUS_HOME whose global limit is `limit` (as the
- * server's coordinator, it reads it from the global settings).
- */
-function world(opts: { limit?: number; clock?: Clock } = {}) {
-  const base = mkdtempSync(join(tmpdir(), "nexus-coord-"));
-  process.env.NEXUS_HOME = join(base, "home");
-  process.env.FAKE_LOG = join(base, "fake.log");
-  updateGlobalSettings({ defaults: { max_running: opts.limit ?? 2 } });
-  const coordinator = new Coordinator();
-  const ticks: (() => void)[] = [];
-  const engines: Engine[] = [];
-
-  /** `own`: the project's own limit on its queues running at once (else it follows the global one). */
-  const add = (id: string, queues: Record<string, Spec>, own?: number) => {
-    const root = join(base, id);
-    mkdirSync(root, { recursive: true });
-    const store = ProjectStore.init(root, { id, name: `Project ${id}`, root, orchestrator: { notify: false } });
-    if (own !== undefined) updateSettings(store, { defaults: { max_running: own } });
-    for (const [qid, spec] of Object.entries(queues)) {
-      const s = Array.isArray(spec) ? { steps: spec } : spec;
-      const steps: StepDef[] = s.steps.map((b, i) => ({ id: `${qid}${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${b}`, acceptance: [] }));
-      const worktree = s.own ? join(base, `${id}-${qid}`) : undefined;
-      if (worktree) mkdirSync(worktree, { recursive: true });
-      store.writeQueue({
-        protocol: 1, id: qid, title: `Queue ${qid}`, revision: 1, status: "proposed", stop_conditions: [], checks: [], steps,
-        approvals: [], withdrawals: [], history: [], ...(worktree ? { worktree } : {}), ...(s.level ? { review_level: s.level } : {}),
-      });
-      approveQueue(store, qid);
-    }
-    let engine: Engine | undefined;
-    // Stands in for the server's file watcher.
-    const tick = () => { routeAnswers(store); acceptReviews(store); engine?.onChange(loadProjectState(store)); };
-    engine = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100, coordinator, clock: opts.clock });
-    ticks.push(tick);
-    engines.push(engine);
-    const queue = (q: string) => loadProjectState(store).queues.find((x) => x.id === q)!;
-    return { store, engine, queue };
-  };
-
-  const timer = setInterval(() => { for (const t of ticks) t(); }, 150);
-  const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms);
-  const stop = () => { clearInterval(timer); for (const e of engines) e.shutdown(); };
-  // Every project's engine looks at its files once, synchronously: what did not start then never would by itself.
-  const tick = () => { for (const t of ticks) t(); };
-  return { coordinator, add, until, tick, stop };
-}
-
-/** Marks a queue's steps done as an external worker would, with no engine involved, and accepted. */
-function doneByHand(store: ProjectStore, queue: string, steps: string[]): void {
-  const session = newId();
-  store.writeSession({ protocol: 1, id: session, project: store.readProject().id, role: "worker", runtime: "external", cwd: ".", launched_by: "external", created_at: new Date().toISOString() });
-  for (const step of steps) for (const type of ["step.started", "step.done"] as const) {
-    store.appendEvent({ v: 1, id: newId(), at: new Date().toISOString(), session, type, queue, step, ...(type === "step.done" ? { summary: "by hand" } : {}) } as Event);
-  }
-  acceptReviews(store);
-}
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const going = (state: string | undefined) => state === "running" || state === "pausing";
 
 test("two queues chained after the same queue in the project's checkout run one after the other, in plan order", async () => {
   const work = holdWork();
@@ -176,6 +86,31 @@ test("a direct start, a resume and a continue in a checkout another queue holds 
   } finally { w.stop(); work.done(); }
 });
 
+test("a resume while the worker's cleanup runs is refused at once when another queue holds the checkout, not halted later (queue LH, finding 6)", async () => {
+  const work = holdWork();
+  const cleanups = gatedCleanup();
+  const w = world({ spawn: cleanups.spawn });
+  const p = w.add("p", { A: ["slow"], H: ["slow"] });
+  try {
+    // H's run halts during its worker's turn (as when the checks Nexus runs fail meanwhile) and holds the checkout no
+    // more. The worker's cleanup after that turn is held, so a Resume now is deferred until it ends.
+    cleanups.hold();
+    p.engine.start("H");
+    await w.until("H at work", () => p.queue("H").steps[0]!.status === "running", LONGER.step);
+    p.engine["halt"]("H", "halted during the turn");
+    work.release("H1");
+    await w.until("H's worker's cleanup running", () => cleanups.held() > 0, LONGER.step);
+    assert.equal(p.queue("H").run?.state, "halted");
+    p.engine.start("A");
+    await w.until("A at work", () => p.queue("A").steps[0]!.status === "running", LONGER.step);
+    assert.throws(() => p.engine.resume("H"), /queue H cannot go on: its checkout is in use, queue A runs there/);
+    const reason = p.queue("H").run?.reason;
+    cleanups.release();
+    await sleep(500);
+    assert.deepEqual([p.queue("H").run?.state, p.queue("H").run?.reason], ["halted", reason], "the halt as it was, not one with the refusal");
+  } finally { cleanups.release(); w.stop(); work.done(); }
+});
+
 test("a third queue over the limit waits and starts when one ends, also across two projects; a direct one is refused", async () => {
   const work = holdWork();
   const w = world({ limit: 2 });
@@ -193,7 +128,7 @@ test("a third queue over the limit waits and starts when one ends, also across t
     assert.equal(r.queue("Z").start!.waiting, "queue Z0 is done; waits: 2 queues run, the limit is 2");
     assert.equal(r.queue("Z").start!.held!.kind, "limit");
     work.release("A1"); // B stays at work
-    await w.until("A to finish", () => p.queue("A").run?.state === "finished", LONGER.run);
+    await w.until("A to finish", () => p.queue("A").run?.state === "finished", LONGER.processes);
     await w.until("Z to start once A ended", () => !!r.queue("Z").run, LONGER.step);
     assert.ok(going(p.queue("B").run?.state), "B was still at work: Z took A's place");
     await w.until("Z to finish", () => r.queue("Z").run?.state === "finished", LONGER.run);
@@ -257,7 +192,7 @@ test("a project's own limit holds beside the global one: one of its queues at a 
     assert.equal(p.engine.plan("B", { after: ["B0"], by: "user" }), "queue B0 is done; queue B waits: 1 queue of Project p runs, its limit is 1; it starts by itself then");
     assert.equal(p.queue("B").start!.held!.kind, "limit");
     work.release("A1"); // Z stays at work
-    await w.until("B to finish once A ended", () => p.queue("B").run?.state === "finished", LONGER.run);
+    await w.until("B to finish once A ended", () => p.queue("B").run?.state === "finished", LONGER.processes);
     assert.ok(going(r.queue("Z").run?.state), "Z still at work: B waited for its project's limit, not the global one");
   } finally { w.stop(); work.done(); }
 });
@@ -274,7 +209,7 @@ test("the global limit holds whatever the projects' own limits are", async () =>
     assert.throws(() => p.engine.start("C"), /^Error: queue C cannot start: 2 queues run, the limit is 2$/, "its own limit of 5 does not lift the global one");
     assert.throws(() => r.engine.start("Z"), /queue Z cannot start: 2 queues run, the limit is 2/);
     work.release();
-    await w.until("A and B to finish", () => p.queue("A").run?.state === "finished" && p.queue("B").run?.state === "finished", LONGER.run);
+    await w.until("A and B to finish", () => p.queue("A").run?.state === "finished" && p.queue("B").run?.state === "finished", LONGER.processes);
     r.engine.start("Z");
     await w.until("Z to finish", () => r.queue("Z").run?.state === "finished", LONGER.run);
   } finally { w.stop(); work.done(); }

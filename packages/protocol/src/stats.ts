@@ -1,4 +1,4 @@
-// Statistics (decided 2026-11-14, docs/ideas/statistics.md and tags.md; PROTOCOL.md, "Statistics"): how steps went, by
+// Statistics (decided 2026-11-14, docs/ideas/statistics.md and tags.md; docs/protocol/stats.md, "Statistics"): how steps went, by
 // model, effort or a tag facet, for the orchestrator choosing a model and effort and for the user watching the use of
 // the subscription. Raw numbers would mislead (hard work goes to strong models), so beside the counts: the share
 // accepted in the first round, the average rounds, stops and failures, the median working time, and the estimated use
@@ -11,6 +11,7 @@ import { PROJECT_ACTIVITY, type StepTags } from "./tags.ts";
 import { usageEstimates } from "./usage-estimate.ts";
 import { metricDef, type MetricValue } from "./metrics.ts";
 import { formatSeconds } from "./times.ts";
+import { compareIds } from "./ids.ts";
 import { windowKind } from "./digest.ts";
 
 /** What a report groups by: the step's model or effort (from its worker turns), or one of its tag facets. */
@@ -40,6 +41,8 @@ export interface StepStat {
   /** Accepted (done); accepted in its first round; decided (accepted, rejected or failed). */
   accepted: boolean; first: boolean; decided: boolean;
   stops: number; failures: number;
+  /** Skipped with a mark: its own work is done and went on elsewhere (docs/design/continued.md); still not accepted. */
+  continued: boolean;
   /** The sum of its worker turns' durations (its own work, never the wait for a review); none without turns. */
   work_ms?: number;
   turns: number;
@@ -47,6 +50,14 @@ export interface StepStat {
   fallback: boolean;
   /** Estimated use, by window (`<runtime>:<window>`, in utilization, 0 to 1), summed over its worker turns. */
   usage: Record<string, number>;
+  /**
+   * How its session came to it (queue CT): `switch`, it opened in a fresh session after context care's switch (run.yaml
+   * `switches`, `why: context`); `same`, in the session that ran the queue's step before it; `other`, anything else
+   * (a run's first step, a runtime switch, the closing refactoring step, a session chosen at a start).
+   */
+  session_from: "switch" | "same" | "other";
+  /** Its send-backs (by anyone) and the check-fix rounds after its failed checks. */
+  send_backs: number; check_fix_rounds: number;
   /** Its worker turns without an estimate in a window they name (a reset, a reading missing, unknown tokens). */
   usage_missing: number;
 }
@@ -86,6 +97,11 @@ export function stepStats(projects: readonly Pick<ProjectState, "project" | "que
       if (gap) missing++;
     }
     const durations = own.map((x) => x.t.duration_ms).filter((d): d is number => d !== undefined);
+    const starts = (s: StepView) => s.timeline.filter((e) => e.type === "step.started");
+    const opened = starts(st)[0]?.session;
+    const k = q.steps.indexOf(st);
+    const before = q.steps.slice(0, k).reverse().map((s) => starts(s).at(-1)?.session).find((x) => !!x);
+    const switched = !!q.run?.switches?.some((x) => x.step === st.id && (x.why ?? "context") === "context");
     out.push({
       project: p.project.id, queue: q.id, step: st.id, at: outcomes.at(-1)!.at, status: st.status,
       model: last?.model, effort: last?.effort, runtime: last?.runtime,
@@ -93,8 +109,12 @@ export function stepStats(projects: readonly Pick<ProjectState, "project" | "que
       rounds, accepted, first: accepted && rounds <= 1, decided: accepted || st.status === "rejected" || st.status === "failed",
       stops: st.timeline.filter((e) => e.type === "queue.stop").length,
       failures: st.timeline.filter((e) => e.type === "step.failed").length,
+      continued: !!st.continued,
       work_ms: durations.length ? durations.reduce((a, b) => a + b, 0) : undefined,
       turns: own.length, fallback: own.some((x) => !!x.t.fallback), usage, usage_missing: missing,
+      session_from: switched ? "switch" : opened && opened === before ? "same" : "other",
+      send_backs: st.sent_back.length,
+      check_fix_rounds: (q.check_runs?.steps[st.id]?.sets ?? []).filter((x) => x.state === "failed").length,
     });
   }
   return out;
@@ -120,6 +140,8 @@ export interface StatGroup {
   /** The average rounds of the steps reported done at least once. */
   avg_rounds?: number;
   stops: number; failures: number;
+  /** Of its steps that stopped, how many were skipped as continued elsewhere: a stop by design, not a step lost. */
+  continued: number;
   /** Working time of its accepted steps: the median and the quartiles (by size, how the planned size came out). */
   median_ms?: number; p25_ms?: number; p75_ms?: number;
   /** Estimated use by window, summed; an estimate, and the turns without one. */
@@ -210,6 +232,7 @@ function groupOf(key: string, xs: readonly StepStat[], by: StatDimension, across
     first_rate: decided ? first / decided : undefined,
     avg_rounds: done.length ? done.reduce((a, s) => a + s.rounds, 0) / done.length : undefined,
     stops: xs.reduce((a, s) => a + s.stops, 0), failures: xs.reduce((a, s) => a + s.failures, 0),
+    continued: xs.filter((s) => s.continued && s.stops > 0).length,
     median_ms: quantile(times, 0.5), p25_ms: quantile(times, 0.25), p75_ms: quantile(times, 0.75),
     usage, usage_steps: usageSteps, usage_missing: xs.reduce((a, s) => a + s.usage_missing, 0), fallback: xs.filter((s) => s.fallback).length,
   };
@@ -223,6 +246,63 @@ function groupOf(key: string, xs: readonly StepStat[], by: StatDimension, across
     };
   }
   return g;
+}
+
+/** The quality signals of one group of steps (SwitchReport). */
+interface SwitchGroup {
+  steps: number;
+  /** Fewer than FEW_STEPS steps: read with care. */
+  few: boolean;
+  decided: number; first_accepted: number;
+  /** first_accepted / decided; absent with nothing decided. */
+  first_rate?: number;
+  /** Steps sent back at least once; their share of the steps; all send-backs. */
+  sent_back: number; send_back_rate?: number; send_backs: number;
+  /** Check-fix rounds, all, and per step. */
+  check_fix_rounds: number; check_fix_avg?: number;
+}
+
+/**
+ * Whether context care's switches cost quality (queue CT): the steps (of `project`, or all; with an outcome at or after
+ * `since`) that opened in a fresh session after a context switch, against those that went on in the session of the step
+ * before; the other steps (a run's first, a runtime switch…) apart, counted in neither.
+ */
+export interface SwitchReport { project?: string; since?: string; switched: SwitchGroup; same: SwitchGroup; other: number }
+
+export function switchReport(all: readonly StepStat[], o: { project?: string; since?: string } = {}): SwitchReport {
+  const xs = all.filter((s) => (!o.project || s.project === o.project) && (!o.since || s.at >= o.since));
+  const group = (g: readonly StepStat[]): SwitchGroup => {
+    const decided = g.filter((s) => s.decided).length, first = g.filter((s) => s.first).length;
+    const sent = g.filter((s) => s.send_backs > 0).length, fixes = g.reduce((a, s) => a + s.check_fix_rounds, 0);
+    return {
+      steps: g.length, few: g.length < FEW_STEPS, decided, first_accepted: first, first_rate: decided ? first / decided : undefined,
+      sent_back: sent, send_back_rate: g.length ? sent / g.length : undefined, send_backs: g.reduce((a, s) => a + s.send_backs, 0),
+      check_fix_rounds: fixes, check_fix_avg: g.length ? fixes / g.length : undefined,
+    };
+  };
+  return {
+    project: o.project, since: o.since,
+    switched: group(xs.filter((s) => s.session_from === "switch")), same: group(xs.filter((s) => s.session_from === "same")),
+    other: xs.filter((s) => s.session_from === "other").length,
+  };
+}
+
+/** The comparison as `nexus stats --switches` prints it. */
+export function switchReportText(r: SwitchReport): string {
+  const line = (name: string, g: SwitchGroup) => {
+    if (!g.steps) return `- ${name}: no step`;
+    const parts = [`${plural(g.steps, "step")}${g.few ? " (few data)" : ""}`];
+    parts.push(g.first_rate !== undefined ? `accepted in the first round ${g.first_accepted} of ${g.decided} (${pct(g.first_rate)})` : "none decided yet");
+    parts.push(`sent back ${g.sent_back} of ${g.steps} (${pct(g.send_back_rate!)}; ${plural(g.send_backs, "send-back")})`);
+    parts.push(`${plural(g.check_fix_rounds, "check-fix round")} (${Math.round(g.check_fix_avg! * 100) / 100} per step)`);
+    return `- ${name}: ${parts.join("; ")}`;
+  };
+  return [
+    `Steps after a context switch and without one (${r.project ? `project ${r.project}` : "all projects"}${r.since ? `, since ${r.since}` : ""})`,
+    line("after a context switch (a fresh session)", r.switched),
+    line("without a switch (the session of the step before)", r.same),
+    `Not compared: ${plural(r.other, "step")} that opened a session otherwise (a run's first step, a runtime switch, the closing refactoring step). A switch is read from the queue's current run record. Groups of fewer than 5 steps are few data.`,
+  ].join("\n");
 }
 
 /** One usage window's course, day by day (UsageDays). */
@@ -343,7 +423,7 @@ export interface ProjectMetrics { metrics: MetricDef[]; values: MetricPoint[] }
 
 export function projectMetrics(state: Pick<ProjectState, "metrics" | "queues">): ProjectMetrics {
   const values = state.queues.flatMap((q) => q.steps.flatMap((st) => st.metrics.map((m) => ({ ...m, queue: q.id, step: st.id }))))
-    .sort((a, b) => a.at.localeCompare(b.at) || a.event.localeCompare(b.event));
+    .sort((a, b) => a.at.localeCompare(b.at) || compareIds(a.event, b.event));
   const names = [...state.metrics.metrics.map((m) => m.name), ...values.map((v) => v.name)];
   const metrics = [...new Set(names)].map((n) => metricDef(state.metrics, n)).filter((d): d is MetricDef => !!d);
   return { metrics, values };

@@ -1,4 +1,4 @@
-// ESLint for Nexus: correctness rules only, no style rules (docs/DESIGN.md, "Static analysis").
+// ESLint for Nexus: correctness rules only, no style rules (docs/design/checks.md, "Static analysis").
 // Every rule here catches a bug a test may miss; formatting and taste are not checked.
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
@@ -13,6 +13,9 @@ const typed = [
   "apps/web/src/**/*.{ts,tsx}",
   "apps/web/test/**/*.{ts,tsx}",
 ];
+
+// Names that hold an id: `id`, `event` (an event's id), `queue`, `step`, `dir`, and anything ending in `Id`.
+const ID_NAMES = "/^(id|ids|event|queue|step|dir)$|Id$/";
 
 export default tseslint.config(
   { ignores: ["**/node_modules/**", "**/dist/**", "tmp/**", ".nexus/**"] },
@@ -39,6 +42,17 @@ export default tseslint.config(
       "@typescript-eslint/switch-exhaustiveness-check": [
         "error",
         { considerDefaultExhaustiveForUnions: false, requireDefaultForNonUnion: false },
+      ],
+      // An id (a ULID, a queue or step id, a path used as a key) sorted by the locale: in hu-HU "…ZS" sorts after
+      // "…ZT", so two events of one millisecond can swap. compareIds (packages/protocol/src/ids.ts) compares by code
+      // unit. The rule sees the names below on either side of the call.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: `CallExpression[callee.property.name='localeCompare']:matches(${["callee.object", "arguments.0"]
+            .flatMap((side) => [`[${side}.property.name=${ID_NAMES}]`, `[${side}.name=${ID_NAMES}]`]).join(", ")})`,
+          message: "Compare ids with compareIds (@nexus/protocol), not localeCompare: the locale reorders them.",
+        },
       ],
     },
   },

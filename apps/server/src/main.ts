@@ -1,43 +1,49 @@
 // The Nexus server: reads every registered project's .nexus/ directory, serves the dashboard and its API,
 // and tells connected dashboards when a project's files change. It writes nothing in phase 1.
-import { createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";
+import { appendFileSync, createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
-import { bodyLimit } from "hono/body-limit";
 import { serve, type HttpBindings } from "@hono/node-server";
 import { WebSocketServer, type WebSocket } from "ws";
-import chokidar, { type FSWatcher } from "chokidar";
 import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, closingToSkip, closingToSkipAtApproval, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
-  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readRegistry, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
+  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readRegistry, readCapacity, readUsage, readTurns, readServerSpeed, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
-  STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
-  SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, writeCount, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
+  STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, reviewStats, type ReviewStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
+  SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, queueWorkedOn, stepsWorkedOn, ProjectModel, FileCache, useHomeReader, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
   projectIdeas, ideaMatches, ideaLinks, changeIdeaLinks, decideIdeaMatches, ideaStatuses, changeIdeaStatus, reconcileIdeaStatuses, readNotes, type IdeasResponse, type IdeaMatchesResponse,
-  previewIdeaHandoff, sendIdeaHandoff, retryIdeaHandoff,
+  previewIdeaHandoff, sendIdeaHandoff, retryIdeaHandoff, shownState,
 } from "@nexus/protocol";
-import { newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
+import { digestInput, newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Engine } from "./engine.ts";
 import { Coordinator } from "./coordinator.ts";
+import { Capacity } from "./capacity.ts";
+import { readSnapshots } from "./snapshots.ts";
+import { agentOwning, lowerOwnedProcesses } from "./worker-process.ts";
 import { branchState, leftBehind, stepCommits } from "./gitinfo.ts";
 import { cleanUp, mergeBack } from "./mergeback.ts";
 import { Merger } from "./merger.ts";
 import { fixProjectRules, projectRules } from "./rulesfix.ts";
 import { RemovalBlocked, checkRemoval, deleteNexusDir, removalView, stopProject, unregister } from "./removal.ts";
-import { decideStoppedWork, discardRecorded } from "./stopwork.ts";
+import { decideStoppedWork, discardRecorded, readStoppedWork } from "./stopwork.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { Conversations } from "./conversations.ts";
 import { listModels } from "./models.ts";
 import { readDeployChanges, readDeploySettings, writeDeploySettings } from "./deploy.ts";
+import { crashNotice, dismissCrash, readCrash, recordCrash } from "./crash.ts";
 import { Standby, refuseHandoverDir, smokeCheck, takeHandoverEnv } from "./handover.ts";
 import { Lifecycle, ROOT, projectPart, version } from "./lifecycle.ts";
 import { DeployPlanner, PlanError, planTime } from "./deploy-plan.ts";
-import { MAX_UPLOAD_BODY, UploadError, saveUpload } from "./uploads.ts";
+import { UploadError, readLimited, saveUpload } from "./uploads.ts";
 import { COMMIT_HASH, commitDetail, fileResponse, locate } from "./files.ts";
-import { chatRange, pin, searchLines } from "./chats.ts";
+import { chatRange, chatView, pin, searchLines } from "./chats.ts";
+import { LiveStream, type LiveSources } from "./live.ts";
+import { SEQ_HEADER, type LogKind } from "@nexus/protocol/live";
 import { searchProject } from "./search.ts";
+import { perf } from "./perf.ts";
+import { watchHome, watchProject as watchProjectFiles, type ProjectWatch } from "./watchers.ts";
 import { dashboardFiles, isPublicFile } from "./web-static.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
@@ -52,8 +58,10 @@ const HANDOVER = takeHandoverEnv();
 // NEXUS_LOG: the server writes its own log (1: <NEXUS_HOME>/server.log, or a path). Node opens it shared, so a
 // successor after an update can append while its predecessor still holds it (a shell's `>>` would lock it).
 let log: WriteStream | undefined;
+let logFile: string | undefined;
 if (process.env.NEXUS_LOG) {
   const file = process.env.NEXUS_LOG === "1" ? join(nexusHome(), "server.log") : process.env.NEXUS_LOG;
+  logFile = file;
   mkdirSync(dirname(file), { recursive: true });
   log = createWriteStream(file, { flags: "a" });
   const logTo = log;
@@ -61,9 +69,24 @@ if (process.env.NEXUS_LOG) {
     const write = stream.write.bind(stream) as (chunk: unknown, ...rest: unknown[]) => boolean;
     stream.write = ((chunk: unknown, ...rest: unknown[]) => { logTo.write(chunk as string); return write(chunk, ...rest); }) as typeof stream.write;
   }
-  process.on("uncaughtException", (err) => { logTo.write(`${new Date().toISOString()} uncaught: ${err.stack ?? err}\n`); process.exit(1); });
   console.log(`---- ${new Date().toISOString()} pid ${process.pid}`);
 }
+// An uncaught exception ends the server, as it always did: its stack goes to the log (or to stderr without one) and the
+// process exits with 1. It is also recorded in <NEXUS_HOME>/crash.json (src/crash.ts), which the next server shows on
+// the dashboard and tells every project's orchestrator.
+process.on("uncaughtException", (err) => {
+  const line = `${new Date().toISOString()} uncaught: ${err.stack ?? err}\n`;
+  // Written at once: the stream's write would still be pending when the process exits.
+  try { if (logFile) appendFileSync(logFile, line); else process.stderr.write(line); } catch { /* the record below still tells */ }
+  recordCrash(err);
+  process.exit(1);
+});
+// A rejected promise nobody handled is logged, and the server goes on (queue LF, F1): such a promise is a background
+// chain (a check, a timer's work) whose failure belongs to one run, not a reason to end every worker with the server.
+// The code handles its chains' failures where they belong (a halted run); this is the backstop that keeps them local.
+process.on("unhandledRejection", (reason) => {
+  console.error(`${new Date().toISOString()} unhandled rejection (the server goes on): ${reason instanceof Error ? reason.stack : String(reason)}`);
+});
 
 // A backstop: a hand-over folder that is not this NEXUS_HOME's is not ours. Refuse it before anything is written or
 // started, and exit non-zero: a real predecessor then sees a failure and rolls back.
@@ -86,34 +109,54 @@ let standingBy = !!HANDOVER;
 
 // ---------------------------------------------------------------- projects
 
-interface Entry { id: string; root: string; store: ProjectStore; engine: Engine; orchestrator: Orchestrator; conversations: Conversations; merger: Merger; state?: ProjectState; stateAt?: number; error?: string }
+/**
+ * A project loaded in this server. `model`: its files kept in memory (docs/design/model.md). `store` is the model's:
+ * every reader in this server (the requests, the user's actions, the engine, the orchestrator, the merger and the rest)
+ * reads through it, and the state it derives (loadProjectState over it) is the model's, once per change.
+ */
+interface Entry { id: string; root: string; store: ProjectStore; model: ProjectModel; engine: Engine; orchestrator: Orchestrator; conversations: Conversations; merger: Merger; error?: string }
 const projects = new Map<string, Entry>();
 /** Over every project's engine: one queue per checkout, and the limit on queues running at once (src/coordinator.ts). */
 const coordinator = new Coordinator();
+// The workers' and checks' processes run below normal priority: the server and the user's programs go first (queue SV3).
+lowerOwnedProcesses(true);
+/**
+ * One heavy operation on the workstation at a time, across projects (src/capacity.ts). Made when this server becomes
+ * active, which writes <NEXUS_HOME>/capacity.yaml anew: the grants of a server before it ended with its processes.
+ */
+let capacity: Capacity | undefined;
 
 function refreshRegistry(): void {
   if (!active) return;
-  // Global settings (PROTOCOL.md): the file exists from the first start on, with the built-in defaults; each project's
+  capacity ??= new Capacity({ onChange: () => broadcast({ type: "server" }) });
+  // Global settings (docs/protocol/settings.md, "Global settings"): the file exists from the first start on, with the built-in defaults; each project's
   // project.yaml from before them is migrated once, before anything reads it (effective values unchanged).
   ensureGlobalSettings();
   const reg = readRegistry();
   for (const p of reg.projects) {
     if (projects.has(p.id)) continue;
-    const store = ProjectStore.forRoot(p.root);
-    try { if (store.migrateProject()) console.log(`settings of project ${p.id}: migrated to follow the global settings where equal`); }
+    const files = ProjectStore.forRoot(p.root);
+    try { if (files.migrateProject()) console.log(`settings of project ${p.id}: migrated to follow the global settings where equal`); }
     catch (err) { console.error(`settings of project ${p.id}: not migrated: ${(err as Error).message}`); }
-    // Steps done before review levels keep the meaning they had (PROTOCOL.md, "Before review levels").
-    try { if (store.markReviewLevels()) console.log(`project ${p.id}: steps done from now on are reviewed by level`); }
+    // Steps done before review levels keep the meaning they had (docs/protocol/review.md, "Before review levels").
+    try { if (files.markReviewLevels()) console.log(`project ${p.id}: steps done from now on are reviewed by level`); }
     catch (err) { console.error(`project ${p.id}: review levels not marked: ${(err as Error).message}`); }
     // A deploy planned after a step or queue of this project holds the run at that step's end (src/deploy-plan.ts); so
     // does Nexus merging a worktree queue back into the run's checkout (src/merger.ts), until its fast-forward.
     let merger: Merger | undefined;
-    const engine = new Engine(store, () => changed(p.id), { coordinator, boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) || (merger?.atBoundary(q, step, state) ?? false) });
+    // The project's files read once, here, and kept (docs/design/model.md): the engine's recovery reads its state, and
+    // everything after reads through its store.
+    const model = new ProjectModel(files.dir);
+    const store = model.store;
+    // Measured: making the engine recovers the project's runs after a restart (queue SV1 found it reading the whole
+    // state once per queue).
+    const engine = perf.measure(`engine start ${p.id}`, () => new Engine(store, () => changed(p.id), { coordinator, capacity, snapshots: readSnapshots, boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) || (merger?.atBoundary(q, step, state) ?? false) }));
     merger = new Merger(store, { start: (q) => void engine.start(q), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining || lifecycle.busy, poke: () => changed(p.id) });
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).
-    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), plan: () => planner.notices(), changes: readDeployChanges, push: ({ kind, ...n }) => void push(n, { kind }) });
-    projects.set(p.id, { id: p.id, root: p.root, store, engine, orchestrator, merger, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
+    // Its routine reviews go to short-lived review helpers (src/review-helper.ts) while review_helper.enabled is on.
+    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), plan: () => planner.notices(), changes: readDeployChanges, crash: readCrash, push: ({ kind, ...n }) => void push(n, { kind }) }, { helpers: {} });
+    projects.set(p.id, { id: p.id, root: p.root, store, model, engine, orchestrator, merger, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
     watchProject(p.id, store.dir);
   }
   // A project taken off the registry (by the server's removal, or by hand): its agents and timers stop, its watcher
@@ -135,30 +178,81 @@ function dropProject(e: Entry): { parts: Parameters<typeof stopProject>[0]; clos
   watchers.delete(e.id);
   watchedNotes.delete(e.id);
   watch.forget(e.id);
+  e.model.close();
+  live.forget(e.id);
   return { parts: [e.engine, e.orchestrator, e.conversations, e.merger], closed: (w?.close() ?? Promise.resolve()).catch((err: Error) => console.error(`watch ${e.id}: not closed: ${err.message}`)) };
 }
 
 /**
- * The project's state, one snapshot passed on until this process writes (writeCount) or a change from outside clears it
- * (changed()): a rebuild reads the whole history, about 120 ms on a project of 70 queues (DESIGN.md, "The cost of
- * rebuilding state").
+ * The project's state, from its model (docs/design/model.md): derived again, from memory, only after a file of it
+ * changed (this process's write, or the watcher's report) or changed() was called; otherwise the same snapshot.
  */
 function stateOf(e: Entry): ProjectState | undefined {
-  if (!e.error && (!e.state || e.stateAt !== writeCount())) {
-    const at = writeCount();
-    try { e.state = loadProjectState(e.store); e.stateAt = at; } catch (err) { e.error = (err as Error).message; }
-  }
-  return e.state;
+  if (e.error) return undefined;
+  try { return e.model.stale() ? perf.measure(`state ${e.id}`, () => e.model.current()) : e.model.current(); } catch (err) { e.error = (err as Error).message; return undefined; }
 }
 
 // ---------------------------------------------------------------- change notification
 
 const sockets = new Set<WebSocket>();
-/** Tells every open dashboard what changed: a project, the project list, or the server's own state. */
-function broadcast(m: { type: "changed"; project: string } | { type: "projects" | "server" }): void {
-  const msg = JSON.stringify(m);
-  for (const s of sockets) if (s.readyState === s.OPEN) s.send(msg);
+/** A socket whose unsent data passes this is closed: the page reconnects and reads in full (docs/design/live.md). */
+const SOCKET_BEHIND = 8 * 1024 * 1024;
+function sendAll(msg: string): void {
+  for (const s of sockets) {
+    if (s.readyState !== s.OPEN) continue;
+    if (s.bufferedAmount > SOCKET_BEHIND) { s.terminate(); sockets.delete(s); continue; }
+    s.send(msg);
+  }
 }
+/** Tells every open dashboard that the project list or the server's own state changed (a project's changes: `live`). */
+function broadcast(m: { type: "projects" | "server" }): void { sendAll(JSON.stringify(m)); }
+
+/** A project's line in the project list (GET /api/projects, and the live stream's `summary`). */
+function summaryOf(e: Entry, s: ProjectState | undefined): ProjectSummary {
+  const count = (st: string) => s?.queues.filter((q) => q.status === st).length ?? 0;
+  // Running: at work now; a queue whose run the user stopped is not (queue EF, queueWorkedOn).
+  const running = s?.queues.filter(queueWorkedOn).length ?? 0;
+  return {
+    id: e.id, root: e.root, name: s?.project.name ?? e.id, error: e.error,
+    running, waiting: count("waiting"), stopped: count("stopped"),
+    open_questions: s?.questions.filter(isOpenQuestion).length ?? 0,
+    attention: s?.attention ?? [],
+  };
+}
+
+/** The chat agents' heads the stream compares: the orchestrator's always, a conversation's when it was touched. */
+const heads: LiveSources["heads"] = (id, sessions) => {
+  const e = projects.get(id);
+  if (!e) return [];
+  const orch = e.orchestrator.head();
+  const out: ReturnType<LiveSources["heads"]> = [{ session: orch.session?.id ?? "", orchestrator: true, head: orch }];
+  for (const sid of sessions) {
+    const item = e.conversations.item(sid);
+    if (item) out.push({ session: sid, head: e.conversations.head(sid), conversation: item });
+  }
+  return out;
+};
+
+/**
+ * The changes themselves, numbered per project (src/live.ts): published at the end of a change's decisions, at a log's
+ * 150 ms, before a project's read is answered and after a write, before it answers.
+ */
+const live = new LiveStream({
+  send: sendAll,
+  listening: () => sockets.size > 0,
+  sources: {
+    // The dashboard's state: a closed queue that waits for nothing as its summary (queue AQ; GET …/queues/:queue below).
+    state: (id) => { const e = projects.get(id); const s = e && stateOf(e); return s && shownState(s); },
+    summary: (id, s) => summaryOf(projects.get(id)!, s),
+    log: (id, session, kind) => {
+      const st = projects.get(id)!.store;
+      return kind === "activity" ? st.readActivity(session) : kind === "chat" ? st.readChat(session) : st.readRefusals(session);
+    },
+    pins: (id, session) => chatView(projects.get(id)!.store, session, 1).pins,
+    heads,
+  },
+});
+const publish = (id: string) => { if (!projects.has(id)) return; try { live.publish(id); } catch (err) { console.error(`live ${id}: ${(err as Error).message}`); } };
 const pending = new Map<string, NodeJS.Timeout>();
 
 function changed(id: string): void {
@@ -169,7 +263,7 @@ function changed(id: string): void {
     if (!active) return;
     const e = projects.get(id);
     if (e) {
-      e.state = undefined; e.error = undefined;
+      e.model.changed(); e.error = undefined;
       // The decisions on a change, in order. Each gets the state as it stands: one snapshot, rebuilt only after a write
       // of the decisions before it (stateOf; a change from another process comes back here through the watcher). One
       // that fails is logged and the next goes on.
@@ -189,20 +283,20 @@ function changed(id: string): void {
       for (const [what, decide] of decisions) {
         const s = stateOf(e);
         if (!s) break;
-        try { decide(s); } catch (err) { console.error(`${what} in ${id}: ${(err as Error).message}`); }
+        try { perf.measure(`${what} (${id})`, () => decide(s)); } catch (err) { console.error(`${what} in ${id}: ${(err as Error).message}`); }
       }
       const s = stateOf(e);
       if (s) watch.check({ id, name: s.project.name }, s.attention);
     }
-    broadcast({ type: "changed", project: id });
+    publish(id);
   }, 150));
 }
 
-/** Each project's watcher of its .nexus folder, by project id. */
-const watchers = new Map<string, FSWatcher>();
+/** Each project's watchers of its .nexus folder (watchers.ts; Node's made again after an error), by project id. */
+const watchers = new Map<string, ProjectWatch>();
 const watchedNotes = new Map<string, string>();
 function syncNotesWatcher(id: string, state: ProjectState): void {
-  const watcher = watchers.get(id);
+  const watcher = watchers.get(id)?.tree;
   if (!watcher) return;
   const dir = state.project.conversations.notes_dir;
   const path = dir ? join(state.project.root, dir) : undefined;
@@ -213,18 +307,44 @@ function syncNotesWatcher(id: string, state: ProjectState): void {
   if (old) { void watcher.unwatch(old); watchedNotes.delete(id); }
   if (path) { watcher.add(path); watchedNotes.set(id, path); }
 }
+/**
+ * A line of a session's log only (activity, chat, refusals, pins: docs/design/model.md): no state changes and no
+ * decision runs; the dashboards ask again for that project's logs (a `log` message), once per 150 ms per session.
+ */
+const logPending = new Map<string, NodeJS.Timeout>();
+const LOG_KINDS: Record<string, LogKind> = { "activity.jsonl": "activity", "chat.jsonl": "chat", "refusals.jsonl": "refusals", "pins.json": "pins" };
+function logChanged(id: string, path: string): void {
+  if (!active) return;
+  const m = /[\\/]sessions[\\/]([^\\/]+)[\\/]([^\\/]+)$/.exec(path);
+  const kind = m && LOG_KINDS[m[2]!];
+  if (!m || !kind) return;
+  const session = m[1]!;
+  live.logChanged(id, session, kind);
+  const key = `${id}/${session}`;
+  if (logPending.has(key)) return;
+  logPending.set(key, setTimeout(() => { logPending.delete(key); publish(id); }, 150));
+}
 function watchProject(id: string, dir: string): void {
-  watchers.set(id, chokidar
-    // Uploaded pictures change no state: a 10 MB write need not reload the project.
-    .watch(dir, { ignoreInitial: true, followSymlinks: false, ignored: (p) => p.endsWith(".tmp") || p.endsWith(".lock") || /^[\\/]uploads([\\/]|$)/.test(p.slice(dir.length)) })
-    .on("all", () => changed(id))
-    .on("error", (err) => console.error(`watch ${id}: ${(err as Error).message}`)));
+  watchers.set(id, watchProjectFiles(id, dir, { model: () => projects.get(id)?.model, changed: () => changed(id), log: (path) => logChanged(id, path) }));
 }
 
-chokidar.watch(join(nexusHome(), "projects.yaml"), { ignoreInitial: true }).on("all", () => {
+// NEXUS_HOME's files that every project's state, the statistics and the estimates read, kept in memory (model.ts):
+// this server's writes reach the model as they are made, a change by hand through this watcher.
+const homeFiles = new FileCache(nexusHome());
+useHomeReader(homeFiles);
+/** The settings or away mode changed (by hand too): every project's state goes out and its decisions run (queue LH). */
+const homeChanged = () => { for (const e of projects.values()) { e.model.changed(); changed(e.id); } };
+const registryChanged = () => {
   if (!active) return;
   refreshRegistry();
   broadcast({ type: "projects" });
+};
+watchHome(nexusHome(), {
+  touched: (path) => homeFiles.touched(path),
+  settings: homeChanged,
+  registry: registryChanged,
+  // A watcher that failed may have missed a change: NEXUS_HOME's files are read again, and everything looked at again.
+  failed: (err) => { console.error(`watch ${nexusHome()}: ${err.message}; its files are read again`); homeFiles.clear(); homeChanged(); registryChanged(); },
 });
 
 // ---------------------------------------------------------------- files the dashboard may show
@@ -264,6 +384,8 @@ const planner = new DeployPlanner({
 });
 const watch = new AttentionWatch();
 
+// Every request is timed by its route, its synchronous part measured as a span (src/perf.ts).
+app.use("*", perf.middleware);
 // Remote devices sign in once with the access token; this machine needs nothing (src/remote.ts).
 app.use("*", async (c, next) => {
   if (c.req.path === "/login" || isPublicFile(c.req.path) || allowed(c.env.incoming)) return next();
@@ -300,6 +422,23 @@ app.post("/login", async (c) => {
  * to the user alone).
  */
 const CLI_WRITES = new Set(["/api/server/update", "/api/server/cancel", "/api/server/plan", "/api/server/cancel-plan", "/api/server/away"]);
+/** What `nexus server` sends for an orchestrator the user asked (`away` is the user's alone). */
+const ORCHESTRATOR_WRITES = new Set(["/api/server/update", "/api/server/cancel", "/api/server/plan", "/api/server/cancel-plan"]);
+/**
+ * The agents' own processes (queue HG, docs/design/security.md): any program on this machine can send a browser's
+ * headers, so a write (and the read that hands out the access token) is also refused when the connection comes from a
+ * process in an agent's job. Only the orchestrator's job may send the `nexus server` writes above. Off Windows, and
+ * when a job host does not answer, the checks below stay the only guard.
+ */
+app.use("/api/*", async (c, next) => {
+  const read = c.req.method === "GET" || c.req.method === "HEAD";
+  if (read && c.req.path !== "/api/remote") return next();
+  const socket = c.env.incoming.socket;
+  if (socket.remotePort === undefined || socket.localPort === undefined) return next();
+  const agent = await agentOwning(socket.remotePort, socket.localPort);
+  if (agent === undefined || (agent === "orchestrator" && !read && ORCHESTRATOR_WRITES.has(c.req.path))) return next();
+  return c.json({ error: `an agent's process (${agent}) does not do the user's actions; agents use the nexus CLI` }, 403);
+});
 app.use("/api/*", async (c, next) => {
   if (c.req.method === "GET" || c.req.method === "HEAD") return next();
   const origin = c.req.header("origin");
@@ -318,28 +457,32 @@ app.use("/api/projects/:id/*", async (c, next) => {
   const e = projects.get(c.req.param("id"));
   if (!e) return c.json({ error: "unknown project" }, 404);
   c.set("entry", e);
-  return next();
+  // The live stream (docs/protocol/live.md, "Where a reply stands"): a read is answered after what is pending was sent,
+  // and names where the stream stood; a write sends what it changed before it answers, and names where that left it.
+  const read = c.req.method === "GET" || c.req.method === "HEAD";
+  if (read) publish(e.id);
+  const at = live.position(e.id);
+  await next();
+  if (!read) publish(e.id);
+  c.res.headers.set(SEQ_HEADER, read ? at : live.position(e.id));
 });
 
+// Each line names where its project's stream stood (`seq`), the header the epoch: the list applies the later summaries.
 app.get("/api/projects", (c) => {
   refreshRegistry();
   const list: ProjectSummary[] = [...projects.values()].map((e) => {
-    const s = stateOf(e);
-    const count = (st: string) => s?.queues.filter((q) => q.status === st).length ?? 0;
-    return {
-      id: e.id, root: e.root, name: s?.project.name ?? e.id, error: e.error,
-      running: count("running"), waiting: count("waiting"), stopped: count("stopped"),
-      open_questions: s?.questions.filter(isOpenQuestion).length ?? 0,
-      attention: s?.attention ?? [],
-    };
+    publish(e.id);
+    return { ...summaryOf(e, stateOf(e)), seq: live.seq(e.id) };
   });
+  c.header(SEQ_HEADER, live.epoch);
   return c.json(list);
 });
 
+// The state's full read, from the texts the live stream keeps (one serialization per change, however many read it).
 app.get("/api/projects/:id/state", (c) => {
   const e = c.get("entry");
-  const s = stateOf(e);
-  return s ? c.json(s) : c.json({ error: e.error }, 500);
+  const json = live.stateJson(e.id);
+  return json ? c.body(json, 200, { "content-type": "application/json" }) : c.json({ error: e.error }, 500);
 });
 
 // Expected times of a project's queues, as estimates (@nexus/protocol estimates.ts): the samples are the finished
@@ -394,7 +537,7 @@ app.get("/api/projects/:id/ideas/statuses", (c) => {
   return c.json(ideaStatuses(e.store, s));
 });
 
-// The queue templates in effect for the project (PROTOCOL.md, "Queue templates"), for "New queue from template".
+// The queue templates in effect for the project (docs/protocol/planning.md, "Queue templates"), for "New queue from template".
 app.get("/api/projects/:id/templates", (c) => {
   const e = c.get("entry");
   const { templates, problems } = readTemplates(e.root);
@@ -420,11 +563,11 @@ app.get("/api/projects/:id/rules", (c) => {
   return c.json(projectRules(e.root));
 });
 
-app.get("/api/projects/:id/commits/:hash", (c) => {
+app.get("/api/projects/:id/commits/:hash", async (c) => {
   const e = c.get("entry");
   const hash = c.req.param("hash");
   if (!COMMIT_HASH.test(hash)) return c.json({ error: "not a commit hash (7 to 40 lowercase hex digits)" }, 400);
-  const commit = commitDetail(e.root, hash);
+  const commit = await commitDetail(e.root, hash);
   return commit ? c.json(commit) : c.json({ error: "not found" }, 404);
 });
 
@@ -466,11 +609,14 @@ app.post("/api/projects/:id/sessions/:session/messages", act((st, b, p) =>
 // Approving a stopped queue lifts its stop: first the user's choice about the stopped step's work (src/stopwork.ts).
 // `skip_closing: true`: the user skips the queue's closing refactoring step with the approval of a stopped queue's new
 // revision (checked before anything is recorded), as at Continue.
-app.post("/api/projects/:id/queues/:queue/approve", act((st, b, p) => {
+// The stopped step's work is read first (its git without holding the loop); then the action checks, decides and writes
+// in one go, as before (src/stopwork.ts).
+app.post("/api/projects/:id/queues/:queue/approve", act(async (st, b, p) => {
+  const left = await readStoppedWork(st, p("queue"));
   if (b.skip_closing !== undefined && typeof b.skip_closing !== "boolean") throw new ActionError("skip_closing is true or false");
   const skipClosing = b.skip_closing === true;
   if (skipClosing) closingToSkipAtApproval(st, p("queue"));
-  const d = decideStoppedWork(st, p("queue"), b.work, "user_approval");
+  const d = decideStoppedWork(st, p("queue"), b.work, "user_approval", left);
   if (!d.proceed) return { message: d.message };
   return approveQueue(st, p("queue"), b.words, { skipClosing });
 }));
@@ -520,7 +666,7 @@ app.post("/api/projects/:id/queues/:queue/run", act((_st, b, p, e) => {
     default: throw new ActionError("action is start, pause, resume, stop, stop_at_once or cancel_start");
   }
 }));
-// The user's answers about the plan (PROTOCOL.md, "The plan"): accept or decline the orchestrator's proposal for the
+// The user's answers about the plan (docs/protocol/planning.md, "The plan"): accept or decline the orchestrator's proposal for the
 // queue, or hand a dependency they set back to the orchestrator (`after`: one predecessor; without it, all of them);
 // the user's reorder: `move` the queue after `after` (null: with no queue before it), as in a list; `add` a
 // predecessor (`after`) or `remove` one; and `undo` (`change`) a move, an add or a remove within its window. The three
@@ -550,7 +696,7 @@ app.post("/api/projects/:id/queues/:queue/plan", act((st, b, p, e) => {
     default: throw new ActionError("action is move, add, remove, undo, accept, decline or hand_back");
   }
 }));
-// The user's decision on the orchestrator's proposal for the project's tag lists (PROTOCOL.md, "Tags"): accept or
+// The user's decision on the orchestrator's proposal for the project's tag lists (docs/protocol/stats.md, "Tags"): accept or
 // decline. Only the user: there is no CLI command and no event for it.
 app.post("/api/projects/:id/tags/:proposal", act((st, b, p) => {
   switch (b.action) {
@@ -559,7 +705,7 @@ app.post("/api/projects/:id/tags/:proposal", act((st, b, p) => {
     default: throw new ActionError("action is accept or decline");
   }
 }));
-// The user's decisions on a recurring queue (PROTOCOL.md, "Recurring queues"): the standing approval, a pause and its
+// The user's decisions on a recurring queue (docs/protocol/planning.md, "Recurring queues"): the standing approval, a pause and its
 // end, the removal. Only the user: there is no CLI command and no event for them.
 app.post("/api/projects/:id/recurring/:rid", act((_st, b, p, e) => {
   switch (b.action) {
@@ -572,7 +718,8 @@ app.post("/api/projects/:id/recurring/:rid", act((_st, b, p, e) => {
 app.delete("/api/projects/:id/recurring/:rid", act((_st, _b, p, e) => ({ message: e.engine.removeRecurring(p("rid")) })));
 // Continue on a stopped queue: the user's lift of the stop, then the run goes on (only from the dashboard, as every write).
 // `skip_closing: true`: the user skips the queue's closing refactoring step with it (checked before anything is recorded).
-app.post("/api/projects/:id/queues/:queue/continue", act((st, b, p, e) => {
+app.post("/api/projects/:id/queues/:queue/continue", act(async (st, b, p, e) => {
+  const left = await readStoppedWork(st, p("queue"));
   if (b.skip_closing !== undefined && typeof b.skip_closing !== "boolean") throw new ActionError("skip_closing is true or false");
   const skipClosing = b.skip_closing === true;
   if (skipClosing) {
@@ -580,7 +727,7 @@ app.post("/api/projects/:id/queues/:queue/continue", act((st, b, p, e) => {
     if (!q) throw new ActionError(`unknown queue ${p("queue")}`, 404);
     closingToSkip(q);
   }
-  const d = decideStoppedWork(st, p("queue"), b.work, "user_continue");
+  const d = decideStoppedWork(st, p("queue"), b.work, "user_continue", left);
   if (!d.proceed) return { message: d.message };
   return e.engine.continueQueue(p("queue"), { skipClosing });
 }));
@@ -610,7 +757,7 @@ app.post("/api/projects/:id/queues/:queue/steps/:step/accept", act((_st, b, p, e
  * not have come through yet), and from what the server's live parts say.
  */
 function removalNow(e: Entry): RemovalView {
-  e.state = undefined; e.error = undefined;
+  e.model.rebuild(); e.error = undefined;
   const s = stateOf(e);
   const plan = planner.view()?.after;
   return removalView(e.root, s?.project.name ?? e.id, s, {
@@ -646,14 +793,19 @@ app.post("/api/projects/:id/remove", async (c) => {
   }
 });
 
-// A picture for a chat message (src/uploads.ts): the body's size is checked before it is read or parsed (also when it
-// comes without a Content-Length), and the guard above has already taken it as the user's, from the dashboard.
-app.post("/api/projects/:id/uploads", bodyLimit({
-  maxSize: MAX_UPLOAD_BODY,
-  // The rest of the body is not read, so the connection is not reused: a client would send its next request on a
-  // socket the server is about to close.
-  onError: (c) => c.json({ error: "only PNG, JPEG, WebP or GIF up to 10 MB" }, 413, { connection: "close" }),
-}), async (c) => {
+// A picture for a chat message (src/uploads.ts): the body's size is checked before it is parsed (from its
+// Content-Length, or while it streams in), and the guard above has already taken it as the user's, from the dashboard.
+// A body over the limit is read on and thrown away (up to MAX_UPLOAD_DRAIN, for UPLOAD_DRAIN_MS) before the 413, so the
+// socket closes with nothing unread on it: Windows resets one that has, and the client loses the answer.
+app.post("/api/projects/:id/uploads", async (c, next) => {
+  const length = c.req.header("content-length");
+  const declared = length !== undefined && !c.req.header("transfer-encoding") ? Number(length) : undefined;
+  const read = await readLimited(c.req.raw.body, declared).catch(() => undefined);
+  if (!read) return c.json({ error: "the body could not be read" }, 400, { connection: "close" });
+  if ("body" in read) { c.req.raw = new Request(c.req.raw, { body: read.body }); return next(); }
+  // Closed even when drained: the drain may have stopped at its bound, and a refused upload ends its connection.
+  return c.json({ error: "only PNG, JPEG, WebP or GIF up to 10 MB" }, 413, { connection: "close" });
+}, async (c) => {
   const e = c.get("entry");
   const body = (await c.req.json().catch(() => undefined)) as Body | undefined;
   if (!body || typeof body !== "object") return c.json({ error: "not a JSON object" }, 400);
@@ -693,39 +845,53 @@ app.get("/api/projects/:id/search", (c) => {
 
 app.get("/api/projects/:id/sessions/:session/activity", (c) => {
   const e = c.get("entry");
-  return c.json(e.engine.activity(c.req.param("session"), c.req.query("queue"), c.req.query("step"), Number(c.req.query("limit") ?? 300)));
+  const queue = c.req.query("queue"), step = c.req.query("step");
+  const read = e.store.readActivity(c.req.param("session"));
+  live.opened(e.id, c.req.param("session"), "activity", read);
+  const items = read.entries.filter((a) => (!queue || a.queue === queue) && (!step || a.step === step));
+  return c.json(items.slice(-Number(c.req.query("limit") ?? 300)));
+});
+
+// A queue's whole view (QueueView, as in the model's state): the dashboard reads it when it opens a queue that its state
+// holds as a summary (`archived`: closed and waiting for nothing; packages/protocol/src/archive.ts).
+app.get("/api/projects/:id/queues/:queue", (c) => {
+  const e = c.get("entry");
+  const s = stateOf(e);
+  if (!s) return c.json({ error: e.error }, 500);
+  const q = s.queues.find((x) => x.id === c.req.param("queue"));
+  return q ? c.json(q) : c.json({ error: "unknown queue" }, 404);
 });
 
 // Git on the dashboard (src/gitinfo.ts; local git only, never a fetch): a step's commits per round, a queue's branch.
 // null when the project is not a git repository (or nothing was recorded).
-app.get("/api/projects/:id/queues/:queue/steps/:step/commits", (c) => {
+app.get("/api/projects/:id/queues/:queue/steps/:step/commits", async (c) => {
   const e = c.get("entry");
   const q = stateOf(e)?.queues.find((x) => x.id === c.req.param("queue"));
   if (!q) return c.json({ error: "unknown queue" }, 404);
-  return c.json(stepCommits(e.store, q, c.req.param("step")) ?? null);
+  return c.json((await stepCommits(e.store, q, c.req.param("step"))) ?? null);
 });
 // What a stopped queue's stopped step left (its own commits, the checkout's uncommitted changes) and whether a Discard
 // is recorded for this stop; null when the queue is not stopped at a step.
-app.get("/api/projects/:id/queues/:queue/left", (c) => {
+app.get("/api/projects/:id/queues/:queue/left", async (c) => {
   const e = c.get("entry");
   const q = stateOf(e)?.queues.find((x) => x.id === c.req.param("queue"));
   if (!q) return c.json({ error: "unknown queue" }, 404);
-  const left = leftBehind(e.store, q);
+  const left = await leftBehind(e.store, q);
   const view: LeftView | null = left ? { ...left, discarded: discardRecorded(q) ?? null } : null;
   return c.json(view);
 });
-app.get("/api/projects/:id/queues/:queue/git", (c) => {
+app.get("/api/projects/:id/queues/:queue/git", async (c) => {
   const e = c.get("entry");
   const q = stateOf(e)?.queues.find((x) => x.id === c.req.param("queue"));
   if (!q) return c.json({ error: "unknown queue" }, 404);
-  return c.json(branchState(e.store, q) ?? null);
+  return c.json((await branchState(e.store, q)) ?? null);
 });
 
 // Refused actions of every session of the project, oldest first; with ?queue= (and &step=) only those of a step.
 app.get("/api/projects/:id/refusals", (c) => {
   const e = c.get("entry");
   const queue = c.req.query("queue"), step = c.req.query("step");
-  const all = e.store.sessionIds().flatMap((s) => e.store.readRefusals(s).entries)
+  const all = e.store.sessionIds().flatMap((s) => { const r = e.store.readRefusals(s); live.opened(e.id, s, "refusals", r); return r.entries; })
     .filter((r) => (!queue || r.queue === queue) && (!step || r.step === step));
   return c.json(all.sort((a, b) => a.at.localeCompare(b.at)));
 });
@@ -743,7 +909,9 @@ app.get("/api/stats", (c) => {
   if (project && !projects.has(project)) return c.json({ error: "unknown project" }, 404);
   const filter = Object.fromEntries(STAT_FILTERS.map((f) => [f, c.req.query(f) || undefined]).filter(([, v]) => v));
   const states = [...projects.values()].map(stateOf).filter((x): x is ProjectState => !!x);
-  return c.json(statsReport(stepStats(states, readTurns().entries), { by, project, since, filter }) satisfies StatsReport);
+  // `reviews`: the reviews' quality on three levels (queue RH), for the same project and range.
+  const report: StatsReport & { reviews: ReviewStats } = { ...statsReport(stepStats(states, readTurns().entries), { by, project, since, filter }), reviews: reviewStats(states, { project, since }) };
+  return c.json(report);
 });
 
 // The usage windows day by day for the global Stats view (UsageDays), from ?since= (a date or a time; default 30 days
@@ -769,14 +937,7 @@ app.get("/api/digest", (c) => {
     const state = stateOf(e);
     if (!state) continue;
     for (const q of state.queues) if (q.run) runs.push({ session: q.run.session, state: q.run.state, updated_at: q.run.updated_at });
-    const ids = e.store.sessionIds();
-    const recent = <T extends { at: string }>(xs: T[]) => xs.filter((x) => x.at > since);
-    events.push(...projectDigest({
-      state,
-      events: ids.flatMap((s) => recent(e.store.readEvents(s).entries)),
-      refusals: ids.flatMap((s) => recent(e.store.readRefusals(s).entries)),
-      activity: ids.flatMap((s) => recent(e.store.readActivity(s).entries.filter((a) => a.kind === "retry"))),
-    }, since));
+    events.push(...projectDigest(digestInput(e.store, state, since), since));
     running.push(...projectRunning(state));
   }
   // The usage line: the account's windows are server-wide, so its turns are every project's (turns.jsonl).
@@ -785,13 +946,22 @@ app.get("/api/digest", (c) => {
 });
 
 app.get("/api/usage", (c) => c.json(readUsage() ?? null));
+// The workstation's heavy slot (<NEXUS_HOME>/capacity.yaml): what a step whose checks are queued waits behind.
+app.get("/api/capacity", (c) => c.json(readCapacity() ?? null));
 
 // Nexus itself: its version, and updating it without cutting off running work (src/lifecycle.ts).
 // `local`: whether this request comes straight from this machine (src/remote.ts isLocal), so the dashboard shows what
 // only makes sense on the server machine ("Open in editor": a path on another device points nowhere).
-app.get("/api/server", async (c) => c.json({ ...(await version()), local: isLocal(c.env.incoming), update: lifecycle.status, plan: planner.view(), push_on_deploy: readDeploySettings().push_on_deploy, max_running: readGlobalSettings().defaults.max_running, running: runningSteps(), away: awayNow(readAway()) }));
+app.get("/api/server", async (c) => c.json({ ...(await version()), local: isLocal(c.env.incoming), update: lifecycle.status, plan: planner.view(), push_on_deploy: readDeploySettings().push_on_deploy, max_running: readGlobalSettings().defaults.max_running, running: runningSteps(), away: awayNow(readAway()), crash: crashNotice() }));
 
-// ---------------------------------------------------------------- away mode (PROTOCOL.md, "Away mode")
+// The server's measurements of itself (src/perf.ts): its event loop's delay, the requests by route, the blocks over
+// 200 ms and what ran in them. Read-only, also while standing by.
+app.get("/api/server/perf", (c) => c.json(perf.view()));
+// The server's speed benchmarks (scripts/server-speed.ts; <NEXUS_HOME>/benchmarks/server-speed.jsonl), the latest 200
+// runs oldest first, for the global Stats view's trend. Read-only.
+app.get("/api/benchmarks/server-speed", (c) => c.json({ runs: readServerSpeed().entries.slice(-200) }));
+
+// ---------------------------------------------------------------- away mode (docs/protocol/review.md, "Away mode")
 
 let awayTimer: NodeJS.Timeout | undefined;
 
@@ -831,8 +1001,10 @@ app.post("/api/server/away", async (c) => {
 function runningSteps() {
   return [...projects.values()].flatMap((e) => {
     const s = stateOf(e);
-    const steps = (s?.queues ?? []).flatMap((q) => q.steps.filter((x) => x.status === "running")
-      .map((x) => ({ queue: q.id, step: x.id, title: x.title, session: q.run?.session ?? null, run: q.run?.state ?? null })));
+    // Only steps whose run is going: a run the user stopped leaves its step "running" in the derivation, with no agent
+    // at work on it and nothing an update waits for (queue EF, stepWorkedOn).
+    const steps = stepsWorkedOn(s?.queues ?? [])
+      .map(({ queue: q, step: x }) => ({ queue: q.id, step: x.id, title: x.title, session: q.run?.session ?? null, run: q.run?.state ?? null }));
     return steps.length ? [{ project: e.id, name: s?.project.name ?? e.id, steps }] : [];
   });
 }
@@ -892,6 +1064,14 @@ app.post("/api/server/cancel-plan", async (c) => {
   try { return c.json({ text: planner.cancel(askerOf(b.by)), update: lifecycle.status }); }
   catch (e) { return c.json({ error: (e as Error).message }, e instanceof PlanError ? 409 : 500); }
 });
+// The user closed the notice of the server's last crash (src/crash.ts): it is not shown again, in any dashboard.
+app.post("/api/server/crash/dismiss", async (c) => {
+  const b = (await c.req.json().catch(() => ({}))) as { at?: unknown };
+  if (typeof b.at !== "string") return c.json({ error: "at: the crash's time is missing" }, 400);
+  if (!dismissCrash(b.at)) return c.json({ error: "no such crash: a later one replaced it" }, 409);
+  broadcast({ type: "server" });
+  return c.json({ crash: crashNotice() });
+});
 app.post("/api/server/cancel", (c) => {
   try { lifecycle.cancel(); return c.json(lifecycle.status); } catch (e) { return c.json({ error: (e as Error).message }, 409); }
 });
@@ -944,7 +1124,11 @@ app.get("/api/models/:runtime", async (c) => {
 
 // The orchestrator chat.
 app.get("/api/projects/:id/orchestrator", (c) => {
-  return c.json(c.get("entry").orchestrator.view());
+  const e = c.get("entry");
+  const view = e.orchestrator.view();
+  // Its chat's later lines and pins come as log messages (the earlier sessions' chats do not change).
+  if (view.session) live.opened(e.id, view.session.id, "chat");
+  return c.json(view);
 });
 app.post("/api/projects/:id/orchestrator/messages", act((_st, b, _p, e) => e.orchestrator.say(b.text)));
 app.post("/api/projects/:id/orchestrator/reset", act((_st, _b, _p, e) => e.orchestrator.reset()));
@@ -955,7 +1139,11 @@ app.get("/api/projects/:id/conversations", (c) => {
 });
 app.get("/api/projects/:id/conversations/:cid", (c) => {
   const e = c.get("entry");
-  try { return c.json(e.conversations.view(c.req.param("cid"))); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
+  try {
+    const view = e.conversations.view(c.req.param("cid"));
+    live.opened(e.id, view.session.id, "chat");
+    return c.json(view);
+  } catch (err) { return c.json({ error: (err as Error).message }, 404); }
 });
 app.post("/api/projects/:id/conversations", act((_st, b, _p, e) => e.conversations.create(b)));
 // The step's latest conversation that is not archived ("Chat about this" opens it, or starts one when there is none).
@@ -975,7 +1163,7 @@ app.get("/api/projects/:id/settings", (c) => {
   const e = c.get("entry");
   return c.json({ own: ownKeys(e.store.readStoredProject()), global: readGlobalSettings() });
 });
-// The global settings, which every project follows where it has no value of its own (PROTOCOL.md, "Global settings").
+// The global settings, which every project follows where it has no value of its own (docs/protocol/settings.md, "Global settings").
 app.get("/api/settings", (c) => c.json({ global: readGlobalSettings(), keys: OVERRIDABLE.map((x) => settingKey(x.path)) }));
 app.patch("/api/settings", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as unknown;
@@ -1040,6 +1228,8 @@ async function release(): Promise<void> {
   watchers.clear();
   await Promise.all(closing);
   planner.shutdown(); // its timers write the plan file: no longer this server's
+  capacity?.shutdown(); // so does the coordinator: the successor writes capacity.yaml anew
+  capacity = undefined;
   // Chat turns still running are cut off first and recorded: the successor goes on with them (src/lifecycle.ts).
   for (const e of projects.values()) projectPart(e).shutdown();
   // An agent's exit is written to its runtime file: wait for those last writes.
@@ -1056,7 +1246,10 @@ async function release(): Promise<void> {
  * port cannot be had; the error says so.
  */
 async function reacquire(): Promise<void> {
-  projects.clear(); // their engines are shut down for good
+  // Their engines are shut down for good (release); each is dropped as a removed project is: its model stops hearing
+  // of this process's writes, the coordinator forgets its engine (queue LH: they were only cleared, two write listeners
+  // per project left behind, and every write after the next activate touched the old models too).
+  for (const e of [...projects.values()]) dropProject(e);
   const http = server as Server;
   reacquiring = true;
   try {
@@ -1081,6 +1274,7 @@ async function reacquire(): Promise<void> {
 }
 let reacquiring = false;
 
+perf.start();
 if (active) activate();
 auth(); // creates the access token on the first start
 const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) => {
@@ -1104,7 +1298,7 @@ server.on("error", (err: NodeJS.ErrnoException) => {
   process.exit(1);
 });
 
-const shutdown = () => { for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); e.merger.shutdown(); } process.exit(0); };
+const shutdown = () => { capacity?.shutdown(); for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); e.merger.shutdown(); } process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
@@ -1114,5 +1308,7 @@ server.on("upgrade", (req, socket, head) => {
   wss.handleUpgrade(req, socket, head, (ws) => {
     sockets.add(ws);
     ws.on("close", () => sockets.delete(ws));
+    // The socket's first message: the epoch and where each project's stream stands (docs/protocol/live.md).
+    ws.send(live.hello([...projects.keys()]));
   });
 });

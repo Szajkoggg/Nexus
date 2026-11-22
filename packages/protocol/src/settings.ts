@@ -1,4 +1,4 @@
-// Global settings that projects follow, with a per-setting override (PROTOCOL.md, "Global settings"). Pure: the files
+// Global settings that projects follow, with a per-setting override (docs/protocol/settings.md, "Global settings"). Pure: the files
 // are read and written by the store (store.ts); the global file only by the server.
 import { GlobalSettings, ProjectFile, StoredProject } from "./schemas.ts";
 import { TAG_KINDS } from "./tags.ts";
@@ -8,8 +8,8 @@ import { TAG_KINDS } from "./tags.ts";
  * `none`: the setting has no default, so a project's own "none" is stored as null.
  */
 export const OVERRIDABLE: readonly { path: readonly string[]; none?: true }[] = [
-  ...["stop_conditions", "review_level", "review_send_back_limit", "context_reuse_threshold", "context_care",
-    "protect_nexus", "push_accepted", "provisional_counts", "merge_back", "resolve_conflicts", "usage_pause_threshold", "max_running"].map((k) => ({ path: ["defaults", k] })),
+  ...["stop_conditions", "review_level", "review_send_back_limit", "context_reuse_tokens", "context_care",
+    "protect_nexus", "push_accepted", "provisional_counts", "merge_back", "resolve_conflicts", "usage_pause_threshold", "max_running", "check_fix_limit"].map((k) => ({ path: ["defaults", k] })),
   { path: ["runtimes", "default"] },
   { path: ["runtimes", "claude", "model"], none: true },
   { path: ["runtimes", "claude", "effort"], none: true },
@@ -28,7 +28,7 @@ export const OVERRIDABLE: readonly { path: readonly string[]; none?: true }[] = 
   { path: ["orchestrator", "effort"], none: true },
   { path: ["orchestrator", "fallback"], none: true },
   { path: ["orchestrator", "notify"] },
-  { path: ["orchestrator", "context_threshold"] },
+  { path: ["orchestrator", "context_threshold_tokens"] },
   { path: ["languages", "reader"], none: true },
   ...TAG_KINDS.flatMap((k) => [
     { path: ["kinds", k, "runtime"] },
@@ -36,9 +36,14 @@ export const OVERRIDABLE: readonly { path: readonly string[]; none?: true }[] = 
     { path: ["kinds", k, "effort"], none: true as const },
     { path: ["kinds", k, "fallback"] },
   ]),
+  { path: ["review_helper", "enabled"] },
+  { path: ["review_helper", "runtime"] },
+  { path: ["review_helper", "model"], none: true },
+  { path: ["review_helper", "effort"], none: true },
+  { path: ["review_helper", "audit_rate"] },
 ] as const;
 
-/** A setting's path as written in PROTOCOL.md and in an update's `follow` list: `runtimes.claude.model`. */
+/** A setting's path as written in docs/protocol/settings.md and in an update's `follow` list: `runtimes.claude.model`. */
 export const settingKey = (path: readonly string[]) => path.join(".");
 
 type Tree = Record<string, unknown>;

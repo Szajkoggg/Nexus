@@ -12,13 +12,18 @@
 //            there ("kept the uncommitted work"), else failed
 //   slownoop  work, then end the turn without an outcome (the step stays open)
 //   slowask   work, then ask a blocking question and end the turn
+//   askslow   ask a blocking question and end the turn; the answer's turn works (work() below) before it reports the
+//             step done, so a test sees the queue at work after its answer (queue FL1)
+//   askwork   ask a question with --can-continue, work on (work() below) in the same turn, then end it without an
+//             outcome; the answer's turn reports the step done
 //   doneexit  report the step done, then the process exits on a signal before its turn ends
 //   doneexitheld  the same, held by FAKE_RELEASE before exit so a test can accept review first
 //   commit    commit a file named after the step in its working directory, then done
 //   commitstop  the same commit, then a stop condition
 //   untracked   write <step>-left.txt in its working directory, neither added nor committed, then done
-//   background  start work in the background (a command) and end the turn without an outcome; the work ends after
-//               FAKE_BG_MS (default 1500). Claude's fake then starts a turn by itself with the task's notification,
+//   background  start work in the background (a command) and end the turn without an outcome; the work ends when the
+//               file FAKE_BG_RELEASE names exists (the test lets it end once Nexus has taken the turn's end in), else
+//               after FAKE_BG_MS (default 1500). Claude's fake then starts a turn by itself with the task's notification,
 //               as Claude Code does; Codex's does not (Nexus nudges). Told of the end either way, it reports done.
 //   bgagent     the same with a sub-agent in the background
 //   bglong      the same command, running FAKE_BG_LONG_MS (default 600000): past the engine's limit in a test
@@ -46,25 +51,35 @@
 // "refused": the agent tries actions that are refused (each fake writes them as its runtime does), then done.
 // "summary": done, then the step's context summary (`nexus context`); "summaryslow": the same, then it works (as
 // "slow") before the turn ends. Nexus asking for the summary ("[Nexus] … write your context summary") gets one, unless
-// FAKE_NO_SUMMARY is set; so does the orchestrator ("[Nexus] Your context is … full"), with "fake orchestrator
+// FAKE_NO_SUMMARY is set (with FAKE_SUMMARY_FAIL set, that turn fails as the failure kind it names); so does the orchestrator ("[Nexus] Your context holds …"), with "fake orchestrator
 // summary" (topics plan, promises; file docs/plan.md), and with FAKE_SUMMARY_MS set it then works that long. FAKE_CONTEXT_FILL (0 to 1) is the context fill each turn reports
-// (default: claude 10 %, codex 6 %); FAKE_CONTEXT_FILL_FILE names a file whose content, while it exists, replaces it (a
+// (default: claude 10 %, codex 6 %) of the context window, FAKE_CONTEXT_WINDOW tokens (default: claude 1000, codex 2000); FAKE_CONTEXT_FILL_FILE names a file whose content, while it exists, replaces it (a
 // test changes the fill of a running process). A step turn may come after a seed (context care's first prompt of a fresh session): it is found at the
 // start of any line.
 // An answer ("[Nexus] Answer …") makes it report the current step done (also in a new process of the session: the
 // step is kept in a file beside FAKE_LOG). As an orchestrator: "FAKE-DRAFT:" followed by
-// YAML drafts that queue; "FAKE-NEXUS: [args]" runs `nexus` with those arguments; a "[Nexus] A worker asked … (qid X;"
-// notice is answered with "fake answer"; with FAKE_REVIEW_ACCEPT set, a notice of a step waiting for its review is
+// YAML drafts that queue; "FAKE-NEXUS: [args]" runs `nexus` with those arguments; "FAKE-SCRIPT: <file>" runs that
+// file with Node inside the agent's process tree (its job on Windows) and replies with its output; a "[Nexus] A worker
+// asked … (qid X;" notice is answered with "fake answer"; with FAKE_REVIEW_ACCEPT set, a notice of a step waiting for its review is
 // answered with `nexus review accept`. "FAKE-LONG" is answered with longReply("Reply"); a hand-over with
 // longReply("SUMMARY"). "FAKE-SLOW" in a chat message: the turn works for FAKE_CHAT_SLOW_MS (default 4000), then
 // replies "slow reply"; a stop (interrupt) ends it early. "FAKE-HOLD": waits for FAKE_RELEASE (as a slow worker does),
 // so a test can change usage during a chat turn. "FAKE-HISTORY": the reply lists every message the agent took in so
 // far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer).
+// As a review helper (its packet: "[Nexus] Review step S of queue Q, round R"), the step's goal steers it with
+// "FAKE-HELPER: <verdict>": accept (nexus review accept), sendback (nexus review send-back, every round), sendback1
+// (the first round only, accept after), passon:<reasons> (nexus review pass-on --why <reasons>), none (no verdict),
+// hang (no verdict, held by FAKE_RELEASE like a slow step), refused (an action its permissions refuse, then nexus ask,
+// which the CLI refuses a helper, then a pass-on with doubt naming both). Without one: accept at level 2, pass on
+// (level) at level 3. Each verdict's text starts "fake helper".
 // Claude's fake keeps the conversations it saved (fakeSaved below) and refuses, as Claude Code does, to resume one it
 // never saved or to start a saved one anew; FAKE_START_MS: it reads its input only after that long (Claude Code's
-// start-up), so a test can end it before it saved anything; FAKE_REFUSE: it refuses every start, each in its way.
+// start-up), so a test can end it before it saved anything; FAKE_REFUSE: it refuses every start, each in its way;
+// FAKE_LATE_NEXT: its first turn's result waits for a message sent after its reply, which then runs as a turn of its own
+// (once the file FAKE_LATE_GATE names exists, when set; the process runs it before it exits, its input closed or not);
+// FAKE_LATE_NEXT=inside: that message is read inside the turn, and no turn of its own follows.
 import { execFileSync, spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -77,9 +92,29 @@ const nexusOut = (args: string[], input?: string): string => {
   catch (e) { return `nexus failed: ${String((e as { stderr?: string }).stderr ?? e).trim()}`; }
 };
 
+/**
+ * Appends a line to a log the tests read while the fakes write it. appendFileSync creates a new file and writes to it
+ * in two calls, and a test that saw the file exist could read it empty in between (queue KM: "Unexpected end of JSON
+ * input" in two full runs). So a new file comes into place with its first line in it (written beside it, then linked
+ * there); when another process made it meanwhile, the line is appended as usual.
+ */
+function appendLine(file: string, line: string): void {
+  if (!existsSync(file)) {
+    const part = `${file}.${process.pid}.part`;
+    writeFileSync(part, line);
+    try { linkSync(part, file); return; } catch { /* made meanwhile: append */ } finally { unlinkSync(part); }
+  }
+  appendFileSync(file, line);
+}
+
 /** Records what reached the agent and how, for the tests (FAKE_LOG, one JSON line each). */
 export function record(text: string, priority: string | null, busy: boolean): void {
-  if (process.env.FAKE_LOG) appendFileSync(process.env.FAKE_LOG, JSON.stringify({ text, priority, busy, session: process.env.NEXUS_SESSION ?? null }) + "\n");
+  if (process.env.FAKE_LOG) appendLine(process.env.FAKE_LOG, JSON.stringify({ text, priority, busy, session: process.env.NEXUS_SESSION ?? null }) + "\n");
+}
+
+/** The context window a turn reports: FAKE_CONTEXT_WINDOW, else the runtime's own `fallback`. */
+export function contextWindow(fallback: number): number {
+  return Number(process.env.FAKE_CONTEXT_WINDOW) || fallback;
 }
 
 /** The context tokens a turn reports for a window of `window` tokens: FAKE_CONTEXT_FILL of it, else `fallback`. */
@@ -89,12 +124,29 @@ export function contextTokens(window: number, fallback: number): number {
   return fill ? Math.round(Number(fill) * window) : fallback;
 }
 
+/** Background work a fake reports: it ends when the file `release` names exists, else after `ms`. */
+export interface Background { kind: "command" | "agent"; ms: number; release?: string }
+
+/**
+ * Calls `end` when background work ends: once its release file exists (polled; given up after 300 s), else after its
+ * time. A time alone raced the engine: under load Nexus took the turn's end in only after the work had ended (queue CI).
+ */
+export function onBackgroundEnd(bg: Background, end: () => void): void {
+  const release = bg.release;
+  if (!release) { setTimeout(end, bg.ms); return; }
+  const started = Date.now();
+  const look = (): void => { if (existsSync(release) || Date.now() - started > 300_000) end(); else setTimeout(look, 20); };
+  look();
+}
+
 export interface Fake {
   step?: string;
   /** Work this turn leaves running in the background, for the runtime's fake to report after the turn (see the header). */
-  background?: { kind: "command" | "agent"; ms: number };
+  background?: Background;
   /** This turn ran a sub-agent in the foreground (FAKE: subagent), for the runtime's fake to report its tokens. */
   subagent?: boolean;
+  /** The step asked with FAKE: askslow: the answer's turn works before it reports the step done. */
+  answerWork?: boolean;
   /** Every message the agent took in, in order (FAKE-HISTORY shows them). */
   history?: string[];
 }
@@ -186,14 +238,14 @@ export function longReply(label: string): string {
  * environment the tests check (`handover`: NEXUS_HANDOVER, which no runtime may inherit).
  */
 export function recordArgs(what: Record<string, unknown>): void {
-  if (process.env.FAKE_ARGS) appendFileSync(process.env.FAKE_ARGS, JSON.stringify({ ...what, handover: process.env.NEXUS_HANDOVER ?? null }) + "\n");
+  if (process.env.FAKE_ARGS) appendLine(process.env.FAKE_ARGS, JSON.stringify({ ...what, handover: process.env.NEXUS_HANDOVER ?? null }) + "\n");
 }
 
 /**
  * The conversations Claude's fake saved, across its processes: one id per line in a file in the test's temporary
  * folder (beside FAKE_LOG, else in NEXUS_HOME, else the system's). Claude Code 2.1.323 saves a session's
  * conversation when it reads the session's first message, not at its start nor at the turn's end (probed
- * 2026-11-15, DESIGN.md, "When Claude Code saves a conversation"); a test may mark one saved itself (a session that
+ * 2026-11-15, docs/design/engine.md, "When Claude Code saves a conversation"); a test may mark one saved itself (a session that
  * ran before the test's files). Codex's fake keeps its threads the same way (fake-codex-saved.txt): Codex 0.167.2
  * saves a thread (its rollout file) when the thread's first turn starts, not at thread/start (probed 2026-11-15).
  */
@@ -254,6 +306,8 @@ function writeDenied(path: string): boolean {
  * `tool` reports a shell command it ran.
  */
 export async function respond(fake: Fake, text: string, tool: (command: string) => void, refused?: () => void): Promise<string | { fail: FakeFailure } | { exit: true } | { interrupted: true }> {
+  const helper = /^\[Nexus\] Review step (\S+) of queue (\S+), round (\d+)/.exec(text);
+  if (helper) return reviewAsHelper(text, helper[2]!, helper[1]!, Number(helper[3]), tool, refused);
   const m = /step (\S+) \(\d+ of \d+\)/.exec(text);
   if (/(^|\n)\[Nexus\] Queue/.test(text) && m) {
     const step = (fake.step = m[1]!);
@@ -351,7 +405,9 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       if (existsSync(file)) nexus("step", "done", step, "--summary", `fake finished ${step} after the stop was lifted`);
       else { writeFileSync(file, "1"); nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop"); }
     }
-    if (behaviour === "ask" || behaviour === "slowask") nexus("ask", "Which way?", "--step", step);
+    if (behaviour === "ask" || behaviour === "slowask" || behaviour === "askslow") nexus("ask", "Which way?", "--step", step);
+    if (behaviour === "askslow") fake.answerWork = true;
+    if (behaviour === "askwork") { nexus("ask", "Which way?", "--step", step, "--can-continue"); await work(step); }
     if (behaviour === "askthree") {
       for (const text of ["Which layout?", "Which colour?", "Which sound?"]) nexus("ask", text, "--step", step, "--can-continue", "--option", "First", "--option", "Second", "--recommend", "First");
       if (process.env.FAKE_ASK_LINGER_MS) await new Promise(r => setTimeout(r, Number(process.env.FAKE_ASK_LINGER_MS)));
@@ -383,12 +439,14 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       else nexus("step", "failed", step, "--reason", "the uncommitted work is gone");
     }
     if (behaviour === "background" || behaviour === "bgagent" || behaviour === "bglong") {
-      fake.background = { kind: behaviour === "bgagent" ? "agent" : "command", ms: Number(behaviour === "bglong" ? process.env.FAKE_BG_LONG_MS ?? 600_000 : process.env.FAKE_BG_MS ?? 1500) };
+      fake.background = behaviour === "bglong"
+        ? { kind: "command", ms: Number(process.env.FAKE_BG_LONG_MS ?? 600_000) }
+        : { kind: behaviour === "bgagent" ? "agent" : "command", ms: Number(process.env.FAKE_BG_MS ?? 1500), release: process.env.FAKE_BG_RELEASE };
     }
     // The queue's last step done: the report, written where the prompt says (refused under a denied folder, as
     // Claude Code refuses a Write its --disallowedTools rule covers), then registered with nexus report.
     const report = /`nexus report (\S+) --file (\S+) --summary/.exec(text);
-    if (report && (behaviour === "done" || behaviour === "untracked" || (behaviour === "merge" && !stoppedIntegration))) {
+    if (report && (["done", "untracked", "slow", "commit"].includes(behaviour) || (behaviour === "merge" && !stoppedIntegration))) {
       const path = resolve(report[2]!);
       if (!writeDenied(path)) {
         mkdirSync(dirname(path), { recursive: true });
@@ -409,8 +467,30 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     return "background done";
   }
   if (text.startsWith("[Nexus] Answer") && fake.step) {
+    if (fake.answerWork) await work(fake.step);
     nexus("step", "done", fake.step, "--summary", `fake finished ${fake.step} after an answer`);
     return "answered";
+  }
+  // A check-fix round (the checks Nexus ran failed): with FAKE_CHECK_DISPUTE naming a check that failed, say once (per
+  // step) that its failure is not this work's and end the turn; otherwise "fix" it (FAKE_CHECK_FIX_MS long) and report
+  // the step done again.
+  const fix = /^\[Nexus\] The checks Nexus ran for step (\S+) of queue \S+: check-fix round (\d+)/.exec(text);
+  if (fix) {
+    const step = fix[1]!;
+    const dispute = process.env.FAKE_CHECK_DISPUTE;
+    const marker = join(dirname(process.env.FAKE_LOG ?? "."), `fake-disputed-${step}`);
+    // "*": the first check the message says failed.
+    const name = dispute === "*" ? /Check "(.+)" failed/.exec(text)?.[1] : dispute;
+    if (name && !existsSync(marker) && text.includes(`Check "${name}" failed`)) {
+      writeFileSync(marker, "1");
+      const out = nexusOut(["check", step, name, "--unrelated", "--evidence", "it fails on the base too"]);
+      return `disputed: ${out}`;
+    }
+    nexus("step", "start", step);
+    // FAKE_CHECK_FIX_MS: the fix takes that long (a picture of the round at work; a stop ends it early).
+    if (process.env.FAKE_CHECK_FIX_MS && await interruptible(Number(process.env.FAKE_CHECK_FIX_MS))) return { interrupted: true };
+    nexus("step", "done", step, "--summary", `fake fixed ${step} in check-fix round ${fix[2]}`);
+    return `check-fix round ${fix[2]}`;
   }
   // A step sent back (by the orchestrator or the user's Fix it): work on it again and report it done.
   const back = /^\[Nexus\] The (?:orchestrator reviewed|user sent) step (\S+) of queue \S+ .*\(round (\d+)\)/.exec(text);
@@ -419,12 +499,14 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     nexus("step", "done", back[1]!, "--summary", `fake finished ${back[1]} round ${back[2]}`);
     return `round ${back[2]}`;
   }
-  if (text.startsWith("[Nexus] Your context is") && text.includes("fresh orchestrator session")) {
+  if (text.startsWith("[Nexus] Your context holds") && text.includes("fresh orchestrator session")) {
     if (!process.env.FAKE_NO_SUMMARY) nexus("context", "fake orchestrator summary", "--topics", "plan,promises", "--files", "docs/plan.md");
     if (process.env.FAKE_SUMMARY_MS) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SUMMARY_MS)));
     return "summary written";
   }
   if (text.includes("write your context summary")) {
+    // FAKE_SUMMARY_FAIL: the request's turn fails that way (a failure kind, as a step's behaviour names it).
+    if (process.env.FAKE_SUMMARY_FAIL) return { fail: process.env.FAKE_SUMMARY_FAIL as FakeFailure };
     if (!process.env.FAKE_NO_SUMMARY && fake.step) nexus("context", `fake summary of ${fake.step}, on request`, "--topics", "fake");
     return "summary";
   }
@@ -444,10 +526,33 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
   if (draft) return nexusOut(["queue", "draft", "-"], draft[1]);
   const run = /FAKE-NEXUS: (\[.*\])/.exec(text);
   if (run) return nexusOut(JSON.parse(run[1]!) as string[]);
+  const script = /FAKE-SCRIPT: (.+)/.exec(text);
+  if (script) {
+    try { return execFileSync(process.execPath, [script[1]!.trim()], { env: process.env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(); }
+    catch (e) { return `script failed: ${(e as { stderr?: string }).stderr ?? (e as Error).message}`; }
+  }
   const asked = /A worker asked[\s\S]*?\(qid (\S+);/.exec(text);
   if (asked) return nexusOut(["answer", asked[1]!, "fake answer", "--continue"]);
   // With FAKE_REVIEW_ACCEPT set, a step waiting for its review is accepted (tests about something other than review).
   const review = /\bStep (\S+) of queue (\S+) is done and waits for your review/.exec(text);
   if (review && process.env.FAKE_REVIEW_ACCEPT) return nexusOut(["review", "accept", review[2]!, review[1]!]);
   return "ok"; // a nudge, a message sent while idle, anything else
+}
+
+/** A review helper's turn (see the header): the verdict its step's goal asks for. */
+async function reviewAsHelper(text: string, queue: string, step: string, round: number, tool: (command: string) => void, refused?: () => void): Promise<string> {
+  const level3 = text.includes("Review level 3");
+  const verdict = /FAKE-HELPER: (\S+)/.exec(text)?.[1] ?? (level3 ? "passon:level" : "accept");
+  const run = (args: string[]) => { tool(`nexus ${args.join(" ")}`); return nexusOut(args); };
+  if (verdict === "none") return "fake helper: no verdict";
+  if (verdict === "hang") { await work(step); return "fake helper: no verdict after work"; }
+  if (verdict === "accept" || (verdict === "sendback1" && round > 1)) return run(["review", "accept", queue, step, "--note", `fake helper checked round ${round}`]);
+  if (verdict === "sendback" || verdict === "sendback1") return run(["review", "send-back", queue, step, `fake helper: fix round ${round}`]);
+  if (verdict.startsWith("passon:")) return run(["review", "pass-on", queue, step, "--why", verdict.slice(7), "--findings", `fake helper findings for ${step}`]);
+  if (verdict === "refused") {
+    refused?.();
+    const asked = run(["ask", "May I push?", "--step", step]);
+    return run(["review", "pass-on", queue, step, "--why", "doubt", "--findings", `fake helper: git push was refused; ${asked}`]);
+  }
+  return `fake helper: unknown verdict ${verdict}`;
 }

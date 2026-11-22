@@ -1,4 +1,4 @@
-// What a step runs on (PROTOCOL.md, "Kinds and their defaults"): its runtime, model, effort and fallback chain, by the
+// What a step runs on (docs/protocol/runtimes.md, "Kinds and their defaults"): its runtime, model, effort and fallback chain, by the
 // precedence decided with queue FB (2026-11-14), strongest first: the step's own values in the queue YAML; the queue's;
 // what the run's start named explicitly (--runtime, --model, --effort, or the session it continues); the step's kind's
 // defaults (the project's own, else the global ones); the project's defaults. Pure and free of Node: the engine, the
@@ -147,7 +147,7 @@ function windowReason(name: string, utilization: number, threshold: number): str
 }
 
 /**
- * Whether a runtime is beyond the usage threshold now, and until when (PROTOCOL.md, "Fallback when usage runs out"):
+ * Whether a runtime is beyond the usage threshold now, and until when (docs/protocol/runtimes.md, "Fallback when usage runs out"):
  * any of its windows (Claude Code's five_hour, seven_day and the like; Codex's codex_*) at or above `threshold`. A
  * window the runtime has not reported is free; one whose `resets_at` has passed counts as reset, without a fresh
  * reading; one without a reset time cannot be waited for and counts as free. With several full windows, the later

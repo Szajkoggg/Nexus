@@ -1,4 +1,4 @@
-// Pictures in chat messages (PROTOCOL.md, "Uploads"). The composer uploads a pasted, dropped or attached picture; the
+// Pictures in chat messages (docs/protocol/api.md, "Uploads"). The composer uploads a pasted, dropped or attached picture; the
 // server saves it under the project's .nexus/uploads/ and answers its absolute path; the message carries each path on
 // its own line, after the text. A sent message shows those lines as pictures. The pure part, unit tested.
 

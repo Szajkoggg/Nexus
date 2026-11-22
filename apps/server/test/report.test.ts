@@ -56,8 +56,8 @@ function setup(o: { git?: boolean } = {}) {
 
 test("the report is written outside the working tree, copied into the queue's folder, and its source removed", async () => {
   const x = setup();
-  assert.equal(x.store.readProject().defaults.protect_nexus, true);
   try {
+    assert.equal(x.store.readProject().defaults.protect_nexus, true);
     x.engine.start("Q", { runtime: "claude" });
     await x.finished();
     const argv = readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[] })[0]!.argv!;

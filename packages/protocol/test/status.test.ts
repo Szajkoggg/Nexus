@@ -51,6 +51,42 @@ test("allowed: skip a pending, stopped or failed step; each is an entry with who
   assert.equal(q.status, "stopped", "skipping the stopped step does not lift the stop: that is the user's");
 });
 
+test("a skip may say where the step's work went on: the mark on the step, also after the fact in a finished queue", () => {
+  const { store, emit, queue } = setup(["Q1", "Q2", "Q3", "Q4"]);
+  store.writeQueue({ protocol: 1, id: "M", title: "Other", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [step("M1")] });
+  const set = (stepId: string, refs: string[] | undefined, reason = "cause found; the fix is planned elsewhere") =>
+    orchestratorStatusChange(store, { queue: "Q", step: stepId, to: "skipped", reason, continued_in: refs });
+  emit(1, { type: "step.started", queue: "Q", step: "Q1" });
+  emit(2, { type: "queue.stop", queue: "Q", step: "Q1", condition: "the cause is in the product", reason: "described" });
+  assert.match(set("Q1", [" Q3", "Q4", "Q3", "M/M1", "M"]), /Q\/Q1 skipped \(was stopped\), continued in Q3, Q4, M\/M1, M/);
+  const q1 = queue().steps[0]!;
+  assert.equal(q1.status, "skipped", "the status stays skipped: everything that closes a step is unchanged");
+  assert.deepEqual(q1.continued && { in: q1.continued.in, by: q1.continued.by, reason: q1.continued.reason }, { in: ["Q3", "Q4", "M/M1", "M"], by: "orchestrator", reason: "cause found; the fix is planned elsewhere" });
+  assert.deepEqual(queue().changes.at(-1)!.continued_in, ["Q3", "Q4", "M/M1", "M"]);
+
+  // Refusals: the step itself, what does not exist, with another status.
+  const refused = (stepId: string, refs: string[], why: RegExp) => assert.throws(() => set(stepId, refs), (e: ActionError) => why.test(e.message), refs.join(","));
+  refused("Q2", ["Q2"], /names the step itself/);
+  refused("Q2", ["Q/Q2"], /names the step itself/);
+  refused("Q2", ["Q9"], /neither a step of queue Q nor a queue/);
+  refused("Q2", ["M/M7"], /queue M has no step M7/);
+  refused("Q2", ["X/X1"], /no queue X/);
+  refused("Q2", ["a b"], /takes steps \(FL4\)/);
+  assert.throws(() => orchestratorStatusChange(store, { queue: "Q", to: "cancelled", reason: "x", continued_in: ["Q3"] }), /--continued-in goes with skipped/);
+
+  // A plain skip, then the mark after the fact; the queue done, the mark is still set (FL2 and FL3).
+  orchestratorStatusChange(store, { queue: "Q", step: "Q2", to: "skipped", reason: "dropped" });
+  assert.equal(queue().steps[1]!.continued, undefined, "a step simply dropped has no mark");
+  for (const id of ["Q3", "Q4"]) { emit(3, { type: "step.started", queue: "Q", step: id }); emit(4, { type: "step.done", queue: "Q", step: id, summary: "ok" }); emit(5, { type: "review.accepted", queue: "Q", step: id }, "u"); }
+  assert.equal(queue().status, "done");
+  assert.throws(() => orchestratorStatusChange(store, { queue: "Q", step: "Q2", to: "skipped", reason: "x" }), /skipped already \(--continued-in marks/);
+  assert.match(set("Q2", ["Q3"], "its work was done by Q3"), /Q\/Q2 \(skipped\) is marked continued in Q3/);
+  assert.deepEqual(queue().changes.at(-1)!.from, "skipped");
+  assert.deepEqual(queue().steps[1]!.continued?.in, ["Q3"]);
+  assert.equal(queue().status, "done", "the mark changes no status");
+  assert.throws(() => set("Q3", ["Q4"]), /queue Q is done/, "a done step is not skipped");
+});
+
 test("refused, with the reason: done, approving, lifting, reopening, a step at work, and anything not listed", () => {
   const { store, emit, set } = setup();
   emit(1, { type: "step.started", queue: "Q", step: "Q1" });
@@ -60,7 +96,7 @@ test("refused, with the reason: done, approving, lifting, reopening, a step at w
   // A live run holds Q2: it is at work.
   store.writeRun("Q", { protocol: 1, session: "w", state: "running", step: "Q2", started_at: at(3), updated_at: at(3), revision: 1 });
   const refused = (to: string, s: string | undefined, why: RegExp) => assert.throws(() => set(to, s), (e: ActionError) => why.test(e.message), `${to} ${s ?? ""}`);
-  refused("done", "Q3", /never marks a step done: work done elsewhere is skipped/);
+  refused("done", "Q3", /never marks a step done: .* is skipped with --continued-in naming where/);
   refused("approved", undefined, /approving is the user's/);
   refused("lift", undefined, /only the user lifts a stop/);
   refused("pending", "Q1", /reopening step Q\/Q1 \(done\) is the user's: a send-back/);

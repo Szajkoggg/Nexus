@@ -1,4 +1,4 @@
-// The closing refactoring step (PROTOCOL.md, "The closing refactoring step"): `coding: true` adds a step Nexus keeps
+// The closing refactoring step (docs/protocol/queues.md, "The closing refactoring step"): `coding: true` adds a step Nexus keeps
 // after the queue's own steps; the field is part of what an approval pins and stays once the queue has started; the
 // step cannot be skipped, `nexus queue set finished` waits for it, and a step of the queue's own at work after it ran
 // makes it run again at the end.

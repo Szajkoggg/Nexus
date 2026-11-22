@@ -1,4 +1,4 @@
-// The project's metrics against the fake runtimes (PROTOCOL.md, "Project metrics"): the orchestrator defines one with a
+// The project's metrics against the fake runtimes (docs/protocol/stats.md, "Project metrics"): the orchestrator defines one with a
 // warning threshold; a worker records its values (FAKE: metric); the value beyond the threshold is marked on its step
 // (StepView.metrics `warn`) with the step's commit, the orchestrator is told it once, and its review notice lists the
 // round's metrics; the value within it is told nothing.

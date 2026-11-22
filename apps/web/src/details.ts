@@ -123,6 +123,11 @@ export function describe(e: Event): string {
     case "review.rejected": return e.text ?? "";
     case "review.provisional": return e.text ?? "";
     case "review.fix_asked": return e.text;
+    case "review.audited": return `${e.verdict}: ${e.text}`;
+    case "review.passed_on": return `${e.reasons.join(", ")}: ${e.text}`;
+    // The checks Nexus runs (queue EC): a worker's dispute of a failure, and the orchestrator's decision on it.
+    case "check.disputed": return `${e.name}: ${e.evidence}`;
+    case "check.decided": return `${e.verdict}: ${e.reason}`;
     // Events this line shows no text for.
     case "change.proposed":
     case "log":
@@ -181,6 +186,21 @@ export function showsWorktreeActions(queue: Pick<QueueView, "worktree" | "status
   if (!queue.worktree || queue.worktree === "auto" || normPath(queue.worktree) === normPath(root)) return false;
   return queue.status === "done" || !!queue.git?.merged || !!queue.git?.cleaned;
 }
+
+/**
+ * The base branch Merge back would move, wherever it is offered (the queue's Worktree section, the integration step's
+ * box): a finished worktree queue not merged or cleaned up yet, not a survey run (it leaves no commit), whose base is a
+ * branch. Undefined: no Merge back there. Never withheld because the server would refuse now (docs/design/dashboard.md,
+ * "Merge back where it waits"): the server says why.
+ */
+export function mergeBackInto(queue: Pick<QueueView, "worktree" | "status" | "git" | "maintenance">, root: string): string | undefined {
+  const g = queue.git;
+  if (!showsWorktreeActions(queue, root) || g?.merged || g?.cleaned || queue.maintenance === "survey") return undefined;
+  return g?.base?.branch !== false ? g?.base?.ref : undefined;
+}
+
+/** The one action every Merge back posts to (the queue panel's, the integration step's, the waiting card's). */
+export const mergeBackPath = (queue: string) => `/queues/${encodeURIComponent(queue)}/merge`;
 
 /** How the merge back of an integration step stands: merged (since the step finished), waiting, and runs again. */
 export function integrationState(queue: Pick<QueueView, "git">, step: Pick<StepView, "finished_at">) {

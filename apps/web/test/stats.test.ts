@@ -4,14 +4,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { StatGroup, StatsReport } from "@nexus/protocol/stats";
-import { compareRows, compareScales, dayOf, daysUrl, estimate, headline, niceMax, rangeSince, statsUrl, weeklyUse, windowPanels } from "../src/stats.ts";
+import { compareRows, compareScales, dayOf, daysUrl, estimate, groupLabel, headline, niceMax, rangeSince, rangeSinceIso, statsUrl, weeklyUse, windowPanels } from "../src/stats.ts";
 
 const today = new Date(2026, 10, 15, 14, 30);
 
 function group(key: string, over: Partial<StatGroup> = {}): StatGroup {
   return {
     key, steps: 10, runtimes: ["claude"], few: false, decided: 8, first_accepted: 6, first_rate: 0.75, avg_rounds: 1.25,
-    stops: 1, failures: 0, median_ms: 30 * 60_000, p25_ms: 20 * 60_000, p75_ms: 45 * 60_000,
+    stops: 1, failures: 0, continued: 0, median_ms: 30 * 60_000, p25_ms: 20 * 60_000, p75_ms: 45 * 60_000,
     usage: {}, usage_steps: {}, usage_missing: 0, fallback: 0, ...over,
   };
 }
@@ -23,6 +23,8 @@ test("the range's first day, as a local date; the addresses carry the range, gro
   assert.equal(rangeSince("7d", today), "2026-11-09", "today and the six days before");
   assert.equal(rangeSince("30d", today), "2026-10-17");
   assert.equal(rangeSince("all", today), undefined);
+  assert.equal(rangeSinceIso("7d", today), new Date(2026, 10, 9).toISOString(), "the first day's local start as an ISO time");
+  assert.equal(rangeSinceIso("all", today), undefined);
   assert.equal(dayOf("2026-11-09").getTime(), new Date(2026, 10, 9).getTime(), "a day's key back to its local start");
   assert.equal(statsUrl({ range: "30d", by: "effort", filter: { kind: "code", area: "" } }, today), "/api/stats?by=effort&since=2026-10-17&kind=code");
   assert.equal(statsUrl({ range: "all", by: "model", project: "p", filter: {} }, today), "/api/stats?by=model&project=p");
@@ -34,6 +36,14 @@ test("grouping: one row per group in the report's order, a Claude model without 
   assert.deepEqual(rows.map((r) => [r.key, r.label, r.steps, r.few, r.runtimes]), [["claude-opus-5-5", "opus-5-5", 12, false, ["claude"]], ["gpt-6", "gpt-6", 4, true, ["codex"]]]);
   assert.deepEqual([rows[0]!.rate, rows[0]!.rounds, rows[0]!.median, rows[0]!.p25, rows[0]!.p75], [75, 1.25, 30, 20, 45]);
   assert.deepEqual([rows[1]!.rate, rows[1]!.median], [undefined, undefined], "nothing decided, nothing accepted: no figure, not zero");
+});
+
+test("the groups without a model or an effort are named in the catalogue's words, in the rows and so in every tooltip", () => {
+  const rows = compareRows(report([group("untagged"), group("default")]));
+  assert.deepEqual(rows.map((r) => r.label), [groupLabel("untagged"), groupLabel("default")]);
+  assert.equal(groupLabel("untagged"), "untagged", "the catalogue's English word");
+  assert.equal(groupLabel("default"), "runtime default");
+  assert.equal(groupLabel("claude-haiku-5-5"), "haiku-5-5");
 });
 
 test("use per step: the weekly windows only, over the steps with an estimate, Claude Code's first; marked as an estimate", () => {

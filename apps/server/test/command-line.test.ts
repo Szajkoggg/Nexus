@@ -1,5 +1,5 @@
 // The length of a Claude Code process's command line. Windows limits a whole command line to 32,767 characters, and a
-// briefing passed as an argument once came within 1,400 of it (DESIGN.md, "The orchestrator's briefing and the command
+// briefing passed as an argument once came within 1,400 of it (docs/design/engine.md, "The orchestrator's briefing and the command
 // line"); briefings now go in a file. This keeps every role's command line well below the limit.
 import { test } from "node:test";
 import assert from "node:assert/strict";

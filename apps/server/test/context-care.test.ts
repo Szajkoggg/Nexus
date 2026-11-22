@@ -1,14 +1,16 @@
-// Context care against the fake runtimes: at the end of a step whose session's context is fuller than the project's
-// threshold, the next step runs in a fresh session seeded with the context summary. The fakes report the context fill
-// FAKE_CONTEXT_FILL asks for (fake-behaviour.ts).
+// Context care against the fake runtimes: at the end of a step whose session's context is beyond the project's
+// threshold (context_reuse_tokens, default 300k, at most 80 % of the window), the next step runs in a fresh session
+// seeded with the context summary. The fakes report the context fill FAKE_CONTEXT_FILL asks for of a window of
+// FAKE_CONTEXT_WINDOW tokens (fake-behaviour.ts); here 1M unless a test says otherwise. Below the threshold, a session idle
+// for over an hour (its prompt cache gone) at a step boundary goes on in a fresh one too, if its summary is fresh (queue FI).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectStore, approveQueue, loadProjectState, routeAnswers, sendMessage, type StepDef } from "@nexus/protocol";
-import { Engine } from "../src/engine.ts";
+import { ProjectStore, approveQueue, loadProjectState, onWrite, routeAnswers, sendMessage, type StepDef } from "@nexus/protocol";
+import { Engine, type Clock } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
@@ -18,28 +20,57 @@ process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 
 interface Received { text: string; priority: string | null; busy: boolean; session: string | null }
 
-function setup(behaviours: string[], opts: { fill: number; care?: boolean; noSummary?: boolean }) {
+/** The engine's clock, moved forward by hand (its timers run on the real one). */
+function movableClock(): Clock & { ahead: number } {
+  const c = { ahead: 0, now: () => Date.now() + c.ahead, setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms), clearTimeout: (h: unknown) => clearTimeout(h as NodeJS.Timeout) };
+  return c;
+}
+
+/** `clock`: the engine's; `hold`: steps wait in review until the test accepts them (accept()). */
+function setup(behaviours: string[], opts: { fill: number; window?: number; care?: boolean; noSummary?: boolean; clock?: Clock; hold?: boolean; lateTurnMs?: number }) {
   const root = mkdtempSync(join(tmpdir(), "nexus-care-"));
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_LOG = join(root, "fake.log");
   process.env.FAKE_CONTEXT_FILL = String(opts.fill);
+  process.env.FAKE_CONTEXT_WINDOW = String(opts.window ?? 1_000_000);
   if (opts.noSummary) process.env.FAKE_NO_SUMMARY = "1"; else delete process.env.FAKE_NO_SUMMARY;
-  const store = ProjectStore.init(root, { id: "p", name: "P", root, defaults: { context_care: opts.care ?? true, context_reuse_threshold: 0.6 } });
+  const store = ProjectStore.init(root, { id: "p", name: "P", root, defaults: { context_care: opts.care ?? true } });
   const steps: StepDef[] = behaviours.map((b, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${b}`, acceptance: [] }));
   store.writeQueue({
     protocol: 1, id: "Q", title: "Queue", description: "The queue's own description: fracture the rock.", revision: 1, status: "proposed",
     stop_conditions: [], checks: [], steps, approvals: [], withdrawals: [], history: [],
   });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
+  const make = (): Engine => new Engine(store, () => { routeAnswers(store); if (!opts.hold) acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...(opts.clock ? { clock: opts.clock } : {}), lateTurnMs: opts.lateTurnMs });
+  let engine = make();
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const received = (): Received[] => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Received) : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
-  const done = () => { engine.shutdown(); delete process.env.FAKE_CONTEXT_FILL; delete process.env.FAKE_NO_SUMMARY; };
-  return { store, engine, queue, received, until, done };
+  const done = () => { engine.shutdown(); delete process.env.FAKE_CONTEXT_FILL; delete process.env.FAKE_CONTEXT_WINDOW; delete process.env.FAKE_NO_SUMMARY; };
+  const accept = () => { acceptReviews(store); engine.onChange(loadProjectState(store)); };
+  /** The next server on the same files (the old one shut down first, as by an update). */
+  const restart = () => { engine.shutdown(); engine = make(); };
+  return { store, get engine() { return engine; }, queue, received, until, done, accept, restart };
 }
 
 const asks = (r: Received[]) => r.filter((m) => m.text.includes("write your context summary"));
+
+test("the threshold in use is 300k tokens, at most 80 % of the window: a 1M window switches past 300k, a 256k one past 204.8k", async () => {
+  for (const c of [
+    { name: "310k of a 1M window", fill: 0.31, window: 1_000_000, switches: true },
+    { name: "202k of a 256k window", fill: 0.79, window: 256_000, switches: false },
+    { name: "207k of a 256k window", fill: 0.81, window: 256_000, switches: true },
+  ]) {
+    const { engine, queue, until, done } = setup(["summary", "done"], c);
+    try {
+      engine.start("Q", { runtime: "claude" });
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+      const q = queue();
+      assert.equal(q.steps[0]!.session !== q.steps[1]!.session, c.switches, c.name);
+      assert.deepEqual(q.run!.switches?.map((s) => s.why), c.switches ? ["context"] : undefined, c.name);
+    } finally { done(); }
+  }
+});
 
 for (const runtime of ["claude", "codex"] as const) {
   test(`${runtime}: above the threshold the next step runs in a fresh session seeded with the summary`, async () => {
@@ -53,6 +84,7 @@ for (const runtime of ["claude", "codex"] as const) {
       assert.notEqual(first, second, "the second step ran in another session");
       assert.equal(q.run!.session, second, "run.yaml points to the new session");
       assert.deepEqual(q.run!.switches?.map((s) => [s.from, s.to, s.step, s.summary, s.fill]), [[first, second, "Q2", "written", 0.8]]);
+      assert.deepEqual(q.run!.switches?.map((s) => s.tokens), [800_000], "its context tokens then");
       assert.equal(asks(received()).length, 0, "a fresh summary needs no asking");
 
       const sessions = loadProjectState(store).sessions;
@@ -63,7 +95,7 @@ for (const runtime of ["claude", "codex"] as const) {
       assert.notEqual(fresh.native_id, old.native_id);
 
       const opening = received().find((m) => m.session === second)!;
-      assert.match(opening.text, /^\[Nexus\] You take over queue Q "Queue" in a fresh session[\s\S]*80% full/);
+      assert.match(opening.text, /^\[Nexus\] You take over queue Q "Queue" in a fresh session[\s\S]*had 800k tokens in its context \(80% full\)/);
       assert.match(opening.text, /context summary at the end of Q1:\nfake summary of Q1\nTopics: fake, context/);
       assert.match(opening.text, /The queue's own description: fracture the rock\./);
       assert.match(opening.text, /- Q1 Step 1: done\. fake finished Q1\n- Q2 Step 2: yours now/);
@@ -74,7 +106,7 @@ for (const runtime of ["claude", "codex"] as const) {
 
   test(`${runtime}: below the threshold or with context care off, the next step stays in the same session`, async () => {
     for (const c of [
-      { name: "below the threshold", first: "summary", fill: 0.5, care: true },
+      { name: "below the threshold (290k of a 1M window)", first: "summary", fill: 0.29, care: true },
       { name: "context care off with a full session", first: "done", fill: 0.9, care: false },
     ]) {
       const { engine, queue, received, until, done } = setup([c.first, "done"], c);
@@ -107,6 +139,9 @@ for (const runtime of ["claude", "codex"] as const) {
     const { engine, queue, received, until, done } = setup(["done", "done", "done"], { fill: 0.8, noSummary: true });
     try {
       engine.start("Q", { runtime });
+      // One wait for each step (each in a session of its own, after a summary asked for), not one for the run: each
+      // takes a few processes, and a busy machine stretches them all (queue CI8).
+      for (const [i, id] of ["Q1", "Q2", "Q3"].entries()) await until(`${id} done`, () => queue().steps[i]!.status === "done", LONGER.run);
       await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
       const q = queue();
       // Asked once at the end of each step that has a next step (Q1 in the first session, Q2 in the second).
@@ -149,3 +184,162 @@ for (const runtime of ["claude", "codex"] as const) {
   });
 
 }
+
+test("claude: a message sent into the step's last turn that the runtime runs as a late turn of its own: the switch waits for that moment, the old session works no turn beside the fresh one, and the message goes to the fresh session (queue LF, F3)", async () => {
+  process.env.FAKE_LATE_NEXT = "1";
+  // The late turn starts once this file exists: after the engine looked at the turn's end and the switch waits. The
+  // moment in which the runtime may still start it is held open past the test's own waits (lateTurnMs), so the late
+  // turn the test starts falls inside it however long the engine takes to look: under load that took 1.0 to 1.7 s
+  // after the turn's result, past the default 1.5 s (queue CI3). The gate, not a time, decides when it starts.
+  const { store, engine, queue, received, until, done, accept } = setup(["summary", "done"], { fill: 0.8, lateTurnMs: 4 * LONGER.run });
+  const gate = join(dirname(process.env.FAKE_LOG!), "late-gate");
+  process.env.FAKE_LATE_GATE = gate;
+  try {
+    engine.start("Q", { runtime: "claude" });
+    // The step's turn has reported its done and summary, and holds its result for the message.
+    await until("Q1 in review in its turn", () => queue().steps[0]!.status === "review" && loadProjectState(store).sessions.find((s) => s.id === queue().run!.session)?.live?.state === "working", LONGER.step);
+    accept();
+    delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_GATE; // for the fresh session's process
+    const old = queue().run!.session;
+    sendMessage(store, old, "Use the grassland settings.", { queue: "Q", step: "Q1" });
+    engine.onChange(loadProjectState(store)); // delivered into the running turn (next)
+    await until("the message sent into the turn", () => received().some((m) => m.session === old && m.text.includes("grassland") && m.priority === "next"));
+    await until("the switch to wait", () => store.readActivity(old).entries.some((e) => /^Nexus waits a moment before step Q2/.test(e.text)), LONGER.step);
+    assert.equal(queue().run!.switches, undefined, "not switched while the runtime may still start a turn");
+    writeFileSync(gate, "");
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+    const q = queue();
+    const fresh = q.steps[1]!.session!;
+    assert.notEqual(fresh, old);
+    assert.deepEqual(q.run!.switches?.map((s) => [s.step, s.why]), [["Q2", "context"]]);
+    const opening = received().find((m) => m.session === fresh)!;
+    assert.match(opening.text, /step Q2 \(2 of 2\)[\s\S]*Use the grassland settings\./, "the message goes to the fresh session");
+    const freshStart = store.readActivity(fresh).entries.find((e) => e.kind === "turn_start")!.at;
+    const beside = store.readActivity(old).entries.filter((e) => e.at >= freshStart && ["turn_start", "text", "tool", "turn_end"].includes(e.kind) && !/^Nexus /.test(e.text));
+    assert.deepEqual(beside.map((e) => `${e.kind}: ${e.text}`), [], "the old session worked no turn beside the fresh one");
+  } finally { done(); delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_GATE; }
+});
+
+test("claude: a message for the old session while the switch waits goes to the fresh session, not as a turn of the old one Nexus then ends (queue LH, finding 11)", async () => {
+  // FAKE_LATE_NEXT=inside: the message sent into the step's last turn is read in it, and no late turn follows; the
+  // process settles for lateTurnMs, and the switch waits for that. A second message in that moment was delivered as a
+  // new turn of the idle old process: its start counted as a late turn, the process was ended, and the message, already
+  // recorded as delivered, reached neither session.
+  process.env.FAKE_LATE_NEXT = "inside";
+  const { store, engine, queue, received, until, done, accept } = setup(["summary", "done"], { fill: 0.8, lateTurnMs: 3000 });
+  try {
+    engine.start("Q", { runtime: "claude" });
+    await until("Q1 in review in its turn", () => queue().steps[0]!.status === "review" && loadProjectState(store).sessions.find((s) => s.id === queue().run!.session)?.live?.state === "working", LONGER.step);
+    accept();
+    delete process.env.FAKE_LATE_NEXT; // for the fresh session's process
+    const old = queue().run!.session;
+    sendMessage(store, old, "Use the grassland settings.", { queue: "Q", step: "Q1" });
+    engine.onChange(loadProjectState(store));
+    await until("the switch to wait", () => store.readActivity(old).entries.some((e) => /^Nexus waits a moment before step Q2/.test(e.text)), LONGER.step);
+    sendMessage(store, old, "Also keep the river.", { queue: "Q", step: "Q1" });
+    engine.onChange(loadProjectState(store));
+    await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+    const fresh = queue().steps[1]!.session!;
+    assert.notEqual(fresh, old);
+    assert.ok(!received().some((m) => m.session === old && m.text.includes("keep the river")), "not sent to the old session");
+    const opening = received().find((m) => m.session === fresh)!;
+    assert.match(opening.text, /step Q2 \(2 of 2\)[\s\S]*Also keep the river\./, "it goes to the fresh session");
+    assert.ok(!opening.text.includes("grassland"), "the message read in the last turn is not given again");
+  } finally { done(); delete process.env.FAKE_LATE_NEXT; }
+});
+
+test("claude: a server that ends after Nexus ended a late turn, before the switch: the next server still gives the message to the fresh session (queue LH, finding 11)", async () => {
+  // As the F3 test above, but the server ends right as Nexus ends the late turn (its activity line written): what that
+  // turn had taken in (recorded as delivered to the old session) was kept in memory only.
+  process.env.FAKE_LATE_NEXT = "1";
+  const x = setup(["summary", "done"], { fill: 0.8, lateTurnMs: 4 * LONGER.run });
+  const gate = join(dirname(process.env.FAKE_LOG!), "late-gate");
+  process.env.FAKE_LATE_GATE = gate;
+  let unhook = () => {};
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q1 in review in its turn", () => x.queue().steps[0]!.status === "review" && loadProjectState(x.store).sessions.find((s) => s.id === x.queue().run!.session)?.live?.state === "working", LONGER.step);
+    x.accept();
+    delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_GATE;
+    const old = x.queue().run!.session;
+    sendMessage(x.store, old, "Use the grassland settings.", { queue: "Q", step: "Q1" });
+    x.engine.onChange(loadProjectState(x.store));
+    await x.until("the message sent into the turn", () => x.received().some((m) => m.session === old && m.text.includes("grassland") && m.priority === "next"));
+    await x.until("the switch to wait", () => x.store.readActivity(old).entries.some((e) => /^Nexus waits a moment before step Q2/.test(e.text)), LONGER.step);
+    // The server ends as the late turn is ended: synchronously, at the activity line's write.
+    const activity = join(x.store.sessionDir(old), "activity.jsonl");
+    let ended = false;
+    unhook = onWrite((f) => {
+      if (ended || resolve(f) !== resolve(activity) || !x.store.readActivity(old).entries.some((e) => e.text.startsWith("Nexus ends the turn the runtime started by itself"))) return;
+      ended = true;
+      x.engine.shutdown();
+    });
+    writeFileSync(gate, "");
+    await x.until("the server ended at the late turn", () => ended, LONGER.step);
+    unhook();
+    await new Promise((r) => setTimeout(r, 500));
+    x.restart();
+    x.engine.resume("Q"); // the restart paused the run
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+    const fresh = x.queue().steps[1]!.session!;
+    assert.notEqual(fresh, old);
+    const opening = x.received().find((m) => m.session === fresh)!;
+    assert.match(opening.text, /step Q2 \(2 of 2\)[\s\S]*Use the grassland settings\./, "the message goes to the fresh session");
+  } finally { unhook(); x.done(); delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_GATE; }
+});
+
+const HOUR = 60 * 60_000;
+
+for (const runtime of ["claude", "codex"] as const) {
+  test(`${runtime}: idle for over an hour at a step boundary with a fresh summary, the next step runs in a fresh session`, async () => {
+    const clock = movableClock();
+    const { engine, queue, received, until, done, accept } = setup(["summary", "done"], { fill: 0.1, clock, hold: true });
+    try {
+      engine.start("Q", { runtime });
+      await until("Q1 in review", () => queue().steps[0]!.status === "review", LONGER.step);
+      clock.ahead = 2 * HOUR;
+      accept();
+      await until("Q2 in review", () => queue().steps[1]!.status === "review", LONGER.step);
+      accept();
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+      const q = queue();
+      const [first, second] = q.steps.map((s) => s.session!);
+      assert.notEqual(first, second, "the second step ran in a fresh session");
+      assert.deepEqual(q.run!.switches?.map((s) => [s.from, s.to, s.step, s.why, s.summary]), [[first, second, "Q2", "idle", "written"]]);
+      const idle = q.run!.switches![0]!.idle_minutes!;
+      assert.ok(idle >= 120 && idle < 125, `idle ${idle} min`);
+      assert.equal(asks(received()).length, 0, "nothing is asked");
+      const opening = received().find((m) => m.session === second)!;
+      assert.match(opening.text, /in a fresh session: the session that ran the queue so far was idle for 2 h( \d+ min)?, past the life of its prompt cache/);
+      assert.match(opening.text, /context summary at the end of Q1:\nfake summary of Q1/);
+    } finally { done(); }
+  });
+}
+
+test("no idle switch without a summary, within the hour, or with a summary older than the session's latest turn", async () => {
+  for (const c of [
+    { name: "idle 2 h without a summary", steps: ["done", "done"], idle: [2 * HOUR] },
+    { name: "idle 50 min with a fresh summary", steps: ["summary", "done"], idle: [50 * 60_000] },
+    // Q1's summary, then Q2's turn (no summary): at Q2's end the summary is older than the latest turn.
+    { name: "idle 2 h with an old summary", steps: ["summary", "done", "done"], idle: [0, 2 * HOUR] },
+  ]) {
+    const clock = movableClock();
+    const { engine, queue, received, until, done, accept } = setup(c.steps, { fill: 0.1, clock, hold: true });
+    try {
+      engine.start("Q", { runtime: "claude" });
+      for (const [i, ms] of c.idle.entries()) {
+        await until(`Q${i + 1} in review`, () => queue().steps[i]!.status === "review", LONGER.step);
+        clock.ahead += ms;
+        accept();
+      }
+      const last = c.steps.length - 1;
+      await until("the last step in review", () => queue().steps[last]!.status === "review", LONGER.step);
+      accept();
+      await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
+      const q = queue();
+      assert.equal(new Set(q.steps.map((s) => s.session)).size, 1, c.name);
+      assert.equal(q.run!.switches, undefined, c.name);
+      assert.equal(asks(received()).length, 0, c.name);
+    } finally { done(); }
+  }
+});

@@ -1,5 +1,5 @@
 // The project's Danger zone, at the bottom of its settings: removing it from Nexus, or deleting Nexus's data of it too
-// (PROTOCOL.md, "Removing a project"). Both are the user's only, confirmed in place: Remove with one more click, Delete
+// (docs/protocol/files.md, "Removing a project"). Both are the user's only, confirmed in place: Remove with one more click, Delete
 // with the project's name typed. While anything runs in the project both are off, and the zone says what runs.
 import { useState, type ReactNode } from "react";
 import type { ProjectFile } from "@nexus/protocol";

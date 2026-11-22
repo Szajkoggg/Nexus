@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { moveOn, placeOf, waitingPosition } from "../src/waiting.ts";
+import { mergeWaitText, moveOn, placeOf, waitingPosition } from "../src/waiting.ts";
 
 type W = { project: string; queue?: string; step?: string; lift?: { place: string; continue: boolean; revision: number }; name: string };
 const lift = { place: " at step W4c", continue: true, revision: 1 };
@@ -70,4 +70,14 @@ test("questions on the same step have separate positions, including after one an
   assert.equal(moveOn(remaining, at), questions[0]);
   assert.equal(waitingPosition(questions, { ...at, project: "other" }).at, 0);
   assert.equal(waitingPosition([w("review", "p", "Q", "Q1")], at).at, 0, "a review is a different destination");
+});
+
+test("a Merging back card's text: no leading queue (its first line names it), the checkout's path for the tooltip", () => {
+  const text = "queue W: the checkout of main has uncommitted changes: commit or stash them, then merge (C:/Users/me/Temp/demo)";
+  assert.deepEqual(mergeWaitText(text, "W"), { text: "the checkout of main has uncommitted changes: commit or stash them, then merge", path: "C:/Users/me/Temp/demo" });
+  const held = String.raw`queue W: the checkout of main has uncommitted changes: commit, then merge (D:\work\demo app); the run of queue X, held at its step's end for this merge back, goes on`;
+  assert.deepEqual(mergeWaitText(held, "W"), { text: "the checkout of main has uncommitted changes: commit, then merge; the run of queue X, held at its step's end for this merge back, goes on", path: String.raw`D:\work\demo app` });
+  const own = "queue W's branch nexus/W moved on after its integration step (it ended at 1234567, the branch is at 89abcde): its work is not merged back";
+  assert.deepEqual(mergeWaitText(own, "W"), { text: own }, "a possessive stays, and a parenthesis that is not a path too");
+  assert.deepEqual(mergeWaitText("queue W: a reason", "X"), { text: "queue W: a reason" }, "another queue's name stays");
 });

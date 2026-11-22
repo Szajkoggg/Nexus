@@ -19,6 +19,10 @@ const refused = (r: Response, body: unknown) => {
 
 type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
+let replied: ((url: string, r: Response) => void) | undefined;
+/** Told of every checked reply (api.ts takes where a write left the live stream from its header). */
+export function onReply(f: (url: string, r: Response) => void): void { replied = f; }
+
 /**
  * A request whose reply is checked: resolves with the reply's JSON body (undefined when it has none); rejects with an
  * HttpError holding the server's reason (else the status text) and status. A write always sends a JSON body (`{}` when
@@ -33,6 +37,7 @@ export async function request<T>(url: string, o: { method?: Method; body?: unkno
   });
   const body = await r.json().catch(() => undefined) as unknown;
   if (!r.ok) throw refused(r, body);
+  replied?.(url, r);
   return body as T;
 }
 

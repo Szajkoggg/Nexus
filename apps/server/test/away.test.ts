@@ -1,4 +1,4 @@
-// The user's away mode (PROTOCOL.md, "Away mode"), against the fake `claude`: while it is on, level-2 steps are reviewed
+// The user's away mode (docs/protocol/review.md, "Away mode"), against the fake `claude`: while it is on, level-2 steps are reviewed
 // as level 3 and level-1 steps are not; when its time comes it ends; a queue that waits for the user meanwhile brings
 // the orchestrator what the plan starts next, and it starts nothing outside the plan; agents cannot
 // switch it; and a real server (a development instance on a free port, its own NEXUS_HOME) keeps it across a restart

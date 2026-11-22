@@ -97,3 +97,16 @@ test("--activities: what the worker did, from the lists; an unknown name is refu
   assert.deepEqual(last.activities, ["feature", "p:terrain"]);
   assert.deepEqual(loadProjectState(x.store).queues[0]!.steps[0]!.observed_activities, ["feature", "p:terrain"]);
 });
+
+test("nexus context records a summary of any length, and warns when it is longer than the standard's 2,000 words", () => {
+  const { root, store } = setup();
+  const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: store.dir, NEXUS_SESSION: "w" };
+  const context = (text: string) => execFileSync(process.execPath, [CLI, "context", text, "--step", "Q1", "--topics", "t"], { cwd: root, env, encoding: "utf8", stdio: "pipe" }).trim();
+  assert.equal(context("Where: Q1 done. ".repeat(10)), "ok: context summary recorded");
+  const long = "word ".repeat(2001);
+  const out = context(long);
+  assert.match(out, /^ok: context summary recorded; warning: it is 2001 words, longer than the standard's 2000 \(nexus help context\)/);
+  const summaries = store.readEvents("w").entries.filter((e) => e.type === "context.summary");
+  assert.equal(summaries.length, 2, "both recorded");
+  assert.ok((summaries[1] as Extract<Event, { type: "context.summary" }>).text.trim() === long.trim(), "the long one whole");
+});

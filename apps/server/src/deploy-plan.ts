@@ -26,6 +26,7 @@ import { dirname, join } from "node:path";
 import { newId, nexusHome, notMergedBack, now, pendingProvisional, renameRetrying, stepClosed, type NotifyKind, type ProjectState } from "@nexus/protocol";
 import type { UpdateAsker } from "./handover.ts";
 import type { UpdateStatus } from "./lifecycle.ts";
+import { gitLabel, perf } from "./perf.ts";
 
 /** What a plan waits for: a step of a queue, or (no `step`) the whole queue. */
 export interface PlanTarget { project: string; queue: string; step?: string }
@@ -206,7 +207,7 @@ export interface PlannerOptions {
   file?: string;
 }
 
-const runGit = (root: string, args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim();
+const runGit = (root: string, args: string[]) => perf.measure(gitLabel(args), () => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true })).trim();
 
 export class DeployPlanner {
   private f: PlanFile;

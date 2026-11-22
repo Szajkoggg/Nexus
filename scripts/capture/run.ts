@@ -91,7 +91,7 @@ export interface Instance { url: string; port: number; pid: number; stop(): Prom
  * NEXUS_HOME and port, the checkout's fake runtimes, and none of NEXUS_DIR, NEXUS_HANDOVER, NEXUS_SESSION. Resolves
  * once it answers, or rejects with its output.
  */
-export async function startInstance(o: { root: string; home: string; port: number; parentEnv?: NodeJS.ProcessEnv }): Promise<Instance> {
+export async function startInstance(o: { root: string; home: string; port: number; parentEnv?: NodeJS.ProcessEnv; waitMs?: number }): Promise<Instance> {
   const fakes = { claude: join(o.root, "apps/server/test/fake-claude.ts"), codex: join(o.root, "apps/server/test/fake-codex.ts") };
   const env = instanceEnv(o.parentEnv ?? process.env, { home: o.home, port: o.port, fakes });
   const child: ChildProcess = spawn(process.execPath, [join(o.root, "apps/server/src/main.ts")], { cwd: o.root, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
@@ -108,11 +108,12 @@ export async function startInstance(o: { root: string; home: string; port: numbe
     await Promise.race([gone, sleep(5000)]);
   };
   const t = Date.now();
-  while (Date.now() - t < 30_000) {
+  const wait = o.waitMs ?? 30_000;
+  while (Date.now() - t < wait) {
     if (exited) throw new Error(`the development instance exited: ${out.trim().slice(-800)}`);
     try { if ((await fetch(`${url}/api/projects`)).ok) return { url, port: o.port, pid: child.pid!, stop, output: () => out }; } catch { /* not yet */ }
     await sleep(250);
   }
   await stop();
-  throw new Error(`the development instance did not answer within 30 s: ${out.trim().slice(-800)}`);
+  throw new Error(`the development instance did not answer within ${Math.round(wait / 1000)} s: ${out.trim().slice(-800)}`);
 }

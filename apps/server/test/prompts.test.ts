@@ -19,13 +19,13 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  ProjectStore, addNote, answerAsUser, approveQueue, ensureUserSession, loadProjectState, newId, now, reportFile, sendMessage,
+  ProjectStore, addNote, answerAsUser, approveQueue, ensureNexusSession, ensureUserSession, loadProjectState, newId, now, reportFile, resetClock, sendMessage,
   type Event, type QueueFile, type SessionFile, type StepDef,
 } from "@nexus/protocol";
 import type { AgentEvents, AgentProcess, Priority } from "../src/agent.ts";
 import type { Launch } from "../src/agent-host.ts";
 import { Engine } from "../src/engine.ts";
-import { freshSessionSeed, midStepSeed, noOutcomeNudge, stepOpening, switchReason } from "../src/prompts.ts";
+import { formatInbox, freshSessionSeed, helperBriefing, helperPacket, midStepSeed, noOutcomeNudge, stepOpening, switchReason } from "../src/prompts.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import type { DeployChanges } from "../src/deploy.ts";
@@ -79,6 +79,7 @@ function golden(name: string, actual: string): void {
 
 function setup(t: TestContext, name: string) {
   t.mock.timers.enable({ apis: ["Date"], now: T0 });
+  resetClock(); // each case starts again at T0: a clock set back on purpose (clock.ts)
   const root = mkdtempSync(join(tmpdir(), `nexus-prompts-${name}-`));
   process.env.NEXUS_HOME = join(root, "home");
   const store = ProjectStore.init(root, { id: "p", name: "Pilot", root });
@@ -94,7 +95,7 @@ function setup(t: TestContext, name: string) {
 test("the worker's texts: briefing, step openings, inbox entries, seeds and nudges match the golden file", (t) => {
   const { root, store, later, event, queue } = setup(t, "worker");
   const p = store.readProject();
-  store.writeProject({ ...p, defaults: { ...p.defaults, stop_conditions: ["The project's own stop condition."], context_care: true, context_reuse_threshold: 0.6,
+  store.writeProject({ ...p, defaults: { ...p.defaults, stop_conditions: ["The project's own stop condition."], context_care: true,
     checks: ["npm run lint", "npm test"] } }); // the project's checks: listed first, npm test once
   queue({
     id: "Q", title: "Prompts under test", description: "Context the worker needs.\nOn two lines.\n",
@@ -186,7 +187,7 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
   change();
   later(); engine.resume("Q");
 
-  tr.section("the nudges after background work (DESIGN.md, \"Background work\"; noOutcomeNudge): it has finished; it still runs after the limit");
+  tr.section("the nudges after background work (docs/design/engine.md, \"Background work\"; noOutcomeNudge): it has finished; it still runs after the limit");
   tr.add(noOutcomeNudge("A1", { finished: true }));
   tr.add(noOutcomeNudge("A1", { finished: false, minutes: 30, work: ["Run the e2e suite", "sub-agent /root/review"] }));
 
@@ -204,6 +205,30 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
   tr.add(open({ range: { from: "1111111111111111111111111111111111111111", to: "2222222222222222222222222222222222222222" }, stat: [" src/code.ts | 12 +++++++-----", " 1 file changed, 7 insertions(+), 5 deletions(-)"].join("\n"), rules: true }));
   tr.section("the closing refactoring step without git records, and without a Refactoring section");
   tr.add(open({ rules: false }));
+
+  tr.section("the closing refactoring step whose checks Nexus runs (P12): with the commit they last passed on, and without");
+  const byNexus = (c: Parameters<typeof stepOpening>[0]["closing"]) => stepOpening({
+    q: cq, step: closing, mode: "start", projectStopConditions: [], notes: [], answers: [], last: true, report: "<report file>", closing: c, checksByNexus: true,
+  });
+  tr.add(byNexus({ range: { from: "1111111111111111111111111111111111111111", to: "2222222222222222222222222222222222222222" }, rules: true, checked: "2222222222222222222222222222222222222222" }));
+  tr.add(byNexus({ rules: false }));
+
+  tr.section("checks run by Nexus (docs/protocol/checks.md, \"Checks run by Nexus\"): a step's opening, the integration step's (no conflict to resolve, one it may resolve)");
+  const nq = loadProjectState(store).queues.find((x) => x.id === "Q")!;
+  const opening = (integration?: Parameters<typeof stepOpening>[0]["integration"]) => stepOpening({
+    q: nq, step: nq.steps[2]!, mode: "start", projectStopConditions: [], projectChecks: ["npm run lint", "npm test"], notes: [], answers: [], last: false,
+    report: "<report file>", integration, checksByNexus: true,
+  });
+  tr.add(opening());
+  tr.add(opening({ base: "main", sha: "4444444444444444444444444444444444444444", branch: "nexus/Q", resolve: false }));
+  tr.add(opening({ base: "main", sha: "4444444444444444444444444444444444444444", branch: "nexus/Q", resolve: true }));
+
+  tr.section("a step whose checks Nexus runs: a check-fix round, and a send-back (inbox entries)");
+  store.writeChecks("C", { protocol: 1, steps: { C1: { by: "nexus", sets: [] } } });
+  const ns = loadProjectState(store);
+  tr.add(formatInbox({ v: 1, id: "check-failed-d1", at: now(), from: "nexus", type: "check_failed", ref: "d1", queue: "C", step: "C1", fix: 1,
+    text: "Check \"npm test\" failed twice (exit code 1).\nFailing tests:\n- engine › halts after the fix limit\nFull log: <root>/.nexus/queues/C/checks/C1/r1f0-1-npm-test.2.log\nThe end of its output:\nnot ok 12 - halts after the fix limit" }, ns));
+  tr.add(formatInbox({ v: 1, id: newId(), at: now(), from: "orchestrator", type: "send_back", ref: "r3", queue: "C", step: "C1", text: "The test is missing.", round: 2 }, ns));
 
   tr.section("a step taken over in its middle on its fallback (usage): with progress, commits and uncommitted files, and without");
   const mq = loadProjectState(store).queues.find((x) => x.id === "Q")!;
@@ -230,7 +255,7 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
 test("the orchestrator's texts: briefing, helpers and notices match the golden file", (t) => {
   const { root, store, later, event, queue } = setup(t, "orchestrator");
   const p = store.readProject();
-  store.writeProject({ ...p, defaults: { ...p.defaults, context_reuse_threshold: 0.55 } });
+  store.writeProject({ ...p, defaults: { ...p.defaults, context_reuse_tokens: 200_000 } });
   const tr = new Transcript("orchestrator");
   let deploys: DeployChanges[] = [];
   let update: UpdateNotice | undefined;
@@ -391,6 +416,73 @@ test("the orchestrator's texts: briefing, helpers and notices match the golden f
   golden("orchestrator", tr.text([[orch, "<orchestrator session>"], [root, "<root>"]]));
 });
 
+test("the review helper's texts: its briefing, its packet, the notices after a pass-on, and what rides with a notice match the golden file", (t) => {
+  const { root, store, event, queue } = setup(t, "helper");
+  const p = store.readProject();
+  // Every acceptance of the helper audited (the rate decides it with the event id's hash; 1: all).
+  store.writeProject({ ...p, review_helper: { ...p.review_helper, audit_rate: 1 } });
+  const tr = new Transcript("orchestrator");
+  // Without helpers of its own: the helper sessions and their verdicts are written here, as their CLI would.
+  const orchestrator = new Orchestrator(store, { draining: false } as unknown as Engine, () => {}, {}, { spawn: tr.spawn });
+  t.after(() => orchestrator.shutdown());
+  const change = () => orchestrator.onChange(loadProjectState(store));
+  orchestrator.say("Hello.");
+  const orch = store.readProject().orchestrator!.session!;
+  queue({ id: "QH", review_level: 2, steps: [
+    { id: "H1", title: "Step H1", goal: "Goal of H1.", acceptance: ["H1 is done"] },
+    { id: "H2", title: "Step H2", goal: "Goal of H2.", acceptance: ["H2 is done", "The look is calm"], review: { prepare: "The calm look: compare with the mockup." } },
+    { id: "H3", title: "Step H3", goal: "Goal of H3.", acceptance: ["H3 is done"], review: { level: 3 } },
+  ] });
+  approveQueue(store, "QH");
+  store.writeSession({ protocol: 1, id: "w-h", project: "p", role: "worker", runtime: "claude", native_id: null, title: "w-h", cwd: root, launched_by: "nexus", created_at: now(), queue: "QH" });
+  const helper = (id: string, step: string, round: number, level: 2 | 3) => store.writeSession({
+    protocol: 1, id, project: "p", role: "helper", runtime: "claude", native_id: null, cwd: root, launched_by: "nexus", created_at: now(),
+    model: "claude-sonnet-5-5", effort: "medium", about: { queue: "QH", step, round, level },
+  });
+  const step = (id: string) => loadProjectState(store).queues.find((q) => q.id === "QH")!.steps.find((x) => x.id === id)!;
+
+  tr.section("H1: the worker sends it back after the helper's send-back, and the helper accepts round 2");
+  event("w-h", { type: "step.started", queue: "QH", step: "H1" });
+  event("w-h", { type: "step.done", queue: "QH", step: "H1", summary: "H1 in its first round.", commit: "aaa1111" });
+  helper("h-1", "H1", 1, 2);
+  event("h-1", { type: "review.sent_back", queue: "QH", step: "H1", text: "The test for the empty list is missing.\nAdd it beside the others." });
+  // The send-back delivered, as the server does (routeSendBacks): round 2 opens.
+  store.appendInbox("w-h", { v: 1, id: "send-back-x", at: now(), from: "helper", type: "send_back", ref: step("H1").sent_back[0]!.id, queue: "QH", step: "H1", text: "The test for the empty list is missing.", round: 2 });
+  event("w-h", { type: "step.started", queue: "QH", step: "H1" });
+  event("w-h", { type: "step.done", queue: "QH", step: "H1", summary: "H1 with the test.", commit: "aaa2222" });
+  helper("h-2", "H1", 2, 2);
+  event("h-2", { type: "review.accepted", queue: "QH", step: "H1", text: "Both criteria checked in the diff and the test file." });
+
+  tr.section("the review helper's briefing");
+  tr.add(helperBriefing(store.readProject()));
+
+  tr.section("H2: its packet, with the review notes, the checks reported and the diff's summary");
+  event("w-h", { type: "step.started", queue: "QH", step: "H2" });
+  event("w-h", { type: "check.result", queue: "QH", step: "H2", name: "npm test", ok: true, summary: "112 pass", duration: 95.2 });
+  event("w-h", { type: "step.done", queue: "QH", step: "H2", summary: "H2 done; the colours differ from the plan (left out: the dark theme).", commit: "bbb1111" });
+  const state = loadProjectState(store);
+  const qh = state.queues.find((q) => q.id === "QH")!;
+  tr.add(helperPacket(qh, step("H2"), {
+    stat: " src/a.ts | 4 ++--\n 1 file changed, 2 insertions(+), 2 deletions(-)", diff: join(root, "sessions", "h-3", "diff.patch"),
+    range: { from: "aaa2222", to: "bbb1111", round: { from: "aaa2222", to: "bbb1111" } }, queueDir: join(root, ".nexus", "queues", "QH"),
+  }));
+
+  tr.section("H2 passed on by the helper (a criterion, a deviation): the review notice, with H1's acceptance and its audit riding with it");
+  helper("h-3", "H2", 1, 2);
+  event("h-3", { type: "review.passed_on", queue: "QH", step: "H2", round: 1, reasons: ["criterion", "deviation"], text: "H2 is done: checked in the diff. The calm look cannot be judged from the packet; the summary leaves out the dark theme." });
+  change();
+
+  tr.section("H3 (level 3) passed on by Nexus without a helper: its runtime is beyond the usage threshold");
+  event(orch, { type: "review.accepted", queue: "QH", step: "H2" });
+  event("w-h", { type: "step.started", queue: "QH", step: "H3" });
+  event("w-h", { type: "step.done", queue: "QH", step: "H3", summary: "H3 done.", commit: "ccc1111" });
+  ensureNexusSession(store);
+  event("nexus", { type: "review.passed_on", queue: "QH", step: "H3", round: 1, reasons: ["unavailable"], text: "The review helper's runtime is beyond the usage threshold: five_hour at 95 %." });
+  change();
+
+  golden("helper", tr.text([[orch, "<orchestrator session>"], [root.replaceAll("\\", "/"), "<root>"], [root, "<root>"]]));
+});
+
 test("the orchestrator's context care: the summary request, the fresh session's first message and summary.md match the golden file", (t) => {
   const { root, store, later, event, queue } = setup(t, "orchestrator-fresh");
   const tr = new Transcript("orchestrator");
@@ -484,31 +576,56 @@ test("the briefings carry the review standard's essentials and point to nexus he
     "before (the old state), mockup (the design), after (the new state), variant-a / variant-b (alternatives), result", "fixed-viewport", "Nexus refuses a wrong pair"]) {
     assert.ok(WORKER_BRIEFING.includes(part), `the worker's briefing has ${JSON.stringify(part)}`);
   }
-  const orch = orchestratorBriefing("Pilot", 60);
+  const orch = orchestratorBriefing("Pilot", 300_000);
   for (const part of ["`nexus help review` (read it before you write a review.prepare)", "In review.prepare name the views with their keys and roles", "waiting-tab@492 before -> after"]) {
     assert.ok(orch.includes(part), `the orchestrator's briefing has ${JSON.stringify(part)}`);
   }
 });
 
-test("the three briefings say to run nexus and git commands on their own, and keep the line against working around a refusal (queue SH)", async () => {
-  const { WORKER_BRIEFING, orchestratorBriefing, partnerBriefing } = await import("../src/prompts.ts");
-  const alone = "Run nexus and git commands on their own, one per call, with nothing before the command name and no option before its subcommand: no cd, no &&, no pipes, not git -C <path> (they run in your working directory already). If one is refused, you may retry the same command once on its own (without chaining or -C), not in another shell.";
-  const partner = partnerBriefing({ name: "P", root: "/p", languages: { working: "en" } } as unknown as Parameters<typeof partnerBriefing>[0], undefined);
-  const briefings = { worker: WORKER_BRIEFING, orchestrator: orchestratorBriefing("Pilot", 60), partner };
-  for (const [who, text] of Object.entries(briefings)) assert.equal(text.split(alone).length, 2, `the ${who}'s briefing says it once`);
+test("the three briefings, on each runtime, say how to read and how to run and chain nexus and git commands (queues SH, BR)", async () => {
+  const { WORKER_BRIEFING, orchestratorBriefing, partnerBriefing, workerBriefing, shellCommands, readingRules } = await import("../src/prompts.ts");
+  const project = { name: "P", root: "/p", languages: { working: "en" } } as unknown as Parameters<typeof partnerBriefing>[0];
+  for (const runtime of ["claude", "codex"] as const) {
+    const roles = { worker: workerBriefing({ working: "en" }, runtime), orchestrator: orchestratorBriefing("Pilot", 300_000, undefined, 500_000, runtime), partner: partnerBriefing(project, undefined, runtime) };
+    for (const [who, text] of Object.entries(roles)) {
+      for (const rule of [shellCommands(runtime), readingRules(runtime)]) assert.equal(text.split(rule).length, 2, `the ${who}'s briefing on ${runtime} says it once`);
+      for (const part of ["as parallel tool calls", "nexus doc <file.md#section>", "only by exception", "never two builds or test runs at once", "a; if ($?) { b }", "a && b", "never in one chain"]) {
+        assert.ok(text.includes(part), `the ${who}'s briefing on ${runtime} has ${JSON.stringify(part)}`);
+      }
+      assert.ok(text.includes(runtime === "codex" ? "Find with rg, with context lines (-C)" : "Find with Grep, with context lines (-C) and a head_limit, and read a known range with Read's offset and limit"), `the ${who}'s briefing reads in part on ${runtime}`);
+      assert.ok(!text.includes("no cd, no &&"), `the ${who}'s briefing on ${runtime} no longer forbids a chain`);
+    }
+  }
+  const partner = partnerBriefing(project, undefined);
+  const briefings = { worker: WORKER_BRIEFING, orchestrator: orchestratorBriefing("Pilot", 300_000), partner };
   assert.ok(WORKER_BRIEFING.includes("- When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, the shell after the edit tool); retry once in a simpler form at most (without chaining, for example), otherwise report what you needed and why.\n"));
   assert.ok(briefings.orchestrator.includes("\nWhen an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, for example); retry once in a simpler form at most, otherwise tell the user what you needed and why (`nexus help refusals`).\n"));
   assert.ok(partner.endsWith("\n- When an action is refused, do not work around it through another tool or command that reaches the same end; retry once in a simpler form at most, otherwise tell the user what you needed and why (`nexus help refusals`)."));
 });
 
+test("the worker looks at one width and reports progress at phase boundaries; the orchestrator puts small items together (queue BR)", async () => {
+  const { workerBriefing, orchestratorBriefing } = await import("../src/prompts.ts");
+  for (const runtime of ["claude", "codex"] as const) {
+    const worker = workerBriefing({ working: "en" }, runtime);
+    assert.ok(worker.includes("Look at a changed view yourself at one width"), `the ${runtime} worker looks at one width`);
+    assert.ok(worker.includes("you only register for the review (nexus review add), without opening them again"));
+    assert.ok(worker.includes("at a phase boundary only"), `the ${runtime} worker reports progress at phase boundaries`);
+    assert.ok(orchestratorBriefing("Pilot", 300_000, undefined, 500_000, runtime).includes("go into one queue, each as a step of its own (at most about five steps)"), `the ${runtime} orchestrator puts small items together`);
+  }
+});
+
 test("the orchestrator's briefing and notices on parallel worktrees and merging back (queue PW)", async () => {
   const { orchestratorBriefing, mergeWaitNotice, mergedNotice } = await import("../src/prompts.ts");
-  const orch = orchestratorBriefing("Pilot", 60);
+  const orch = orchestratorBriefing("Pilot", 300_000);
   for (const part of [
     "give a queue a worktree of its own (worktree: auto) when its work is independent",
     "queues that touch the same code run one after another (put them in the plan in order), never side by side",
     "id <queue>.integrate, review level 2",
-    "it resolves a conflict only where the project's resolve_conflicts setting allows it",
+    "a worker is started only for a conflict the project's resolve_conflicts setting lets it resolve, or for a failing check",
+    // Queue MI: the integration step without a model, the report's writer, and the checks it rests on.
+    "without a model when the merge is clean, and accepts the step itself when every check passes",
+    "The queue's report is written by the step before the integration step",
+    "give such a queue checks that cover the typecheck, the tests and, where the work touches it, the build",
     "Merging the queue back into main is Nexus's own only where the project's merge_back setting is on",
     "with the setting off it is the user's (Merge back in the dashboard). Never merge, rebase or move main yourself.",
   ]) assert.ok(orch.includes(part), `the orchestrator's briefing has ${JSON.stringify(part)}`);
@@ -525,7 +642,7 @@ test("the orchestrator's briefing and notices on parallel worktrees and merging 
 
 test("the static analysis reminder: the notice, the command and the recommended additions in the orchestrator's briefing (queue MT)", async () => {
   const { orchestratorBriefing, staticAnalysisNotice } = await import("../src/prompts.ts");
-  const orch = orchestratorBriefing("Pilot", 60);
+  const orch = orchestratorBriefing("Pilot", 300_000);
   for (const part of [
     "nexus static-analysis decline --reason \"...\"",
     "A maintenance report ends with \"Recommended additions\" (not findings)",
@@ -538,6 +655,6 @@ test("the static analysis reminder: the notice, the command and the recommended 
 
 test("the orchestrator offers the lifecycle template once a queue that touched the run control or lifecycle code is done (queue TP)", async () => {
   const { orchestratorBriefing } = await import("../src/prompts.ts");
-  const orch = orchestratorBriefing("Pilot", 60);
+  const orch = orchestratorBriefing("Pilot", 300_000);
   assert.ok(orch.includes("When a queue that touched the project's run control or lifecycle code (its AGENTS.md may name which code that is) is done, offer the user in one sentence the lifecycle template (nexus template show lifecycle)"), orch);
 });

@@ -1,4 +1,4 @@
-// Review levels (PROTOCOL.md, "Review"): the old review policies read as levels in every file that had them, an
+// Review levels (docs/protocol/review.md, "Review"): the old review policies read as levels in every file that had them, an
 // approval of the old form that stays, the levels the user sets on steps (kept across revisions, no new approval), and
 // steps done before the change, which keep the meaning they had.
 // Where a level comes from and whom a step's review goes to are in state.test.ts.

@@ -1,5 +1,5 @@
 // Settings: the global ones every project follows, and a project's own (how its agents run, its defaults), each
-// setting with a global value switched between following it and the project's own value (PROTOCOL.md, "Global settings").
+// setting with a global value switched between following it and the project's own value (docs/protocol/settings.md, "Global settings").
 import { useState, type ReactNode } from "react";
 import type { GlobalSettings, ProjectFile, TagsFile } from "@nexus/protocol";
 import type { ModelInfo } from "@nexus/protocol/api";
@@ -15,8 +15,9 @@ import { levelTitle } from "./Levels.tsx";
 import { ProjectTags } from "./Tags.tsx";
 import { DangerZone } from "./DangerZone.tsx";
 import { PlannedDeployCard, type PlannedDeploy } from "./DeployPlan.tsx";
-import { SEND_BACKS, STOPS, conditionList, savedConditions, settingsProblem, type SettingsProblem } from "../settingsCheck.ts";
+import { FIX_LIMIT, SEND_BACKS, STOPS, conditionList, savedConditions, settingsProblem, type SettingsProblem } from "../settingsCheck.ts";
 import { usePage } from "../page.ts";
+import { RUNTIME_OPTIONS } from "../runtimes.ts";
 import { NotifySettingsRows } from "./NotifySettings.tsx";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -100,17 +101,18 @@ function nested(values: Values, keys: readonly string[]): Values {
 /** The hint under the partners' web level: what each level lets them do, and for `fetch` its risk. */
 const WEB_HINT: Record<string, Key> = { off: "settings.web.offHint", search: "settings.web.searchHint", fetch: "settings.web.fetchHint" };
 
-/** Every setting with a global value, in the order of PROTOCOL.md's list. */
+/** Every setting with a global value, in the order of docs/protocol/settings.md's list. */
 const SETTING_KEYS = [
-  "defaults.stop_conditions", "defaults.review_level", "defaults.review_send_back_limit", "defaults.context_reuse_threshold",
+  "defaults.stop_conditions", "defaults.review_level", "defaults.review_send_back_limit", "defaults.context_reuse_tokens",
   "defaults.context_care", "defaults.protect_nexus", "defaults.push_accepted", "defaults.provisional_counts", "defaults.merge_back", "defaults.resolve_conflicts", "defaults.usage_pause_threshold",
-  "defaults.max_running",
+  "defaults.max_running", "defaults.check_fix_limit",
   "runtimes.default", "runtimes.claude.model", "runtimes.claude.effort", "runtimes.claude.permission_mode",
   "runtimes.codex.model", "runtimes.codex.effort", "runtimes.codex.sandbox", "runtimes.codex.approval_policy", "runtimes.codex.approvals_reviewer",
   "conversations.runtime", "conversations.model", "conversations.effort", "conversations.web",
-  "orchestrator.runtime", "orchestrator.model", "orchestrator.effort", "orchestrator.fallback", "orchestrator.notify", "orchestrator.context_threshold",
+  "orchestrator.runtime", "orchestrator.model", "orchestrator.effort", "orchestrator.fallback", "orchestrator.notify", "orchestrator.context_threshold_tokens",
   "languages.reader",
   ...TAG_KINDS.flatMap((k) => [`kinds.${k}.runtime`, `kinds.${k}.model`, `kinds.${k}.effort`, `kinds.${k}.fallback`]),
+  "review_helper.enabled", "review_helper.runtime", "review_helper.model", "review_helper.effort", "review_helper.audit_rate",
 ];
 
 /**
@@ -194,7 +196,7 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
       <Section title={t("settings.general")}>
         {p && <Row label={t("settings.name")}><input value={p.values.name} onChange={(e) => p.set("name", e.target.value)} className={field} /></Row>}
         <Setting form={f} keys={["runtimes.default"]} label={t("settings.defaultRuntime")} hint={t("settings.defaultRuntimeHint")}>
-          {(d) => <Select value={f.get("runtimes.default")} onChange={(v) => f.set("runtimes.default", v)} disabled={d} options={[["claude", "Claude Code"], ["codex", "Codex"]]} />}
+          {(d) => <Select value={f.get("runtimes.default")} onChange={(v) => f.set("runtimes.default", v)} disabled={d} options={RUNTIME_OPTIONS} />}
         </Setting>
       </Section>
 
@@ -264,7 +266,7 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
         {/* Its runtime (queue OC): another one starts a fresh orchestrator session; the model and effort go by it. */}
         <Setting form={f} keys={["orchestrator.runtime"]} label={t("settings.runtime")}
           hint={orchRuntime === "codex" ? <span className="text-warn">{t("settings.orchestratorCodexHint")}</span> : t("settings.orchestratorClaudeHint")}>
-          {(d) => <Select value={orchRuntime} disabled={d} onChange={(v) => { f.set("orchestrator.runtime", v); f.set("orchestrator.model", ""); f.set("orchestrator.effort", ""); }} options={[["claude", "Claude Code"], ["codex", "Codex"]]} />}
+          {(d) => <Select value={orchRuntime} disabled={d} onChange={(v) => { f.set("orchestrator.runtime", v); f.set("orchestrator.model", ""); f.set("orchestrator.effort", ""); }} options={RUNTIME_OPTIONS} />}
         </Setting>
         <Setting form={f} keys={["orchestrator.model"]} label={t("settings.model")} hint={t("settings.orchestratorModelHint")}>
           {(d) => <ModelSelect runtime={orchRuntime} value={f.get("orchestrator.model")} onChange={(v) => f.set("orchestrator.model", v)} disabled={d} defaultLabel={t("settings.runtimeDefault")} className="w-full" />}
@@ -276,10 +278,12 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
         <Setting form={f} keys={["orchestrator.notify"]} label={t("settings.tellIt")}>
           {(d) => <Check checked={f.bool("orchestrator.notify")} onChange={(v) => f.set("orchestrator.notify", v)} disabled={d}>{t("settings.tellItCheck")}</Check>}
         </Setting>
-        <Setting form={f} keys={["orchestrator.context_threshold"]} label={t("settings.orchestratorFresh")} hint={t("settings.orchestratorFreshHint")}>
-          {(d) => <Percent value={f.get("orchestrator.context_threshold")} onChange={(v) => f.set("orchestrator.context_threshold", v)} disabled={d} />}
+        <Setting form={f} keys={["orchestrator.context_threshold_tokens"]} label={t("settings.orchestratorFresh")} hint={<>{t("settings.orchestratorFreshHint")} {t("settings.tokensCap")}</>}>
+          {(d) => <Tokens value={f.get("orchestrator.context_threshold_tokens")} onChange={(v) => f.set("orchestrator.context_threshold_tokens", v)} disabled={d} />}
         </Setting>
       </Section>
+
+      <ReviewHelperRows form={f} />
 
       <Section title={t("settings.ideas")}>
         {p && (
@@ -288,7 +292,7 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
           </Row>
         )}
         <Setting form={f} keys={["conversations.runtime"]} label={t("settings.runtime")}>
-          {(d) => <Select value={ideasRuntime} disabled={d} onChange={(v) => { f.set("conversations.runtime", v); f.set("conversations.model", ""); f.set("conversations.effort", ""); }} options={[["claude", "Claude Code"], ["codex", "Codex"]]} />}
+          {(d) => <Select value={ideasRuntime} disabled={d} onChange={(v) => { f.set("conversations.runtime", v); f.set("conversations.model", ""); f.set("conversations.effort", ""); }} options={RUNTIME_OPTIONS} />}
         </Setting>
         <Setting form={f} keys={["conversations.model"]} label={t("settings.model")}>
           {(d) => <ModelSelect runtime={ideasRuntime} value={f.get("conversations.model")} onChange={(v) => f.set("conversations.model", v)} disabled={d} defaultLabel={t("settings.runtimeDefault")} className="w-full" />}
@@ -312,6 +316,12 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
               onChange={(e) => f.set(SEND_BACKS, e.target.value === "" ? "" : Number(e.target.value))} className={`${field} w-24`} />
           )}
         </Setting>
+        <Setting form={f} keys={[FIX_LIMIT]} label={t("settings.checkFixLimit")} hint={t("settings.checkFixLimitHint")}>
+          {(d) => (
+            <input type="number" min={0} step={1} disabled={d} value={f.get(FIX_LIMIT)} aria-label={t("settings.checkFixLimit")}
+              onChange={(e) => f.set(FIX_LIMIT, e.target.value === "" ? "" : Number(e.target.value))} className={`${field} w-24`} />
+          )}
+        </Setting>
         <Setting form={f} keys={[STOPS]} label={t("settings.stops")} hint={t("settings.stopsHint")}>
           {(d) => <ConditionList value={f.list(STOPS)} onChange={(v) => f.set(STOPS, v)} disabled={d} />}
         </Setting>
@@ -329,8 +339,8 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
             {(d) => <span className="block w-24"><Select value={f.get(MAX_RUNNING)} onChange={(v) => f.set(MAX_RUNNING, Number(v))} disabled={d} options={limitChoices(f.get(MAX_RUNNING))} /></span>}
           </Setting>
         )}
-        <Setting form={f} keys={["defaults.context_reuse_threshold"]} label={t("settings.reuse")} hint={t("settings.reuseHint")}>
-          {(d) => <Percent value={f.get("defaults.context_reuse_threshold")} onChange={(v) => f.set("defaults.context_reuse_threshold", v)} disabled={d} />}
+        <Setting form={f} keys={["defaults.context_reuse_tokens"]} label={t("settings.reuse")} hint={<>{t("settings.reuseHint")} {t("settings.tokensCap")}</>}>
+          {(d) => <Tokens value={f.get("defaults.context_reuse_tokens")} onChange={(v) => f.set("defaults.context_reuse_tokens", v)} disabled={d} />}
         </Setting>
         <Setting form={f} keys={["defaults.context_care"]} label={t("settings.care")} hint={t("settings.careHint")}>
           {(d) => <Check checked={f.bool("defaults.context_care")} onChange={(v) => f.set("defaults.context_care", v)} disabled={d}>{t("settings.careCheck")}</Check>}
@@ -367,6 +377,37 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
 }
 
 /**
+ * The review helper (queue RH): whether it takes the orchestrator's routine reviews, the runtime, model and effort it
+ * runs on (one row, global or the project's own together, like a kind's), and the share of its acceptances audited.
+ */
+function ReviewHelperRows({ form: f }: { form: Form }) {
+  const key = (x: string) => `review_helper.${x}`;
+  const runtime = (f.get(key("runtime")) || "claude") as "claude" | "codex";
+  const model = f.get(key("model"));
+  const on = f.bool(key("enabled"));
+  return (
+    <Section title={t("settings.reviewHelper")}>
+      <p className="pb-1 text-xs text-fg-3" id="settings-review-helper">{t("settings.reviewHelperNote")}</p>
+      <Setting form={f} keys={[key("enabled")]} label={t("settings.reviewHelperUse")} hint={t(on ? "settings.reviewHelperOnHint" : "settings.reviewHelperOffHint")}>
+        {(d) => <Check checked={on} onChange={(v) => f.set(key("enabled"), v)} disabled={d}>{t("settings.reviewHelperCheck")}</Check>}
+      </Setting>
+      <Setting form={f} keys={["runtime", "model", "effort"].map(key)} label={t("settings.reviewHelperRunsOn")} hint={t("settings.reviewHelperRunsOnHint")}>
+        {(d) => (
+          <span className="flex flex-wrap items-center gap-1.5">
+            <Select value={runtime} disabled={d} onChange={(v) => { f.set(key("runtime"), v); f.set(key("model"), ""); f.set(key("effort"), ""); }} options={RUNTIME_OPTIONS} />
+            <ModelSelect runtime={runtime} value={model} onChange={(v) => f.set(key("model"), v)} disabled={d} defaultLabel={t("settings.kindModelDefault")} />
+            <EffortSelect runtime={runtime} model={model} value={f.get(key("effort"))} onChange={(v) => f.set(key("effort"), v)} disabled={d} defaultLabel={t("settings.kindEffortDefault")} />
+          </span>
+        )}
+      </Setting>
+      <Setting form={f} keys={[key("audit_rate")]} label={t("settings.reviewHelperAudit")} hint={t("settings.reviewHelperAuditHint")}>
+        {(d) => <Percent value={f.get(key("audit_rate"))} onChange={(v) => f.set(key("audit_rate"), v)} disabled={d} min={0} />}
+      </Setting>
+    </Section>
+  );
+}
+
+/**
  * One kind's defaults: runtime, model and effort on one line, the fallback chain under them. The four go together
  * (global or the project's own).
  */
@@ -379,7 +420,7 @@ function KindRow({ form: f, kind }: { form: Form; kind: string }) {
       {(d) => (
         <span className="block space-y-1.5" id={`kind-${kind}`}>
           <span className="flex flex-wrap items-center gap-1.5">
-            <Select value={runtime} disabled={d} onChange={(v) => { f.set(key("runtime"), v); f.set(key("model"), ""); f.set(key("effort"), ""); }} options={[["claude", "Claude Code"], ["codex", "Codex"]]} />
+            <Select value={runtime} disabled={d} onChange={(v) => { f.set(key("runtime"), v); f.set(key("model"), ""); f.set(key("effort"), ""); }} options={RUNTIME_OPTIONS} />
             <ModelSelect runtime={runtime} value={model} onChange={(v) => f.set(key("model"), v)} disabled={d} defaultLabel={t("settings.kindModelDefault")} />
             <EffortSelect runtime={runtime} model={model} value={f.get(key("effort"))} onChange={(v) => f.set(key("effort"), v)} disabled={d} defaultLabel={t("settings.kindEffortDefault")} />
           </span>
@@ -418,7 +459,7 @@ function ConditionList({ value, onChange, disabled }: { value: string[]; onChang
 }
 
 /** What stops a save, in a sentence for the save row. */
-const problemText = (p: SettingsProblem) => (p.kind === "emptyCondition" ? t("settings.problem.emptyCondition", { n: p.n }) : t("settings.problem.badLimit"));
+const problemText = (p: SettingsProblem) => (p.kind === "emptyCondition" ? t("settings.problem.emptyCondition", { n: p.n }) : t(p.kind === "badFixLimit" ? "settings.problem.badFixLimit" : "settings.problem.badLimit"));
 
 /**
  * Save, and beside it what stops a save (the button is off then) or how the last one went. The same on the project's
@@ -435,10 +476,20 @@ function SaveRow({ busy, problem, msg, onSave }: { busy: boolean; problem?: Sett
 }
 
 /** A share (0 to 1) shown and typed as a percentage. */
-function Percent({ value, onChange, disabled }: { value: string; onChange: (v: number) => void; disabled: boolean }) {
+function Percent({ value, onChange, disabled, min = 10 }: { value: string; onChange: (v: number) => void; disabled: boolean; min?: number }) {
   return (
     <span className="flex items-center gap-2">
-      <input type="number" min={10} max={100} disabled={disabled} value={Math.round(Number(value) * 100)} onChange={(e) => onChange(Number(e.target.value) / 100)} className={`${field} w-24`} /> %
+      <input type="number" min={min} max={100} disabled={disabled} value={Math.round(Number(value) * 100)} onChange={(e) => onChange(Number(e.target.value) / 100)} className={`${field} w-24`} /> %
+    </span>
+  );
+}
+
+/** A number of context tokens shown and typed in thousands (300 for 300,000). */
+function Tokens({ value, onChange, disabled }: { value: string; onChange: (v: number) => void; disabled: boolean }) {
+  return (
+    <span className="flex items-center gap-2">
+      <input type="number" min={1} max={10_000} step={10} disabled={disabled} value={Math.round(Number(value) / 1000)} onChange={(e) => onChange(Number(e.target.value) * 1000)} className={`${field} w-24`} />
+      <span className="whitespace-nowrap">{t("settings.kTokens")}</span>
     </span>
   );
 }
@@ -454,7 +505,7 @@ function OrchestratorFallback({ form: f }: { form: Form }) {
   </>}>
     {(d) => <span className="grid gap-2">
       <Select value={value?.runtime ?? ""} disabled={d} empty={t("settings.fallbackNone")}
-        options={[["claude", "Claude Code"], ["codex", "Codex"]]}
+        options={RUNTIME_OPTIONS}
         onChange={(runtime) => set(runtime ? { runtime: runtime as "claude" | "codex" } : null)} />
       {value && <>
         <label className="grid gap-1 text-xs text-fg-3">{t("settings.model")}
@@ -490,7 +541,7 @@ export function SettingsPanel({ project, tags, server, tools }: {
 }) {
   const { reload: onChanged } = usePage();
   const [tab, setTab] = useState<"project" | "global">("project");
-  const { data: info, error: infoError } = useQuery<ProjectSettingsInfo>(projectUrl(project.id, "/settings"), usePage().version);
+  const { data: info, error: infoError } = useQuery<ProjectSettingsInfo>(projectUrl(project.id, "/settings"), usePage().settings);
   return (
     <div>
       <div className="break-all pr-8 text-xs text-fg-3">{tab === "project" ? project.root : t("settings.globalNote")}</div>
@@ -649,11 +700,16 @@ export interface ServerInfo {
   push_on_deploy: boolean;
   /** How many queues may run at once, across all projects (the global `defaults.max_running`). */
   max_running?: number;
-  /** The user's away mode now (PROTOCOL.md, "Away mode"). */
+  /** The user's away mode now (docs/protocol/review.md, "Away mode"). */
   away?: { on: boolean; since?: string; until?: string };
-  /** The planned deploy, if any (PROTOCOL.md, "Planned deploys"). */
+  /** The planned deploy, if any (docs/protocol/api.md, "Planned deploys"). */
   plan?: PlannedDeploy | null;
+  /** The server's last crash, until the user closes its notice (docs/protocol/api.md, "Server crash"). */
+  crash?: ServerCrash | null;
 }
+
+/** An uncaught exception that ended the server (src/crash.ts on the server). */
+export interface ServerCrash { at: string; error: string }
 
 const PUSH_TONE = { pushed: "text-ok", failed: "text-danger", skipped: "text-fg-2" } as const;
 const PUSH_LABEL: Record<"pushed" | "failed" | "skipped", Key> = { pushed: "settings.server.pushed", failed: "settings.server.pushFailed", skipped: "settings.server.notPushed" };

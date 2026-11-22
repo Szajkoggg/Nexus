@@ -1,9 +1,11 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
-import { CONVERSATION_ONLY, ORCHESTRATOR_ONLY, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
-import { ProjectStore, chainPlan, readAway, revisionHash } from "./store.ts";
+import { applyCheckSets, enterAcceptedReview, reviewRound, verdictBeforeReview } from "./checks.ts";
+import { CONVERSATION_ONLY, HELPER_VERDICTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
+import { ProjectStore, chainPlan, countRebuild, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
+import { inFileOrder } from "./clock.ts";
 import { isOpenQuestion, questionBarrier, reviewedByOrchestrator, runEnded, runGoing, runHoldsCheckout, stepWaits, waitsForUserReview } from "./status-rules.ts";
 import { stopPlace } from "./attention.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
@@ -67,6 +69,11 @@ export interface AttentionItem {
   plan?: { proposal?: { after: string[]; reason: string; current: string[] }; predecessor?: string; cause?: "stopped" | "cancelled" | "missing" };
   /** Kind `tags`: the proposal waiting for the user's decision. */
   tags?: TagProposal;
+  /**
+   * Kind `merge`: what the user's Merge back moves (the waiting card asks it where no queue is at hand): the queue's
+   * branch (absent: unnamed) into its base branch. Absent when the base is no branch (nothing to merge into).
+   */
+  merge?: { into: string; branch?: string };
 }
 export interface StepView extends StepDef {
   status: StepStatus;
@@ -82,6 +89,11 @@ export interface StepView extends StepDef {
    * step that did (`back`): the latest record of its queue's run (run.yaml `fallbacks`) for this step.
    */
   usage_switch?: NonNullable<RunFile["fallbacks"]>[number];
+  /**
+   * A skipped step's mark (docs/design/continued.md): where its work went on (`in`: `FL4`, `QX/QX2`, `QX`), when, by
+   * whom and why; from its latest `changes` entry with `continued_in`, gone once its status changes again.
+   */
+  continued?: { in: string[]; at: string; by: StatusChange["by"]; reason?: string };
   /**
    * The queue's closing refactoring step (closing.ts): Nexus keeps it after the queue's own steps, with a reserved id
    * and the standard text; it is not in queue.yaml.
@@ -123,9 +135,29 @@ export interface StepView extends StepDef {
    * server delivered it to the worker (`delivered`); `to_user`: the orchestrator's beyond the limit, which handed the
    * step to the user instead.
    */
-  sent_back: { id: string; text: string; at: string; by: "orchestrator" | "user"; round: number; delivered: boolean; to_user?: boolean }[];
+  sent_back: { id: string; text: string; at: string; by: "orchestrator" | "user" | "helper"; round: number; delivered: boolean; to_user?: boolean }[];
+  /**
+   * Who accepted the step's review (queue RH, H17): the user, the orchestrator, a review helper, or Nexus (the
+   * integration without a model); `event` the review.accepted's id; for an agent its session and what it ran on.
+   */
+  accepted?: { by: "user" | "orchestrator" | "helper" | "nexus"; at: string; event: string; session?: string; runtime?: string; model?: string; effort?: string };
+  /**
+   * The orchestrator's audit of the review helper's acceptance (queue RH): the acceptance's event, its verdict and why.
+   */
+  audit?: { accepted: string; verdict: "agree" | "disagree"; text: string; at: string; event: string };
+  /**
+   * The review helper of the current review round (queue RH): `running` while it has the review (its session exists
+   * and gave no verdict yet), `passed_on` once it (or Nexus, `by: "nexus"`) passed the step on to the orchestrator,
+   * with the `reasons` and the helper's `findings`.
+   */
+  helper?: { session: string; round: number; state: "running" | "passed_on"; by?: "helper" | "nexus"; reasons?: PassOnReason[]; findings?: string };
   /** The round at work answers the user's Fix it: its review is the user's, whatever the policy. */
   user_fix?: boolean;
+  /**
+   * The step.done whose check-fix round the step was started for: started while that done still waited (as the events
+   * read) for its review, so with no verdict between; the checks of that done decide whether it reached review (queue NL).
+   */
+  fix_round_of?: string;
   review_items: (ReviewItem & { at: string; round?: number })[];
   /**
    * The user's marks and comments on review pictures, by the picture's path: `accepted` with its time while marked;
@@ -133,6 +165,27 @@ export interface StepView extends StepDef {
    */
   pictures: Record<string, { accepted?: string; comments: { text: string; at: string; to: "send_back" | "note" | "orchestrator"; note_step?: string }[] }>;
   checks: CheckView[];
+  /**
+   * Who runs the step's checks (checks.yaml, fixed when the step opened): `nexus`, the engine after each
+   * `nexus step done`; `worker` (or absent), the worker reports them (docs/protocol/checks.md, "Checks run by Nexus").
+   */
+  checks_by?: "nexus" | "worker";
+  /**
+   * The step is the integration step the engine runs itself, without a model (its latest step.started is the `nexus`
+   * session's; queue MI): a worker that takes it up (a failing check) clears it.
+   */
+  model_free?: boolean;
+  /**
+   * While `checking` (or `waiting` for the orchestrator's decision on a disputed failure): `queued` for the machine,
+   * `running` (which `check`), `base` (a disputed check run on the queue's base commit), `decision`; since when.
+   */
+  checking?: { phase: "queued" | "running" | "base" | "decision"; since: string; check?: string };
+  /** The check-fix round at work, or the last one (1 for the first), counted apart from the review rounds. */
+  check_fix?: number;
+  /** With `check_fix`: the project's `defaults.check_fix_limit`, so a view can say "check-fix round 1 of 3". */
+  check_fix_limit?: number;
+  /** The latest checks failed with the step's check-fix rounds used up: the run halted for the orchestrator. */
+  check_limit?: boolean;
   /**
    * The step's metric values, oldest first, over every round (metrics.ts): what its workers recorded, and its checks'
    * times as `check:<name>`; each with its commit, and `warn` when beyond its metric's warning threshold.
@@ -176,6 +229,13 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   push?: PushFile;
   /** Git records of the queue (queues/<id>/git.yaml): its base, and a merge back and cleanup by the user. */
   git?: GitFile;
+  /** The checks Nexus ran for its steps (queues/<id>/checks.yaml). */
+  check_runs?: ChecksFile;
+  /**
+   * Why checks.yaml cannot be read, when it cannot (the state warns too): nobody can tell then whether a step's checks
+   * passed, so a step waiting for its review is held as `checking` (checks.ts) and the engine halts its run (queue LF, F6).
+   */
+  check_runs_error?: string;
   /** The queue's next start as planned (queues/<id>/start.yaml): its options, a schedule; why it has not come yet. */
   start?: StartView;
   /** The queue's place in the plan (queues/<id>/plan.yaml): the queues it waits for, each as it stands. */
@@ -185,6 +245,11 @@ export interface QueueView extends Omit<QueueFile, "steps"> {
   /** Its place in the line of the merge train (train.ts): it waits for its turn to integrate into its base. */
   train?: TrainPlace;
   updated?: string;    // time of the latest event about this queue
+  /**
+   * Only in the state the dashboard reads (archive.ts, shownState): the queue is closed and waits for nothing, and comes
+   * as its summary; its details are read from GET /api/projects/:id/queues/:queue when it is opened.
+   */
+  archived?: true;
 }
 /**
  * A planned start as the dashboard shows it. `waiting`: why it has not started yet (the queue it waits for is still
@@ -221,6 +286,8 @@ export interface ProjectState {
 
 const FINISHED_STEP: ReadonlySet<StepStatus> = new Set(["done", "skipped", "failed"]);
 const TERMINAL_QUEUE: ReadonlySet<QueueStatus> = new Set(["done", "cancelled"]);
+/** The verdicts on a step's review (and the hand-over to the user), weighed against the step waiting for it. */
+const REVIEW_VERDICTS: ReadonlySet<Event["type"]> = new Set(["review.accepted", "review.sent_back", "review.rejected", "review.passed_on", "review.provisional", "review.asked_user"]);
 
 /**
  * A step that needs no more work: done or skipped, or rejected once the rejection no longer holds (a newer revision
@@ -230,7 +297,17 @@ export function stepClosed(q: Pick<QueueView, "rejection">, st: { id: string; st
   return st.status === "done" || st.status === "skipped" || (st.status === "rejected" && q.rejection?.step !== st.id);
 }
 
+/**
+ * The project's state. Over a store reading through a model (the server's: model.ts) it is the model's, derived once
+ * per change and shared by every reader, and must not be changed (it is frozen); over the files it is derived now.
+ */
 export function loadProjectState(store: ProjectStore): ProjectState {
+  return store.reader.state?.() ?? deriveProjectState(store);
+}
+
+/** The project's state derived from what the store reads (the model's derivation; loadProjectState otherwise). */
+export function deriveProjectState(store: ProjectStore): ProjectState {
+  countRebuild();
   const warnings: string[] = [];
   const project = store.readProject();
   const away = readAway();
@@ -250,6 +327,7 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       try { view.run = store.readRun(id); } catch (e) { warnings.push(`queue ${id} run: ${(e as Error).message}`); }
       try { view.push = store.readPush(id); } catch (e) { warnings.push(`queue ${id} push: ${(e as Error).message}`); }
       try { view.git = store.readGit(id); } catch (e) { warnings.push(`queue ${id} git: ${(e as Error).message}`); }
+      try { view.check_runs = store.readChecks(id); } catch (e) { view.check_runs_error = (e as Error).message; warnings.push(`queue ${id} checks: ${view.check_runs_error}`); }
       try {
         const plan = store.readStart(id);
         if (plan) view.start = { ...plan, waiting: "", blocked: false };
@@ -265,11 +343,14 @@ export function loadProjectState(store: ProjectStore): ProjectState {
 
   const sessions = new Map<string, SessionView>();
   const noteDeliveries = new Map<string, string>();
-  const events: Event[] = [];
+  // Each session's events, in the order its log has them (one writer per log).
+  const logs: Event[][] = [];
   for (const id of store.sessionIds()) {
     try {
       const s = store.readSession(id);
       const r = store.readEvents(id);
+      const own: Event[] = [];
+      logs.push(own);
       warnings.push(...r.errors);
       const inbox = store.readInbox(id);
       const delivered = store.readDelivered(id);
@@ -279,11 +360,16 @@ export function loadProjectState(store: ProjectStore): ProjectState {
       for (const d of delivered.entries) if (d.kind === "note") noteDeliveries.set(d.id, d.at);
       sessions.set(id, {
         ...s, event_count: r.entries.length, live: store.readRuntime(id),
-        inbox: inbox.entries.map((m) => (handed.has(m.id) ? { ...m, read_at: handed.get(m.id) } : m)),
+        // Copies: the model's entries are frozen, and message.read sets read_at on the view's own.
+        inbox: inbox.entries.map((m) => (handed.has(m.id) ? { ...m, read_at: handed.get(m.id) } : { ...m })),
       });
       for (const e of r.entries) {
         if (e.session !== id) { warnings.push(`session ${id}: event ${e.id} claims session ${e.session}; ignored`); continue; }
-        if (ORCHESTRATOR_ONLY.has(e.type) && s.role !== "orchestrator" && s.role !== "user") {
+        // The server's own session (queue MI) accepts the integration steps it ran without a model.
+        // A review helper writes only its verdicts (queue RH); Nexus passes a step on too.
+        if (s.role === "helper" && !HELPER_VERDICTS.has(e.type)) { warnings.push(`session ${id}: ${e.type} is not a review helper's; ignored`); continue; }
+        if (e.type === "review.passed_on" && s.role !== "helper" && s.role !== "nexus") { warnings.push(`session ${id}: review.passed_on is a review helper's; ignored`); continue; }
+        if (ORCHESTRATOR_ONLY.has(e.type) && s.role !== "orchestrator" && s.role !== "user" && s.role !== "helper" && !(s.role === "nexus" && e.type === "review.accepted")) {
           warnings.push(`session ${id}: ${e.type} is for orchestrators; ignored`); continue;
         }
         if (USER_ONLY.has(e.type) && s.role !== "user") {
@@ -295,11 +381,13 @@ export function loadProjectState(store: ProjectStore): ProjectState {
         if (CONVERSATION_ONLY.has(e.type) && s.role !== "conversation") {
           warnings.push(`session ${id}: ${e.type} is for thinking partners; ignored`); continue;
         }
-        events.push(e);
+        own.push(e);
       }
     } catch (e) { warnings.push(`session ${id}: ${(e as Error).message}`); }
   }
-  events.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+  // By time, then id, but each log keeps the order it was written in, whatever its times say after a clock step
+  // (docs/design/state.md, "Clock steps").
+  const events = inFileOrder(logs, (e) => e.at, (e) => e.id);
 
   // Send-backs the server delivered to a worker, by the review.sent_back event they carry out.
   const delivered = new Set<string>();
@@ -311,15 +399,19 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   }
 
   // Status changes made through Nexus come in among the events, by time; at the same time the event goes first.
-  const changes = [...queues.values()].flatMap((q) => q.changes.map((c) => ({ q, c })))
-    .sort((a, b) => a.c.at.localeCompare(b.c.at));
+  // Each queue's changes keep their order too (one writer: the server).
+  const changes = inFileOrder([...queues.values()].map((q) => q.changes.map((c) => ({ q, c }))), (x) => x.c.at, (x) => x.q.id);
   const questions = new Map<string, QuestionView>();
   let next = 0;
-  for (const e of events) {
-    while (next < changes.length && changes[next]!.c.at < e.at) { applyChange(changes[next]!.q, changes[next]!.c); next++; }
+  for (const { item: e, at } of events) {
+    while (next < changes.length && changes[next]!.at < at) { applyChange(changes[next]!.item.q, changes[next]!.item.c); next++; }
     apply(e, queues, sessions, questions, warnings, project, delivered, away);
   }
-  for (; next < changes.length; next++) applyChange(changes[next]!.q, changes[next]!.c);
+  for (; next < changes.length; next++) applyChange(changes[next]!.item.q, changes[next]!.item.c);
+  // A skip's mark holds while the step stays skipped (an event, a send-back, may open it again).
+  for (const q of queues.values()) for (const st of q.steps) if (st.continued && st.status !== "skipped") st.continued = undefined;
+  // The checks Nexus ran: a step.done whose checks have not passed is no review yet (checks.ts).
+  for (const q of queues.values()) for (const st of q.steps) applyCheckSets(q, st, project.defaults.check_fix_limit);
   // What the workers reported doing, as the names read now; where the run opened a step on its fallback.
   for (const q of queues.values()) for (const st of q.steps) {
     const f = q.run?.fallbacks?.findLast((x) => x.step === st.id);
@@ -367,6 +459,14 @@ export function loadProjectState(store: ProjectStore): ProjectState {
   for (const q of queues.values()) for (const st of q.steps) {
     if (st.status !== "review") st.review_with = undefined;
     else if (st.review_with === "orchestrator" && !orchestrating) st.review_with = "user";
+  }
+  // A review helper started for the step's current round, with no verdict yet, has its review (queue RH).
+  for (const q of queues.values()) for (const st of q.steps) {
+    if (st.helper || !reviewedByOrchestrator(st)) continue;
+    const round = reviewRound(q, st);
+    const h = [...sessions.values()].filter((x) => { const a = helperAbout(x); return a?.queue === q.id && a.step === st.id && a.round === round; })
+      .sort((a, b) => a.created_at.localeCompare(b.created_at)).at(-1);
+    if (h) st.helper = { session: h.id, round, state: "running" };
   }
 
   for (const q of queues.values()) {
@@ -533,7 +633,11 @@ function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsF
     // On the integration step, whose page says how the merge back stands.
     if (q.git?.merge?.waiting && q.status !== "cancelled") {
       const w = q.git.merge.waiting;
-      out.push({ kind: "merge", queue: q.id, step: q.steps.find((s) => s.integration)?.id, text: w.reason + releasedText(w.released), at: w.since });
+      const into = q.git.base?.branch !== false ? q.git.base?.ref : undefined;
+      out.push({
+        kind: "merge", queue: q.id, step: q.steps.find((s) => s.integration)?.id, text: w.reason + releasedText(w.released), at: w.since,
+        ...(into ? { merge: { into, ...(q.branch ? { branch: q.branch } : {}) } } : {}),
+      });
     }
     // A done survey run's worktree Nexus could not remove (src/merger.ts): until it is cleaned up.
     if (q.git?.cleanup?.waiting && !q.git.cleaned) out.push({ kind: "cleanup", queue: q.id, text: q.git.cleanup.waiting.reason, at: q.git.cleanup.waiting.since });
@@ -587,7 +691,8 @@ function initQueue(q: QueueFile, notes: Note[], project: Pick<ProjectFile, "defa
         ...(s.id === integrationStepId(q.id) ? { integration: true as const } : {}),
         status: s.status ?? "pending",
         review_items: [], checks: [], metrics: [], timeline: [], messages: [], segments: [], sent_back: [], pictures: {},
-        notes: notes.filter((n) => n.step === s.id),
+        // Copies: the model's notes are frozen, and a delivery or note.read sets read_at on the view's own.
+        notes: notes.filter((n) => n.step === s.id).map((n) => ({ ...n })),
       };
     }),
   };
@@ -642,6 +747,20 @@ function apply(
     return st;
   };
 
+  // A verdict on a step whose accepted check failure came out of a check-fix round the worker took up: its review
+  // began when Nexus accepted the failure, not after the replay (checks.ts, enterAcceptedReview).
+  if (REVIEW_VERDICTS.has(e.type) && "step" in e && e.queue !== undefined) {
+    const q = queues.get(e.queue); const st = q?.steps.find((x) => x.id === e.step);
+    if (q && st) {
+      // Written while its checks had not let the step into its review: no review of it (checks.ts, verdictBeforeReview).
+      if (verdictBeforeReview(q, st, e.at)) {
+        warnings.push(`event ${e.id} (${e.type}): step ${q.id}/${st.id} was not in its review when it was written (its checks had not passed); it does not count`);
+        return;
+      }
+      enterAcceptedReview(q, st, e.at);
+    }
+  }
+
   switch (e.type) {
     case "step.started": {
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
@@ -663,7 +782,9 @@ function apply(
       for (const kept of again) {
         if (kept && kept.status !== "pending" && kept.status !== "skipped") toPending(kept);
       }
-      st.status = "running"; st.started_at ??= e.at; st.session = e.session;
+      st.fix_round_of = st.status === "review" ? st.timeline.findLast((x) => x.type === "step.done")?.id : undefined;
+      st.status = "running"; st.started_at ??= e.at; st.session = e.session; st.accepted = undefined; st.audit = undefined;
+      st.model_free = e.session === NEXUS_SESSION ? true : undefined;
       st.finished_at = undefined; st.reason = undefined;
       if (!TERMINAL_QUEUE.has(q.status)) { q.status = "running"; q.status_reason = undefined; }
       return;
@@ -700,6 +821,11 @@ function apply(
       if (e.duration !== undefined) st.metrics.push({ name: checkMetric(e.name), value: e.duration, unit: CHECK_UNIT, at: e.at, event: e.id, session: e.session, commit: e.commit });
       return;
     }
+    case "check.disputed":
+    case "check.decided":
+      // On the step's timeline: the checks Nexus ran read them there (checks.ts, applyCheckSets).
+      stepOf(queueOf(e.queue), e.step);
+      return;
     case "metric.recorded": {
       const st = stepOf(queueOf(e.queue), e.step);
       if (st) st.metrics.push({ name: e.name, value: e.value, unit: e.unit, at: e.at, event: e.id, session: e.session, commit: e.commit });
@@ -712,7 +838,7 @@ function apply(
       // A step.done from before the project's review levels keeps its old meaning (legacyPolicy): `continue` went on
       // without review. After the user's Fix it, the round's review is the user's.
       const policy = project.review_levels_since && e.at < project.review_levels_since ? legacyPolicy(q, st) : undefined;
-      st.asked_user = undefined;
+      st.asked_user = undefined; st.helper = undefined;
       st.finished_at = e.at; st.summary = e.summary; st.commit = e.commit;
       if (e.activities) st.observed_activities = [...new Set([...(st.observed_activities ?? []), ...e.activities])];
       endSegment(st, e.at);
@@ -803,20 +929,25 @@ function apply(
       // user (Fix it) only what waits for the user.
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
       if (!q || !st) return;
-      const by = s?.role === "user" ? "user" : "orchestrator";
-      if (st.status !== "review" || st.review_with !== by) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the ${by}'s review; the send-back is ignored`); return; }
-      const round = st.timeline.filter((x) => x.type === "step.done").length + 1;
+      const by = s?.role === "user" ? "user" : s?.role === "helper" ? "helper" : "orchestrator";
+      const waits = by === "user" ? "user" : "orchestrator";
+      if (st.status !== "review" || st.review_with !== waits) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the ${waits}'s review; the send-back is ignored`); return; }
+      const refused = by === "helper" ? helperRefusal(s!, q, st) : undefined;
+      if (refused) { warnings.push(`event ${e.id}: ${refused}; the review helper's send-back is ignored`); return; }
+      const round = reviewRound(q, st) + 1;
       const limit = project.defaults.review_send_back_limit;
-      if (by === "orchestrator" && st.sent_back.filter((x) => x.by === "orchestrator" && !x.to_user).length >= limit) {
+      // The helper's send-backs count toward the limit with the orchestrator's (H7): it is about the step going round.
+      if (by !== "user" && st.sent_back.filter((x) => x.by !== "user" && !x.to_user).length >= limit) {
         st.sent_back.push({ id: e.id, text: e.text, at: e.at, by, round, delivered: false, to_user: true });
         st.review_with = "user";
-        st.asked_user = { text: `The orchestrator sent this step back ${limit} time${limit === 1 ? "" : "s"} already and would again: ${e.text}`, at: e.at };
+        const times = `${limit} time${limit === 1 ? "" : "s"}`;
+        st.asked_user = { text: by === "helper" ? `The review helper would send this step back again, and it was sent back ${times} already: ${e.text}` : `The orchestrator sent this step back ${times} already and would again: ${e.text}`, at: e.at };
         return;
       }
       const sent = delivered.has(e.id);
       st.sent_back.push({ id: e.id, text: e.text, at: e.at, by, round, delivered: sent });
       if (!sent) return; // waits for the server to deliver it
-      st.status = "running"; st.review_with = undefined; st.asked_user = undefined;
+      st.status = "running"; st.review_with = undefined; st.asked_user = undefined; st.fix_round_of = undefined;
       st.user_fix = by === "user" ? true : undefined;
       st.finished_at = undefined;
       if (q.status === "waiting" && !q.steps.some(stepWaits)) q.status = "running";
@@ -824,13 +955,43 @@ function apply(
     }
     case "review.accepted": {
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
-      if (!q || !st || st.status !== "review") return;
+      if (!q || !st) return;
+      if (st.status !== "review") { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for its review; the acceptance is ignored`); return; }
       // The orchestrator accepts only what waits for it; what went to the user is the user's.
       if (s?.role === "orchestrator" && st.review_with !== "orchestrator") { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} waits for the user's review; the orchestrator's acceptance is ignored`); return; }
+      if (s?.role === "helper") {
+        // A level-3 step's judgement stays the orchestrator's: the helper passes it on, never accepts it (H5).
+        const refused = helperRefusal(s, q, st) ?? (st.level !== 2 ? `step ${e.queue}/${e.step} is at review level ${st.level}: the review helper accepts only level 2` : undefined);
+        if (refused) { warnings.push(`event ${e.id}: ${refused}; the review helper's acceptance is ignored`); return; }
+      }
+      const by = s?.role === "user" || s?.role === "helper" || s?.role === "nexus" ? s.role : "orchestrator";
+      st.accepted = { by, at: e.at, event: e.id, ...(s && (by === "orchestrator" || by === "helper") ? { session: s.id, runtime: s.runtime, model: s.model, effort: s.effort } : {}) };
       st.review_with = undefined;
       st.status = "done";
       if (q.steps.every((x) => FINISHED_STEP.has(x.status))) q.status = "done";
       else if (q.status === "waiting" && !q.steps.some(stepWaits)) q.status = "running";
+      return;
+    }
+    case "review.audited": {
+      const st = stepOf(queueOf(e.queue), e.step);
+      if (!st) return;
+      if (st.accepted?.by !== "helper" || st.accepted.event !== e.accepted) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} has no acceptance ${e.accepted} of the review helper's; the audit is ignored`); return; }
+      if (st.audit) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} was audited already; ignored`); return; }
+      st.audit = { accepted: e.accepted, verdict: e.verdict, text: e.text, at: e.at, event: e.id };
+      return;
+    }
+    case "review.passed_on": {
+      // A review helper's pass-on of the step it reviews, or Nexus's (queue RH): the step keeps waiting for the
+      // orchestrator's review, which now gets its notice with the reasons and the findings.
+      const q = queueOf(e.queue); const st = stepOf(q, e.step);
+      if (!q || !st || !s) return;
+      const refused = s.role === "helper" ? helperRefusal(s, q, st)
+        : !reviewedByOrchestrator(st) ? `step ${e.queue}/${e.step} is not waiting for the orchestrator's review`
+        : e.round !== reviewRound(q, st) ? `step ${e.queue}/${e.step} is at review round ${reviewRound(q, st)}, not ${e.round}`
+        : st.helper?.state === "passed_on" ? `step ${e.queue}/${e.step} was passed on already` : undefined;
+      if (refused) { warnings.push(`event ${e.id}: ${refused}; the pass-on is ignored`); return; }
+      const reasons = s.role === "helper" ? e.reasons.filter((r) => !NEXUS_PASS_ON.has(r)) : e.reasons;
+      st.helper = { session: s.id, round: reviewRound(q, st), state: "passed_on", by: s.role === "helper" ? "helper" : "nexus", reasons: reasons.length ? reasons : ["doubt"], findings: e.text };
       return;
     }
     case "review.provisional": {
@@ -922,6 +1083,7 @@ function applyChange(q: QueueView, c: StatusChange): void {
           return;
         }
         st.status = c.to as StepStatus; st.reason = c.reason;
+        st.continued = c.to === "skipped" && c.continued_in ? { in: c.continued_in, at: c.at, by: c.by, ...(c.reason ? { reason: c.reason } : {}) } : undefined;
       } else if (c.to === "cancelled") {
         q.status = "cancelled"; q.status_reason = c.reason;
         return;
@@ -937,9 +1099,30 @@ function applyChange(q: QueueView, c: StatusChange): void {
   }
 }
 
+/** A review helper's `about` (its step and round), or none for any other session. */
+export function helperAbout(s: Pick<SessionFile, "role" | "about">): { queue: string; step: string; round: number; level: ReviewLevel } | undefined {
+  const a = s.about;
+  return s.role === "helper" && a && "round" in a && a.round !== undefined && a.queue !== undefined ? { queue: a.queue, step: a.step, round: a.round, level: a.level } : undefined;
+}
+
+/**
+ * Why a review helper's verdict on the step does not count, or undefined when it does: only the helper started for the
+ * step's current round, while the step waits for the orchestrator's review and was not passed on yet (docs/protocol/review.md, "The
+ * review helper").
+ */
+function helperRefusal(s: Pick<SessionFile, "role" | "about">, q: QueueView, st: StepView): string | undefined {
+  const a = helperAbout(s);
+  if (!a || a.queue !== q.id || a.step !== st.id) return `the review helper was not started for step ${q.id}/${st.id}`;
+  if (!reviewedByOrchestrator(st)) return `step ${q.id}/${st.id} is not waiting for the orchestrator's review`;
+  const round = reviewRound(q, st);
+  if (a.round !== round) return `the review helper was started for round ${a.round} of step ${q.id}/${st.id}, which is at round ${round}`;
+  if (st.helper?.state === "passed_on") return `step ${q.id}/${st.id} was passed on to the orchestrator already`;
+  return undefined;
+}
+
 /** A step back to pending, to run again: nothing of its last round (its outcome, review, reason) shows on it. */
 function toPending(st: StepView): void {
-  st.status = "pending"; st.review_with = undefined; st.asked_user = undefined;
+  st.status = "pending"; st.review_with = undefined; st.asked_user = undefined; st.accepted = undefined; st.audit = undefined; st.helper = undefined;
   st.finished_at = undefined; st.summary = undefined; st.commit = undefined; st.reason = undefined;
 }
 

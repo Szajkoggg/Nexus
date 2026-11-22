@@ -1,5 +1,5 @@
 // A seed for the capture tool: a test project "demo" (a git repository, merge_back on) for the merge train (queue MQ;
-// PROTOCOL.md, "The merge train"). W's integration step waits for the user's review (the orchestrator does not review
+// docs/protocol/git.md, "The merge train"). W's integration step waits for the user's review (the orchestrator does not review
 // here: notify off), so W holds main; B, another
 // worktree queue, finished its own step and is held before its integration step ("for an update", so the instance
 // resumes it, and its boundary holds it again for the train); N is planned after B, so the Queues view shows its plan.

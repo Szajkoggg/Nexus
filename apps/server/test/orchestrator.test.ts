@@ -170,7 +170,7 @@ test("the orchestrator may write only queue drafts, and its briefing uploads the
     assert.deepEqual(disallowed.sort(), ["MultiEdit", "NotebookEdit"], "a Write or Edit rule here would beat the drafts rules (so no .nexus deny rules either: those are the workers')");
     assert.match(brief, /nexus queue draft \.nexus\/drafts\//);
     assert.doesNotMatch(brief, /<<|heredoc/i);
-    assert.match(brief, /no cd, no &&, no pipes/);
+    assert.match(brief, /no cd, no pipes, not git -C <path>/);
     // Housekeeping is its own; consent is the user's; a replaced stopped step is kept and skipped.
     assert.match(brief, /nexus queue set <queue> --step <step> skipped --reason/);
     assert.match(brief, /Consent is the user's, and refused to you: marking a step done[^.]*, approving, lifting a stop, reopening a finished step/);

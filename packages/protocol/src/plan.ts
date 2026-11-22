@@ -1,4 +1,4 @@
-// The plan (PROTOCOL.md, "The plan"): which queue starts after which. Each planned queue has queues/<id>/plan.yaml,
+// The plan (docs/protocol/planning.md, "The plan"): which queue starts after which. Each planned queue has queues/<id>/plan.yaml,
 // written only by the server: the queues it waits for, each with who set it. Nexus starts a queue by the plan once
 // every queue it waits for is done and its current revision is approved (and its checkout and the limit allow: the
 // coordinator's rule). A dependency the user set is the user's: the orchestrator builds around it and may only propose

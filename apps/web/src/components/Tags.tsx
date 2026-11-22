@@ -1,4 +1,4 @@
-// Step tags in the dashboard (PROTOCOL.md, "Tags"): a step's planned tags beside the activities its worker reported
+// Step tags in the dashboard (docs/protocol/stats.md, "Tags"): a step's planned tags beside the activities its worker reported
 // doing; the queue card's quiet line of kinds and areas; the project's lists in its settings; and the user's decision
 // on the orchestrator's proposals, in the waiting list and in the settings. Only the user accepts a proposal.
 import { useState } from "react";

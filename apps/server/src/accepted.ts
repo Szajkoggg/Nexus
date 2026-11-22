@@ -11,10 +11,10 @@
 // confirmed (in any queue of the project: a step whose recorded review commit is in it and that made commits of its
 // own): the push is recorded `held`, with what holds it, and is tried again once one of those is confirmed (or sent to
 // a fix: the user has seen it, and the fix is a step reviewed on its own).
-import { execFileSync } from "node:child_process";
 import { ActionError, loadProjectState, normPath, now, pendingProvisional, type ProjectState, type ProjectStore, type PushFile, type QueueView } from "@nexus/protocol";
-import { checkoutOf } from "./gitinfo.ts";
+import { checkoutOf, revParse } from "./gitinfo.ts";
 import { PUSH_ENV, PUSH_TIMEOUT_MS, pushFailure, runGit, type GitRunner } from "./deploy.ts";
+import { perf } from "./perf.ts";
 
 const MOVED = "the remote branch has commits the accepted one does not; bring them into the branch, then push again";
 
@@ -73,12 +73,14 @@ export class AcceptedPusher {
   private recordReviews(q: QueueView): void {
     const fresh = q.steps.filter((s) => s.status === "review" && s.finished_at && this.store.readPush(q.id)?.review[s.id]?.finished_at !== s.finished_at);
     if (!fresh.length) return;
-    const dir = checkoutOf(this.store, q);
-    let sha: string | null = null;
-    if (dir) { try { sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim() || null; } catch { sha = null; } }
-    const push = this.store.readPush(q.id) ?? { protocol: 1 as const, review: {}, steps: {} };
-    for (const s of fresh) push.review[s.id] = { sha, finished_at: s.finished_at!, at: now() };
-    this.store.writePush(q.id, push);
+    // Part of the step boundary: a measured section (queue GB).
+    perf.section("step boundary: review", () => {
+      const dir = checkoutOf(this.store, q);
+      const sha = dir ? revParse(dir, "HEAD") ?? null : null;
+      const push = this.store.readPush(q.id) ?? { protocol: 1 as const, review: {}, steps: {} };
+      for (const s of fresh) push.review[s.id] = { sha, finished_at: s.finished_at!, at: now() };
+      this.store.writePush(q.id, push);
+    });
   }
 
   private start(q: QueueView, step: string, acceptance: string): void {

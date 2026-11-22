@@ -36,6 +36,7 @@ test("the four numbers: finished and stopped since the time, waiting and running
 
 test("outcome words", () => {
   assert.deepEqual(outcome({ kind: "stopped", step: "W4c" }), { word: "stopped at W4c", tone: "stop" });
+  assert.deepEqual(outcome({ kind: "continued", continued_in: ["FL4", "FL5"] }), { word: "continued in FL4, FL5", tone: "ok" });
   assert.equal(outcome({ kind: "refused", count: 1 }).word, "1 refused action");
   assert.equal(outcome({ kind: "refused", count: 3 }).word, "3 refused actions");
   assert.equal(outcome({ kind: "retried", count: 2 }).word, "retried twice");

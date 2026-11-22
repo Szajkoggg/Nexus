@@ -1,4 +1,4 @@
-// The static analysis reminder (PROTOCOL.md, "Static analysis reminder"): while a project of a known stack has no
+// The static analysis reminder (docs/protocol/planning.md, "Static analysis reminder"): while a project of a known stack has no
 // static analysis (@nexus/protocol static-analysis.ts), once a month the server notes a reminder in
 // .nexus/static-analysis.yaml, and the orchestrator is told to recommend the shipped "static-analysis" template to the
 // user in a sentence. The user's no (the orchestrator's `nexus static-analysis decline`, arriving here through the

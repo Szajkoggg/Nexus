@@ -1,6 +1,9 @@
 // `nexus help <topic>`: Nexus's standards, shipped with Nexus so every project has the current text after a deploy.
 // A project's own conventions stay in its AGENTS.md and in a step's review spec; these texts never name a project.
 
+/** The longest context summary the standard asks for, in words (nexus help context); nexus context warns beyond it. */
+export const CONTEXT_SUMMARY_WORDS = 2000;
+
 export const HELP_TOPICS: Record<string, { summary: string; text: string }> = {
   review: {
     summary: "review material: formats, view keys, roles, pairing, rounds, captures, the process",
@@ -118,6 +121,31 @@ Example:
   Support.Graph for its anchors."
 `,
   },
+  context: {
+    summary: "the shape of a context summary (nexus context)",
+    text: `nexus help context: the shape of a context summary
+
+A context summary (nexus context) is what a fresh session starts from when it takes over your work: the next step
+after a switch, a queue continued in another session, or the orchestrator going on in a fresh session. It carries
+what only you know; the fresh session gets the queue's text, the steps' summaries, its briefing and nexus status
+anyway, so leave out what those say. Write it in six parts, in this order, each as long as it needs:
+  1. Where the work stands: the step, what is committed (the commits), what is not and why.
+  2. The decisions and why, with the ways tried and dropped, and why they were dropped.
+  3. The traps found: what failed or misled, and how to avoid it.
+  4. The important files, and why each matters.
+  5. What comes next: the next move, and what it waits for.
+  6. What the orchestrator or the user asked for or promised: constraints, answers, agreements still in force.
+About 1,000 to 2,000 words at most; nexus context says so when one is longer. Give its topics with --topics and its
+files with --files (nexus status shows them on the session's card); write in the working language.
+
+Example:
+  nexus context "Where: W3 done (1a2b3c4); nothing uncommitted. Decided: floating bodies are pinned to their
+  neighbours, not deleted (deleting broke fixture 7's arches); tried a flood fill first, too slow on 2M cells.
+  Traps: Support.Graph caches by chunk, so rebuild it after a bevel. Files: Runtime/Core/Rock/Support.cs (the graph),
+  Tests/Rock/SupportTests.cs (the fixtures). Next: W4's bevels, which need Support.Graph.Anchors. Agreed: the user
+  wants no overhang fixture until W4." --topics rock,support --files Runtime/Core/Rock/Support.cs
+`,
+  },
   questions: {
     summary: "the shape of a worker's question (nexus ask)",
     text: `nexus help questions: the shape of a question
@@ -160,8 +188,9 @@ When an action is refused:
     summary: "a clean working tree at every step's end; the commit nexus step done reports",
     text: `nexus help commits: a clean working tree at every step's end
 
-Every commit belongs to exactly one step: the user keeps or discards a stopped step's commits, and Nexus pushes the
-commit an accepted step was reviewed at. So:
+Every commit belongs to exactly one step: the user keeps or discards a stopped step's commits, and, where the
+project's push_accepted setting is on (off by default), Nexus pushes the commit an accepted step was reviewed at.
+You never push. So:
   - Commit what the step did before nexus step done, and name it: nexus step done <step> --commit <sha>
     (the last commit, when the step made several).
   - Leave the working tree clean at the step's end, as at a stop: no uncommitted changes to tracked files. What is
@@ -179,11 +208,17 @@ commit an accepted step was reviewed at. So:
     text: `nexus help tests: running tests while working on a step
 
 While you work, run only the tests that cover what you changed, and stop at the first failure: a run of the whole
-suite after a change that breaks many tests takes long and says little. The whole suite runs once, at the step's end,
-as the queue's checks (nexus check, each under its name exactly as the step's opening lists it under "Checks for every
-step", e.g. nexus check <step> "npm test", since a check reported under another name counts as not reported; with
---duration: how long each ran, in seconds, so a check that grows slower shows), and its result goes into the step
-summary.
+suite after a change that breaks many tests takes long and says little. Before a commit, run the tests of the files you
+changed (plus typecheck and lint, as the project says). The whole suite runs once, at the step's end, as the queue's
+checks, and who runs them depends on the step's opening:
+  - Where it says Nexus runs the checks: do not run the whole suite and do not report it; Nexus runs it after your
+    nexus step done and sends you its output only if a check fails (a check-fix round: fix from that output, running
+    only the failing tests). nexus check is refused there (except nexus check <step> <name> --unrelated --evidence "..."
+    in a check-fix round, for a failure that is not your work).
+  - Where it does not (an older server's step, work started by hand): you run the checks at the step's end and report
+    each with nexus check, under its name exactly as the step's opening lists it under "Checks for every step", e.g.
+    nexus check <step> "npm test" --ok --summary "..." --duration <seconds> (a check reported under another name
+    counts as not reported; the duration shows a check that grows slower), and its result goes into the step summary.
   - The project's own way is in its AGENTS.md or README (a script that runs given files, a watch mode).
   - Nexus's own repository: npm run test:files -- <test file>... [--pattern TEXT] runs the files one after another
     and stops at the first failing test; npm test runs the whole suite; npm run test:times lists how long each file

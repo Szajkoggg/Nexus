@@ -1,4 +1,4 @@
-// A project's metrics (decided 2026-11-14, docs/ideas/statistics.md; PROTOCOL.md, "Project metrics"): what the
+// A project's metrics (decided 2026-11-14, docs/ideas/statistics.md; docs/protocol/stats.md, "Project metrics"): what the
 // project measures, named by the orchestrator (`nexus metric define`, into .nexus/metrics.yaml, which only the server
 // writes), and the values its workers record (`nexus metric record`, a `metric.recorded` event among the worker's own
 // events, with the queue, the step and the HEAD commit). The checks' times exist as metrics without a definition:

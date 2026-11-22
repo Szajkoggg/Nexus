@@ -2,9 +2,10 @@
 // panel over the page (full screen on the phone) with the query, a filter by kind, and the hits newest first; a hit
 // goes to its place: a step's or queue's details, a chat message (CH4's jump, chatTarget.ts), a report in the file
 // viewer. The server searches the files (GET /api/projects/:id/search, apps/server/src/search.ts).
+import { applyConversations } from "../liveViews.ts";
 import { useEffect, useState } from "react";
 import { SEARCH_KINDS, SEARCH_LIMIT, SEARCH_MAX_LIMIT, type SearchHit, type SearchKind, type SearchResult } from "@nexus/protocol/search";
-import { enc, projectUrl, request, useQuery } from "../api.ts";
+import { enc, projectUrl, request, useQuery, useLiveRead } from "../api.ts";
 import { usePage } from "../page.ts";
 import { nav } from "../nav.ts";
 import { fileLayer } from "../fileview.ts";
@@ -94,7 +95,7 @@ export function SearchPanel({ project, onClose }: { project: string; onClose: ()
   const [tools, setTools] = useState(last.tools);
   const [limit, setLimit] = useState(PAGE);
   const [result, setResult] = useState<{ url: string; data?: SearchResult; error?: string }>();
-  const conversations = useQuery<{ id: string }[]>(projectUrl(project, "/conversations"), version).data;
+  const conversations = useLiveRead<{ id: string; last_at: string }[]>(projectUrl(project, "/conversations"), project, applyConversations).data;
   useEffect(() => { Object.assign(last, { query, kind, tools }); }, [query, kind, tools]);
   useEffect(() => setLimit(PAGE), [query, kind, tools]);
   const url = searchUrl(project, { query, kind, tools, limit });

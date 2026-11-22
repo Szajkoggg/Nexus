@@ -2,7 +2,7 @@
 // What it does is in fake-behaviour.ts.
 import { existsSync, readFileSync } from "node:fs";
 import {
-  BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, fakeSaved, interrupt, record, recordArgs, respond, saveFakeConversation, type Fake, type FakeFailure,
+  BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, contextWindow, fakeSaved, interrupt, onBackgroundEnd, record, recordArgs, respond, saveFakeConversation, type Background, type Fake, type FakeFailure,
 } from "./fake-behaviour.ts";
 
 // The briefing as the CLI reads it at its start (--append-system-prompt-file): the file is rewritten at the next start.
@@ -40,6 +40,8 @@ let totalCost = 0;
 /** The running totals of every model call in the process, sub-agents' included, as result.modelUsage reports them. */
 const totals = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 };
 const queue: string[] = [];
+/** Late turns still to start (FAKE_LATE_GATE): the CLI runs them before it exits, its input closed or not. */
+let lateTurns = 0;
 
 async function turn(text: string): Promise<void> {
   out({ type: "system", subtype: "init", model: "fake-model", session_id: "fake" });
@@ -53,7 +55,26 @@ async function turn(text: string): Promise<void> {
   fake.history!.push(...unread);
   const reply = actOnRead(unread, first);
   unread = [];
-  out({ type: "assistant", message: { content: [{ type: "text", text: reply }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: contextTokens(1000, 100) - 10 } }, parent_tool_use_id: null });
+  out({ type: "assistant", message: { content: [{ type: "text", text: reply }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: contextTokens(contextWindow(1000), 100) - 10 } }, parent_tool_use_id: null });
+  // FAKE_LATE_NEXT: the process's first turn writes its result only once a message comes in after its reply, and that
+  // message, come too late to be read in the turn, runs as a turn of its own after it (as Claude Code runs a `next`
+  // message that reached it as its turn ended): Nexus sent it into a turn whose result it had not read yet (queue OF).
+  // FAKE_LATE_NEXT=inside: the message is read inside the turn instead, and no turn follows: the process settles with
+  // no late turn, the other half of the settling's paths (queue LH).
+  if (process.env.FAKE_LATE_NEXT && turns === 0) {
+    for (const t = Date.now(); !unread.length && Date.now() - t < 300_000;) await new Promise((r) => setTimeout(r, 20));
+    // FAKE_LATE_GATE: that turn starts only once the file it names exists (a busy machine: after Nexus looked at the
+    // turn's end), polled every 10 ms.
+    const gate = process.env.FAKE_LATE_GATE;
+    if (process.env.FAKE_LATE_NEXT === "inside") fake.history!.push(...unread);
+    else if (gate) {
+      const late = unread;
+      lateTurns++;
+      const start = () => { if (!existsSync(gate)) return void setTimeout(start, 10); lateTurns--; queue.unshift(...late); void pump(); };
+      start();
+    } else queue.unshift(...unread);
+    unread = [];
+  }
   // As Claude Code reports them (checked live): result.usage is this turn's, total_cost_usd runs on. Turn n of the
   // process: 10n input, 5n output, n cache-creation, 100n cache-read tokens, and, with FAKE_COST set, $0.01·n (other
   // tests' records expect a cost of 0).
@@ -77,7 +98,7 @@ async function turn(text: string): Promise<void> {
   totals.outputTokens += usage.output_tokens + (sub?.output_tokens ?? 0);
   totals.cacheReadInputTokens += usage.cache_read_input_tokens + (sub?.cache_read_input_tokens ?? 0);
   totals.cacheCreationInputTokens += usage.cache_creation_input_tokens + (sub?.cache_creation_input_tokens ?? 0);
-  out({ type: "result", subtype: "success", is_error: false, result: reply, num_turns: 1, total_cost_usd: totalCost, usage, modelUsage: { fake: { contextWindow: 1000, ...totals } }, permission_denials: denials });
+  out({ type: "result", subtype: "success", is_error: false, result: reply, num_turns: 1, total_cost_usd: totalCost, usage, modelUsage: { fake: { contextWindow: contextWindow(1000), ...totals } }, permission_denials: denials });
 }
 
 /**
@@ -86,19 +107,19 @@ async function turn(text: string): Promise<void> {
  * left, and a turn the CLI starts by itself (system init) with the notification.
  */
 let tasks: { task_id: string; task_type: string; description: string }[] = [];
-function startBackground(bg: { kind: "command" | "agent"; ms: number }): void {
+function startBackground(bg: Background): void {
   const task = { task_id: `task-${tasks.length + 1}`, task_type: bg.kind === "agent" ? "local_agent" : "local_bash", description: bg.kind === "agent" ? "fake sub-agent" : "fake background command" };
   tasks = [...tasks, task];
   out({ type: "system", subtype: "background_tasks_changed", tasks, uuid: "u", session_id: "fake" });
   out({ type: "system", subtype: "task_started", task_id: task.task_id, description: task.description, is_backgrounded: true, task_type: task.task_type, uuid: "u", session_id: "fake" });
-  setTimeout(() => {
+  onBackgroundEnd(bg, () => {
     tasks = tasks.filter((t) => t !== task);
     out({ type: "system", subtype: "task_updated", task_id: task.task_id, patch: { status: "completed" }, uuid: "u", session_id: "fake" });
     out({ type: "system", subtype: "task_notification", task_id: task.task_id, status: "completed", summary: `${task.description} completed`, uuid: "u", session_id: "fake" });
     out({ type: "system", subtype: "background_tasks_changed", tasks, uuid: "u", session_id: "fake" });
     queue.push(`${BACKGROUND_NOTICE} ${task.description} completed`);
     void pump();
-  }, bg.ms);
+  });
 }
 
 /**
@@ -138,10 +159,10 @@ function interrupted(): void {
  */
 function compact(): void {
   out({ type: "system", subtype: "status", status: "compacting", session_id: "fake" });
-  out({ type: "system", subtype: "compact_boundary", session_id: "fake", compact_metadata: { trigger: "manual", pre_tokens: contextTokens(1000, 100), post_tokens: 30 } });
+  out({ type: "system", subtype: "compact_boundary", session_id: "fake", compact_metadata: { trigger: "manual", pre_tokens: contextTokens(contextWindow(1000), 100), post_tokens: 30 } });
   out({ type: "user", message: { role: "user", content: "This session is being continued from a previous conversation. Summary: fake." }, isReplay: true, parent_tool_use_id: null });
   out({ type: "user", message: { role: "user", content: "<local-command-stdout>Compacted </local-command-stdout>" }, isReplay: true, parent_tool_use_id: null });
-  out({ type: "result", subtype: "success", is_error: false, result: "", num_turns: 0, total_cost_usd: totalCost, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, modelUsage: { fake: { contextWindow: 1000, ...totals } }, permission_denials: [] });
+  out({ type: "result", subtype: "success", is_error: false, result: "", num_turns: 0, total_cost_usd: totalCost, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, modelUsage: { fake: { contextWindow: contextWindow(1000), ...totals } }, permission_denials: [] });
 }
 
 /** Ends the process as a signal would, before the turn's result: the CLI killed, or closing by itself. */
@@ -195,7 +216,7 @@ function listen(): void {
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", read);
   // FAKE_EXIT_DELAY_MS: the process lingers that long after its input closed (a CLI flushing its transcript).
-  process.stdin.on("end", () => { const wait = () => (busy ? setTimeout(wait, 50) : setTimeout(() => process.exit(0), Number(process.env.FAKE_EXIT_DELAY_MS ?? 0))); wait(); });
+  process.stdin.on("end", () => { const wait = () => (busy || lateTurns ? setTimeout(wait, 50) : setTimeout(() => process.exit(0), Number(process.env.FAKE_EXIT_DELAY_MS ?? 0))); wait(); });
 }
 
 // FAKE_START_MS: the input is read only after that long, as Claude Code reads it once it has started.

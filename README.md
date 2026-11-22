@@ -4,8 +4,8 @@ A local dashboard and orchestrator for AI-driven development. Nexus shows each p
 Claude Code and Codex sessions through them step by step, and carries notes, messages and questions between the
 user, a per-project orchestrator agent and the working agents.
 
-- [docs/DESIGN.md](docs/DESIGN.md): concepts, architecture, decisions, phases
-- [docs/PROTOCOL.md](docs/PROTOCOL.md): the `.nexus/` files, events and the `nexus` CLI
+- [docs/DESIGN.md](docs/DESIGN.md): concepts, architecture, decisions, phases (an index; the text is by topic in [docs/design/](docs/design/))
+- [docs/PROTOCOL.md](docs/PROTOCOL.md): the `.nexus/` files, events and the `nexus` CLI (an index; the text is by topic in [docs/protocol/](docs/protocol/))
 
 **Ideas.** Beside the orchestrator, each project has conversations with a thinking partner (the bulb icon): one
 session per topic, for thinking something through (gameplay design, the look, what to build next) without starting
@@ -165,8 +165,9 @@ chats' tool calls. A click goes to the hit's place: a step's or queue's details,
 older orchestrator session's message only while the chat still shows it), a report in the file viewer. The search
 opens again with your last query.
 
-**A fresh orchestrator session.** The orchestrator's long chat is not compacted. When its context is fuller than its
-threshold (85 % by default: "Fresh session at" in the settings' Orchestrator section) at the end of a turn, Nexus asks
+**A fresh orchestrator session.** The orchestrator's long chat is not compacted. When its context holds more than its
+threshold (500k tokens by default, at most 80 % of its model's context window: "Fresh session at" in the settings'
+Orchestrator section) at the end of a turn, Nexus asks
 it for a summary of the decisions, open items, the plan and what it promised you, and goes on in a fresh session that
 starts from that summary, its current briefing and the project's state. You need do nothing: a message you send
 meanwhile waits for the fresh session. The chat stays one chat: the earlier session's messages stay above a **Fresh
@@ -217,6 +218,18 @@ your review · UX2"…), a progress line with a segment per step, and its steps 
 computer. "Running" means a run is really at work; a queue whose run is paused says so. The step that matters is
 highlighted with why and its action (**Continue…**, **Review…**, its questions). On a phone the list is one column, the
 finished steps before it and the steps after the next three are folded into one line each; a tap unfolds them.
+
+**Checks run by Nexus.** When a worker reports a step done, Nexus runs the queue's checks itself (the project's and the
+queue's, one after another) before the step goes to its review; the worker does not run the whole suite. Meanwhile the
+step reads **checks running** (with the check and since when under it), or **checks queued** while another project's
+checks have the machine (one heavy operation at a time on the computer; its box says what it waits behind: which project's queue and step holds the machine, or a full test run outside Nexus, and its place in line), and the queue says the same ("checks running ·
+SF3"). The step's panel has a **Checks by Nexus** box listing each check: passed, flaky (failed, then passed on its
+second run), failed, running, or waiting its turn. A check that fails twice goes back to the same worker with its
+output: the step reads **check fix 1 of 3**, a round of its own and no send-back, so the review round and its pictures
+keep their number. After the last round (**Check-fix rounds** in Settings, under Defaults: global, or a project's own; 3 by default) the run halts
+for the orchestrator; Resume gives one more. A failure the worker says is not its work's is run on the queue's base
+commit: failing there too, the step goes to its review, and Nexus proposes a fix queue (CI) for the failing test. A step
+started by an older Nexus keeps having its checks run by its worker.
 
 **One action bar.** Every queue and step panel ends with the same bar, always in sight however long the panel is:
 the main action on the right (Accept and go on, Approve revision N, Continue, Answer), the second left of it (Fix
@@ -356,7 +369,7 @@ commits what is consistent and leaves no uncommitted changes behind.
 
 The settings panel (the gear icon) has two tabs. **Global** holds the settings every project follows: the default
 runtime; for Claude Code workers the model, effort and permission mode; for Codex workers the model, effort, sandbox
-and what happens when an agent needs to leave the sandbox; the orchestrator's model, effort, notices and the context fill at which it goes on in a fresh session; the thinking
+and what happens when an agent needs to leave the sandbox; the orchestrator's model, effort, notices and the context size (in tokens) at which it goes on in a fresh session; the thinking
 partners' runtime, model and effort; the reader's language; and the defaults, among them the **stop conditions** every
 queue gets besides its own (a list: add, edit, remove; an empty one cannot be saved) and the **send-backs before you**
 (how many times the orchestrator may send a step back to its worker before the step goes to you; 0 or more). It
@@ -387,9 +400,13 @@ per line, as your Codex config names it). Plugins and apps stay off; thinking pa
 What was refused shows in each step's detail and, grouped by kind with counts, under "Refused actions" on the project
 page; from a Claude Code refusal, "Allow for this project…" adds a rule (prefilled, editable) to these settings.
 A run can override model and effort when it starts, and the orchestrator chooses them when it starts runs.
-With context care on (the default, under Defaults), a run whose session is fuller than "Reuse a session up to" at
-the end of a step goes on in a fresh session of the same runtime, model and effort, given the previous session's
+With context care on (the default, under Defaults), a run whose session holds more than "Fresh session past" (300k tokens by default, at
+most 80 % of the model's context window; a share set before is ignored) at the end of a step goes on in a fresh session of the same runtime, model and effort, given the previous session's
 context summary; the run's panel lists each such switch.
+The orchestrator starts each queue in a new session; it continues one (`--use-session`) only when the new work builds
+directly on the same code and the session holds under about 150k tokens.
+`nexus stats --switches` compares the steps that ran in a fresh session after such a switch with those that went on in
+the same session: accepted in the first round, sent back, and check-fix rounds.
 A queue can be started when another one is done, at a time, or when the usage window resets: "When" in the start
 form (or the orchestrator's `nexus run B start --after A [--after C]`, `--at "2026-11-14 22:00"`, `--at usage-reset`).
 This is the plan, shown at the top of a project's queues: what runs now, then what follows, with a line from each queue
@@ -418,7 +435,9 @@ orchestrator.
 Queues run side by side only in worktrees of their own (the orchestrator gives independent work one, and runs queues
 that touch the same code one after another): never two in one checkout, and no more at once, across all
 projects, than "Queues running at once" in the settings panel's Nexus section (Global tab) (2 by default; a queue waiting for your
-review or an answer does not count). A project can have a limit of its own as well: "Queues running at once" in its
+review or an answer does not count, while a queue whose step's checks Nexus is running does). A queue that comes back from
+waiting (your answer, a send-back, its next step) takes a place first: with the limit full it stays running but is held,
+says "waits: N queues run, the limit is M" and goes on by itself once a place frees; do not resume or restart it. A project can have a limit of its own as well: "Queues running at once" in its
 settings (Defaults), switched from Global to Own. Both limits hold: with the global limit at 3 and a project's own at
 1, that project runs one queue at a time while other projects may start theirs. An older `limits.json` is taken over
 into the global setting at the first start. A queue paused or waiting keeps its checkout. Starting a queue whose checkout
@@ -463,7 +482,7 @@ repository, versioned with it); a project's template replaces one of yours with 
 Nexus's. Pick one, fill in what it asks (a maintenance template also asks its mode) and add anything else; "Send to
 the orchestrator" sends it as your message, and the orchestrator drafts the queue and fills in the rest. You approve
 it as any queue. A template is a queue's YAML with a `template:` header, `params:` and `{{name}}` placeholders
-(docs/PROTOCOL.md, "Queue templates"); `nexus template list` shows the ones in effect.
+(docs/protocol/planning.md, "Queue templates"); `nexus template list` shows the ones in effect.
 
 **Maintenance templates.** Ten templates survey a project and report; none depends on a stack, the commands are
 parameters with Node and .NET/Unity examples. `dependencies` lists the outdated dependencies (minor and patch; in
@@ -491,7 +510,10 @@ Nexus's own instances, filled in for this repository, are in `nexus-templates/`.
 there has nothing to merge back: once it is done Nexus removes its worktree, whether merging back by itself is on or
 not; if files are left in it, the worktree stays and "Waiting for you" gets a "Cleanup" item naming them (look, then
 Clean up on the queue's page). A stopped survey keeps its worktree as evidence. In fix_small mode the run ends with
-the integration step and is merged back like any worktree queue.
+the integration step and is merged back like any worktree queue. One of them has no shipped template behind it:
+`nexus-server-speed` runs the server's speed benchmark (`node scripts/server-speed.ts`), which records the run for
+the Stats view's "Server speed" trend, and reports a measure more than 25 % slower than the earlier runs' median; the
+orchestrator proposes how often it recurs.
 
 **Static analysis setup.** The `static-analysis` template sets up static analysis for any stack (ESLint or Biome
 for Node, the .NET analyzers and `dotnet format` for .NET and Unity): it asks you which tools to use, takes the
@@ -521,6 +543,13 @@ median working time and the estimated use of the weekly window per step, and per
 choice is kept in that browser. The range (7, 30, 90 days, all) is at the top; the project and the tags (kind,
 activity, area, size, origin) narrow the steps, not the windows. Use is an estimate and says so (≈); a group of fewer
 than 5 steps is marked "few data"; ↺ counts steps with a turn on a fallback. Every chart has a table view beside it.
+Last, **Server speed**: the running server's own measurements since its start (the event loop's delay at the 99th
+percentile, how often the loop was blocked 200 ms or more, the requests that took that long, the slowest route on
+average), and the speed benchmark's runs as a trend, one chart per configuration (the synthetic project at 1x and 4x,
+on a quiet machine and with tests beside it), a dot per run, for the measure you pick: **Reads** (the dashboard's
+typical reads, 95th percentile), **Change** (a line appended until the dashboards are told), **Start**, **Loop** (the
+event loop's delay). The runs come from `node scripts/server-speed.ts` (below), which Nexus's `server-speed`
+maintenance template runs.
 
 **A project's Stats** (the **Stats** tab beside Orchestrator and Ideas; on a phone the fifth tab) shows what the
 project measures: the metrics the orchestrator defined (`nexus metric define`) and the checks' times, one card each
@@ -595,6 +624,11 @@ the live worktree back, rebuilds and takes the port again. The settings panel th
 reason and "rolled back to <commit>", and your devices get a notification. There is nothing to undo by hand: fix the
 commit and update again. After a restart the server writes its log to `%APPDATA%\Nexus\server.log`.
 
+If the server stops on an error it did not expect (an uncaught exception), it still stops as before, with the stack in
+its log, but it also leaves a record behind. Once it runs again, the dashboard says "The server stopped: <error>,
+<time>" at the top of the page until you close it, and every project's orchestrator is told once, so it can check
+what the stop interrupted. The record is `crash.json` in `NEXUS_HOME`, with the full stack.
+
 While an update waits, you can go on talking with the orchestrator and the thinking partners. An answer still being
 written when Nexus restarts is cut off; after the restart the chat says "Nexus restarted while answering; it goes on",
 and the same conversation answers your message again.
@@ -635,25 +669,49 @@ npm run dev      # development, apart from the live instance: API on :4318 with 
                  # dashboard with hot reload on http://localhost:5173
 npm test         # protocol, importer, engine and orchestrator tests (the last two run a fake `claude`)
 npm run test:files -- apps/server/test/engine.test.ts   # while working: only these files, stops at the first failure
+                 # every test run's stores read through the server's model of the files, frozen, as the server reads
+                 # (docs/design/model.md, "Its reads are read-only")
 npm run test:times   # the whole suite, then how long each file took, slowest first
 npm run typecheck
 npm run lint     # ESLint (correctness rules, with types) and dependency-cruiser (module boundaries); about 15 s
 npm run knip     # unused files, exports and dependencies (closing refactoring steps and maintenance)
 node scripts/load-tests.mjs --burners 12 --copies 4 --rounds 5 apps/server/test/review.test.ts   # tests under load
+node scripts/perf-load.ts --minutes 3   # the server under a live-like load on a dev instance (port 4319); beside npm test too
+node scripts/perf-load.ts --minutes 2 --dashboards 0 --page   # the real dashboard in headless Edge: its requests a minute (build the web first)
+node scripts/server-speed.ts   # the server's speed benchmark: 1x and 4x synthetic project, with and without tests beside it,
+                 # on dev instances (port 4319); appends the run to <NEXUS_HOME>/benchmarks/server-speed.jsonl for the
+                 # Stats view's trend (--no-record only prints it, --out another file); a few minutes
+node scripts/synthetic-nexus.ts <empty folder> --scale 4   # a synthetic .nexus shaped like Nexus's own (fixed seed), with its counts
+node --expose-gc scripts/state-memory.ts <folder>/.nexus --age   # its start, the dashboard's state size, the heap (queue AQ)
+nexus server perf   # what the server measured of itself: event loop delay, requests by route, blocks over 200 ms
 ```
 
 One full run at a time on the machine: `npm test` and `npm run test:times` take a lock in the system's temporary
 folder first (`scripts/test-lock.ts`). When another checkout's full run holds it, they wait, saying once a minute
-what for, and after 15 minutes run anyway; a lock left by a run that died, or held for more than 20 minutes (longer
-than a full run takes), is taken over at once. A full run ends with whatever started it: when the shell or the
-command that ran `npm test` is killed (a background command's time limit, a closed terminal), the run's test processes
-end and its lock goes. `npm run test:files` never waits. `NEXUS_TEST_LOCK` names another lock file,
-`NEXUS_TEST_LOCK_MAX_MS` another longest wait, `NEXUS_TEST_LOCK_STALE_MS` another age at which a lock is stale.
+what for, as long as it takes: a full run never starts beside another; a lock left by a run that died, or held
+for more than 20 minutes (longer than a full run takes), is taken over at once. A full run ends with whatever started
+it: when the shell or the command that ran `npm test` is killed (a background command's time limit, a closed
+terminal), the run's test processes end and its lock goes. `npm run test:files` never waits. `NEXUS_TEST_LOCK`
+names another lock file, `NEXUS_TEST_LOCK_STALE_MS` another age at which a lock is stale. The Nexus server reads the
+same lock: while a full run started outside Nexus holds it, Nexus starts no heavy operation of its own, and `nexus
+status` says so (the machine's line, "The capacity coordinator" in docs/protocol/checks.md).
+
+The checks Nexus runs and everything a worker starts (its runtime, the tests and builds it runs) run below normal
+priority: in Task Manager they show "Below normal", and on a busy machine the Nexus server and your own programs go
+first. A full `npm test` you start yourself in a terminal runs at normal priority, as before.
 
 The tests that run fake runtimes or servers wait 10 s for what they expect (`NEXUS_TEST_WAIT_MS` sets it, e.g. higher
 on a slow machine; `apps/server/test/wait.ts`), so a change that breaks many of them fails the suite in minutes.
 A test that fails only now and then usually fails on a busy machine: `scripts/load-tests.mjs` runs the files given
 several times at once beside busy-loop processes and reports each run, its failures and its slow tests.
+
+On the user's machine (full runs of 550 to 630 s) 15000 is the value measured to be enough: in two full runs at 15000
+and two at 20000 no wait ran over 27 s (a 45 s limit at 15000, so the longest took 60 % of it), and a hung run still
+fails within a minute or two. To keep it, set it as a user environment variable, once: `setx NEXUS_TEST_WAIT_MS 15000`
+(or System Properties, Environment Variables, a new user variable). `setx` changes only processes started afterwards:
+the Nexus live instance reads its environment when it starts, so it sees the value only after it is restarted, and the
+checks it runs (`npm test`) use it only from then on. A terminal opened before the change keeps the old value.
+`NEXUS_TEST_WAIT_LOG` names a file that gets every wait over 2 s, to see what a value should be.
 
 `npm run lint` checks what the compiler does not: a promise nobody awaits, an async function where a void callback is
 expected, a `switch` over a union that leaves a member out (a `default` does not count), the rules of React hooks, and
@@ -661,9 +719,29 @@ the module boundaries (the protocol imports nothing from `apps/`, neither the da
 server). There are no style rules and no formatter. Fix a finding rather than silence it; a promise left alone on
 purpose takes `void`. `npm run knip` lists files nothing loads, exports nothing imports and dependencies nothing uses;
 a file loaded only by its path (a seed of `scripts/capture`, a fake runtime) is an entry in `knip.json`. The rules
-and their reasons: [docs/DESIGN.md](docs/DESIGN.md), "Static analysis".
+and their reasons: [docs/design/checks.md](docs/design/checks.md), "Static analysis".
 
 `NEXUS_PORT` and `NEXUS_HOST` change where the server listens (default `127.0.0.1:4317`, this machine only).
+
+#### Environment variables
+
+| Variable | What it sets | Default |
+|---|---|---|
+| `NEXUS_HOME` | The directory of Nexus's own data (`projects.yaml`, global settings, templates) | `%APPDATA%\Nexus` (`~/.config/Nexus` without `APPDATA`) |
+| `NEXUS_PORT` | The port the server listens on (the CLI's `nexus server …` calls it too) | `4317` |
+| `NEXUS_HOST` | The address the server listens on | `127.0.0.1` |
+| `NEXUS_WAIT_PORT` | Seconds a starting server waits for a port its predecessor still holds (set by an update) | `0` |
+| `NEXUS_CLAUDE` | The Claude Code binary the server runs | `claude` |
+| `NEXUS_CODEX` | The Codex binary the server runs | `codex` |
+| `NEXUS_LOG` | Writes the server's log to a file: `1` means `server.log` in `NEXUS_HOME`, any other value is the file | unset (no log file) |
+| `NEXUS_SHIPPED_TEMPLATES` | The folder of the templates Nexus ships | `templates/` in the Nexus checkout |
+| `NEXUS_VAPID_SUBJECT` | The contact (`mailto:` or URL) in the VAPID claim of web push messages | `mailto:nexus@example.com` |
+| `NEXUS_SESSION` | The session the `nexus` command reports as (set by Nexus in agents; `--session` overrides) | unset |
+| `NEXUS_DIR` | The project's `.nexus` folder the `nexus` command uses (set by Nexus in agents) | found by looking upwards from the working directory |
+| `NEXUS_HANDOVER` | The folder a successor server reads at an update (set by the predecessor; the server removes it from its environment at start) | unset |
+
+The variables of the test runner and of the capture script (`NEXUS_TEST_*`, `NEXUS_CAPTURE_BROWSER`) are described where
+they are used, above and below.
 
 ### Pictures of the dashboard for review
 
@@ -701,8 +779,46 @@ node scripts/layout-faults.ts "docs/ux/mockups/22-plan-layout.html?v=b" --width 
 node scripts/layout-faults.ts http://127.0.0.1:4318/#/nexus --click "All queues of Nexus" --lines "section[aria-label='The plan'] svg path"
 ```
 
-Exit code 1 when it finds a fault; the list says which line, box or text. Details: [docs/DESIGN.md](docs/DESIGN.md),
+Exit code 1 when it finds a fault; the list says which line, box or text. Details: [docs/design/dashboard.md](docs/design/dashboard.md),
 "Layout faults".
+
+### Where the tokens went
+
+`scripts/token-report.ts` measures where your agents' tokens went over a period, so the effect of a change (a deploy
+that cuts calls or context) can be compared with the time before it. It only reads, and the report holds totals only:
+
+```sh
+node scripts/token-report.ts --until 2026-11-18 --out $TEMP/baseline.md          # everything up to that day
+node scripts/token-report.ts --since 2026-11-20 --until 2026-11-27 --project nexus # a week after a deploy, one project
+```
+
+It reads Claude Code's transcripts (`~/.claude/projects`, sub-agents' too), Codex's (`~/.codex/sessions`, or
+`CODEX_HOME`), `<NEXUS_HOME>/turns.jsonl` and the registered projects' `.nexus/sessions` (who each session is, and the
+review and check events). `--since` and `--until` take a date (from that day's start on this machine) or a time; since
+is inclusive, until exclusive. `--project` (repeatable) narrows it to registered projects; `--top` sets how many of the
+most read files it lists (15); `--claude-dir`, `--codex-dir` and `--nexus-home` read other folders (for example a copy
+from another machine). Without `--out` it prints the report.
+
+The report gives: the cost by role (worker, orchestrator, thinking partner) in weighted tokens (each runtime's token
+weights, listed at the report's head: Claude Code's cache read at 0.02 of an input token as measured in its usage
+windows, Codex's at the price ratio 0.1), with the share of cache reads and a call's average context; the cache written again after an idle hour; the share of tests, typecheck and
+lint, builds and waiting for the full-test lock, with the number of full `npm test` runs; images read back and
+`nexus step progress` calls; the files read most often; how many calls made several tool calls at once or only read;
+and the quality signals (Fix it, Reject, a provisional acceptance returned, send-backs, fix rounds after a failed
+check), by queue and step. It ends with what is missing (sessions without a transcript on this machine, transcripts no
+session names). How each figure is counted: [docs/design/usage.md](docs/design/usage.md), "Measuring token use".
+
+`--weights` answers another question from the same turn records: how much each kind of token weighs in your
+subscription's usage windows (Claude Code's 5-hour and weekly, Codex's), above all a cache read against an uncached
+input token (the price ratio is 0.1; Nexus counts Claude Code's at the 0.02 this measured, Codex's at 0.1). It sets each window's growth between readings against the tokens spent meanwhile,
+and says how sure the estimate is and, when it is not, how many more days of data it would take:
+
+```sh
+node scripts/token-report.ts --weights --until 2026-11-18 --out $TEMP/weights.md
+node scripts/token-report.ts --weights --since 2026-11-18 --stretch-minutes 30   # shorter stretches, more of them
+```
+
+It counts every project's turns (the windows are the account's), not only `--project`'s.
 
 ## Remote access
 
@@ -760,6 +876,22 @@ it, as a new revision (a queue that went on waits for your approval at its runni
 approved and started). Whether provisional work is pushed like accepted work is "Provisional work" in Settings (on by
 default; off, nothing built on unconfirmed provisional work is pushed until you confirm it).
 
+**The review helper.** The orchestrator's routine reviews (levels 2 and 3) go to a short-lived review helper on a
+cheaper model, so they stay out of the orchestrator's long chat. It reads the step's packet (its goal, criteria and
+review notes, the checks Nexus ran, the diff, the review material, the worker's summary), then accepts a level-2 step
+whose criteria it can check, sends back what fails (counted toward the same send-back limit), or passes the step on
+to the orchestrator with why (a criterion it cannot check, such as the look; a deviation the worker reported; a
+question; its own doubt; and always at level 3, whose judgement stays the orchestrator's). Levels, away mode and
+provisional acceptances work as above: what the helper passes on reaches the orchestrator as before, and only the
+orchestrator accepts provisionally. A step's panel says who accepted it: "accepted by the review helper · Claude Code ·
+claude-sonnet-5-5 · medium", "accepted by the orchestrator", "accepted by you" or "accepted by Nexus, without a model";
+while the helper reviews it, "the review helper reviews it". The orchestrator hears of the helper's acceptances with
+its next notice and reviews about one in ten again (an audit). Settings, "Review helper": whether routine reviews go to
+the helper (on by default), the runtime, model and effort it runs on (Claude Code, claude-sonnet-5-5, medium by
+default; a project may have its own, with Global · Own like the other settings) and the share audited (10 %).
+`nexus stats --reviews` shows how the reviews went: your Fix its, rejections and returned provisional acceptances,
+the send-backs by who sent them, how often the helper passed steps on, and what the audits found.
+
 **Away mode**: "Away…" at the foot of the sidebar (in Settings on a phone) turns it on until a time (08:00 by default,
 the next such time); "Away until 08:00" then shows there and at the top of the right rail (in the header on a phone),
 with Turn off. Meanwhile level-2 steps run as level 3, so the queues go on and what is yours waits in the batch;
@@ -787,10 +919,19 @@ per round; in the project's own checkout, a commit not made during its worker's 
 branch: how far ahead and behind of its base and of its remote-tracking branch, as last fetched (Nexus never fetches).
 
 **The integration step.** A queue with a worktree of its own ends with a step Nexus keeps (⇄ "Integration", by
-Nexus), after the closing refactoring step: its worker merges the current main into the queue's branch in the worktree
-and runs the checks there, so main only ever moves forward to a tested result. A conflict stops the queue for you,
+Nexus), after the closing refactoring step: Nexus merges the current main into the queue's branch in the worktree and runs
+the checks there, so main only ever moves forward to a tested result. A clean merge needs no model: Nexus makes it
+itself, and at review level 2 or 3, with the checks green, accepts it itself too (a level you set to 1 still comes to
+you). A worker is involved only for a conflict or a check-fix round. A conflict stops the queue for you,
 unless Settings → Merging back → "Conflicts" lets the worker resolve it (then the step's review judges the
 resolution); resolve it in the worktree, or with a new revision, and press Continue: the step runs again.
+
+**Main brought in between the steps.** When Nexus opens a step of a queue with an integration step, it first merges
+the current main into the queue's branch if that is clean (a conflict is only recorded, and the next step's opening
+names the conflicting files; the integration step resolves it), so the steps work on a current base. The step's
+opening says what came in. When a lockfile changed in the merge (or before a step's checks), the worktree's setup
+runs again; the files that count are the project's `defaults.worktree_setup_inputs` (paths or globs in the project's
+`.nexus/project.yaml`, by default the common lockfiles anywhere in the tree; not shown in the dashboard).
 
 **Merge back and clean up.** A finished queue that ran in a worktree of its own offers "Merge into <base>…" and
 "Clean up…". Each asks first. For a queue with an integration step, Merge moves main forward to the commit the
@@ -827,8 +968,8 @@ the queue's provisional acceptances. Turn it on where the project's checks are s
 "Worktree setup" (project only) is a command run once in each new worktree before its first step, for example `npm ci`;
 if it fails, the run stops with the reason.
 
-**Checks for every step** (Settings → Defaults, project only, empty by default): commands every step of every queue
-of the project runs before the queue's own checks, one per line, for example `npm run lint`; a check the queue names
+**Checks for every step** (Settings → Defaults, project only, empty by default): commands Nexus runs after every step of
+every queue of the project, before the queue's own checks, one per line, for example `npm run lint`; a check the queue names
 too runs once. Approving a queue shows them first, marked "(project)". A queue that is running gets a change at its
 next start, not its next step. For Nexus itself set it to `npm run lint` once the static analysis (queue SA) is
 deployed: then every queue, also the ones already approved, runs it.

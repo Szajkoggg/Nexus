@@ -1,4 +1,4 @@
-// Pictures the user adds to a chat message (PROTOCOL.md, "Uploads"). Browsers do not reveal a file's path, so the
+// Pictures the user adds to a chat message (docs/protocol/api.md, "Uploads"). Browsers do not reveal a file's path, so the
 // dashboard sends the picture itself, base64 in a JSON body (writes stay JSON-only), and the server saves it under the
 // project's .nexus/uploads/; the message then carries the saved file's absolute path, which the agent opens.
 // The server is the folder's only writer. The type is judged from the bytes, never from a name or a declared type, and
@@ -14,6 +14,55 @@ export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
  * for the JSON around it (a data: URL prefix, the field name).
  */
 export const MAX_UPLOAD_BODY = 14 * 1024 * 1024;
+/**
+ * What the server reads on and throws away of a refused body before it answers 413 and closes (RFC 9112, 9.6): a
+ * socket closed with unread data on it is reset on Windows, and the client then loses the 413 and sees only the reset
+ * (queue FL, FL3: 8 of 30 oversized fetches). At most this many bytes in all, or a body declared larger is answered
+ * at once; 64 MiB takes well under a second on this machine, and is what @hono/node-server drains after a response.
+ */
+export const MAX_UPLOAD_DRAIN = 64 * 1024 * 1024;
+/** And for at most this long from the refusal: a client that stalls or sends slowly does not hold the request longer. */
+export const UPLOAD_DRAIN_MS = 5_000;
+
+/** A body read under a limit: its bytes, or "too large" and whether the rest was read to its end (drained). */
+export type LimitedBody = { body: Uint8Array<ArrayBuffer> } | { tooLarge: true; drained: boolean };
+
+/**
+ * Reads a request body of at most `max` bytes. A larger one (declared by its Content-Length, or found while it streams
+ * in) is refused: the rest is read and discarded up to `drain` bytes in all and for `ms` from the refusal, so that the
+ * answer can close the connection cleanly; past either bound the reading stops and `drained` is false.
+ */
+export async function readLimited(body: ReadableStream<Uint8Array> | null, declared: number | undefined,
+  o: { max: number; drain: number; ms: number } = { max: MAX_UPLOAD_BODY, drain: MAX_UPLOAD_DRAIN, ms: UPLOAD_DRAIN_MS }): Promise<LimitedBody> {
+  if (!body) return { body: new Uint8Array(0) };
+  if (declared !== undefined && declared > o.drain) return { tooLarge: true, drained: false };
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  let deadline = declared !== undefined && declared > o.max ? Date.now() + o.ms : undefined;
+  for (;;) {
+    const r = await readBy(reader, deadline);
+    if (r === "late") return { tooLarge: true, drained: false };
+    if (r.done) break;
+    size += r.value.length;
+    if (size <= o.max) { chunks.push(r.value); continue; }
+    chunks.length = 0;
+    deadline ??= Date.now() + o.ms;
+    if (size > o.drain) return { tooLarge: true, drained: false };
+  }
+  if (size > o.max) return { tooLarge: true, drained: true };
+  return { body: Buffer.concat(chunks, size) };
+}
+
+/** The reader's next chunk, or "late" once `deadline` (epoch ms) has passed first; no deadline: just the next chunk. */
+function readBy(reader: ReadableStreamDefaultReader<Uint8Array>, deadline: number | undefined): Promise<ReadableStreamReadResult<Uint8Array> | "late"> {
+  const next = reader.read();
+  if (deadline === undefined) return next;
+  next.catch(() => {}); // a read that fails after it lost the race is no unhandled rejection
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<"late">((resolve) => { timer = setTimeout(() => resolve("late"), Math.max(0, deadline - Date.now())); });
+  return Promise.race([next, late]).finally(() => clearTimeout(timer));
+}
 
 export type ImageType = "png" | "jpeg" | "webp" | "gif";
 const EXT: Record<ImageType, string> = { png: ".png", jpeg: ".jpg", webp: ".webp", gif: ".gif" };

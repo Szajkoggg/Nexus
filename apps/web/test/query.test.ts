@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Action, type ActionState } from "../src/action.ts";
-import { Query, Reloads, Requests, bump, noVersions, projectVersion, type Versions } from "../src/query.ts";
+import { Query, Reloads, Requests, bump, noVersions, projectVersion, queueVersion, queuesVersion, settingsVersion, type Versions } from "../src/query.ts";
 
 /** A fetcher whose answers the test hands out by hand, in any order. */
 function manual() {
@@ -140,32 +140,48 @@ test("a stopped query takes no answer", async () => {
   assert.equal(changes(), 0);
 });
 
+/** A state message of the live stream, as the server sends it (docs/protocol/live.md). */
+const state = (project: string, body: Record<string, unknown> = { set: { generated_at: "t" } }) => ({ type: "state" as const, project, seq: 1, ...body });
+const queue = (id: string) => ({ id }) as never;
+
 test("a change in another project leaves this project's version alone, so its reads ask nothing", () => {
   const { calls, q } = setup();
-  let v: Versions = bump(noVersions, { type: "changed", project: "A" });
-  q.ask("/api/projects/A/orchestrator", projectVersion(v, "A"));
-  v = bump(v, { type: "changed", project: "B" });
+  let v: Versions = bump(noVersions, state("A"));
+  q.ask("/api/projects/A/ideas", projectVersion(v, "A"));
+  v = bump(v, state("B"));
   v = bump(v, { type: "server" });
   v = bump(v, { type: "projects" });
-  q.ask("/api/projects/A/orchestrator", projectVersion(v, "A"));
+  q.ask("/api/projects/A/ideas", projectVersion(v, "A"));
   assert.equal(calls.length, 1);
-  v = bump(v, { type: "changed", project: "A" });
-  q.ask("/api/projects/A/orchestrator", projectVersion(v, "A"));
+  v = bump(v, state("A"));
+  q.ask("/api/projects/A/ideas", projectVersion(v, "A"));
   assert.equal(calls.length, 2);
 });
 
-test("what each message bumps", () => {
+test("what each message bumps: a change of a session's facts only asks nothing that spans projects or queues", () => {
   const v0 = noVersions;
-  const changed = bump(v0, { type: "changed", project: "A" });
-  assert.deepEqual(changed, { all: 1, list: 1, epoch: 0, project: { A: 1 } });
-  assert.deepEqual(bump(changed, { type: "projects" }), { all: 2, list: 2, epoch: 0, project: { A: 1 } });
-  assert.deepEqual(bump(changed, { type: "server" }), { all: 2, list: 1, epoch: 0, project: { A: 1 } });
-  const again = bump(changed, { type: "reconnected" });
-  assert.deepEqual(again, { all: 2, list: 2, epoch: 1, project: { A: 1 } });
+  const facts = bump(v0, state("A", { upsert: { sessions: [{ id: "s" }] } }));
+  assert.equal(facts.all, 0, "the server, the digest, the usage are not asked again");
+  assert.equal(queuesVersion(facts, "A"), queuesVersion(v0, "A"));
+  assert.notEqual(projectVersion(facts, "A"), projectVersion(v0, "A"), "the project's other reads (ideas, rules) are");
+  const queued = bump(facts, state("A", { upsert: { queues: [queue("Q1")] } }));
+  assert.equal(queued.all, 1);
+  assert.notEqual(queuesVersion(queued, "A"), queuesVersion(facts, "A"));
+  assert.notEqual(queueVersion(queued, "A", "Q1"), queueVersion(facts, "A", "Q1"), "its queue's reads move");
+  assert.equal(queueVersion(queued, "A", "Q2"), queueVersion(facts, "A", "Q2"), "another queue's do not");
+  const asked = bump(v0, state("A", { set: { attention: [] } }));
+  assert.equal(asked.all, 1, "what waits for the user moves what spans projects");
+  const set = bump(v0, state("A", { set: { project: {} } }));
+  assert.notEqual(settingsVersion(set, "A"), settingsVersion(v0, "A"));
+  const reload = bump(v0, state("A", { reload: true }));
+  assert.notEqual(queueVersion(reload, "A", "Q2"), queueVersion(v0, "A", "Q2"), "a reload moves every queue's reads");
+  assert.deepEqual(bump(v0, { type: "log", project: "A", seq: 1, session: "s", log: "activity", entries: [] }), v0, "a log line moves no version: its views apply it");
+  assert.deepEqual(bump(v0, { type: "projects" }), { ...v0, all: 1, list: 1 });
+  assert.deepEqual(bump(v0, { type: "server" }), { ...v0, all: 1 });
+  const again = bump(queued, { type: "reconnected" });
   // A reconnect may have missed any project's change: every project's version moves.
-  assert.notEqual(projectVersion(again, "B"), projectVersion(changed, "B"));
-  assert.notEqual(projectVersion(again, "A"), projectVersion(changed, "A"));
-  assert.equal(projectVersion(changed, "B"), projectVersion(v0, "B"));
+  assert.notEqual(projectVersion(again, "B"), projectVersion(queued, "B"));
+  assert.notEqual(queueVersion(again, "A", "Q2"), queueVersion(queued, "A", "Q2"));
 });
 
 // ---------------------------------------------------------------- a write's outcome (Reloads)
@@ -300,3 +316,4 @@ test("a control waits only for the reads it shows, not for a slow read of someth
   assert.equal(landed, true);
   assert.equal(state.view("/state").data, "level 3");
 });
+

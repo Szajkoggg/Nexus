@@ -1,7 +1,8 @@
-// The plan as the Queues view shows it (PROTOCOL.md, "The plan"): what runs now, then what follows, in columns; lines
+// The plan as the Queues view shows it (docs/protocol/planning.md, "The plan"): what runs now, then what follows, in columns; lines
 // from each queue to those it waits for; on every queue what it waits for. Pure and unit tested; components/Plan.tsx
 // draws it (lanes on a desktop, an ordered list on the phone).
 import { runGoing } from "@nexus/protocol/status-rules";
+import { compareIds } from "@nexus/protocol/ids";
 import { formatClock, t, type Key, type Params } from "./i18n.ts";
 import { openPlan, queueStatus, type HonestStatus, type QueueLike } from "./queueStatus.ts";
 
@@ -172,7 +173,7 @@ export function planLayout(all: readonly PlanQueue[], now = new Date()): PlanLay
       const rows = n.before.map((b) => row.get(b.queue)).filter((r): r is number => r !== undefined);
       return rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : Number.MAX_SAFE_INTEGER;
     };
-    here.sort((a, b) => weight(a) - weight(b) || madeAt(a.id).localeCompare(madeAt(b.id)) || a.id.localeCompare(b.id));
+    here.sort((a, b) => weight(a) - weight(b) || madeAt(a.id).localeCompare(madeAt(b.id)) || compareIds(a.id, b.id));
     here.forEach((n, i) => row.set(n.id, i));
     columns[c] = here;
   }
@@ -189,7 +190,7 @@ export function planLayout(all: readonly PlanQueue[], now = new Date()): PlanLay
 export function moveTargets(l: PlanLayout, all: readonly PlanQueue[], queue: string): { id: string; title: string }[] {
   const shown = planList(l).map((n) => n.id);
   return all.filter((q) => q.id !== queue && !ENDED.has(q.status))
-    .sort((a, b) => (shown.indexOf(a.id) + 1 || 1e9) - (shown.indexOf(b.id) + 1 || 1e9) || a.id.localeCompare(b.id))
+    .sort((a, b) => (shown.indexOf(a.id) + 1 || 1e9) - (shown.indexOf(b.id) + 1 || 1e9) || compareIds(a.id, b.id))
     .map((q) => ({ id: q.id, title: q.title }));
 }
 
@@ -259,7 +260,7 @@ export function drawPlan(l: PlanLayout, heights: ReadonlyMap<string, number>, wi
   l.columns.forEach((nodes, c) => {
     const passing = edges.filter((e) => e.c0 < c && c < e.c1)
       .map((e) => ({ key: e.key, want: e.c0 === c - 1 ? mid(e.from) : gapMid(e.key, c - 1) }))
-      .sort((a, b) => a.want - b.want || a.key.localeCompare(b.key));
+      .sort((a, b) => a.want - b.want || compareIds(a.key, b.key));
     let y = s.head, qi = 0, gi = 0;
     while (qi < nodes.length || gi < passing.length) {
       const q = nodes[qi], g = passing[gi];
@@ -280,7 +281,7 @@ export function drawPlan(l: PlanLayout, heights: ReadonlyMap<string, number>, wi
   /** The range a line may be moved within at a column: its box's (a port) or its gap's. */
   const room = new Map<string, [number, number]>();
   const ports = (id: string, list: { key: string; toward: number }[], at: (key: string) => number) => {
-    list.sort((a, b) => a.toward - b.toward || a.key.localeCompare(b.key));
+    list.sort((a, b) => a.toward - b.toward || compareIds(a.key, b.key));
     const b = boxes.get(id)!;
     const step = list.length > 1 ? Math.min(10, Math.max(0, h(id) - 12) / (list.length - 1)) : 0;
     list.forEach((p, i) => {
@@ -313,7 +314,7 @@ export function drawPlan(l: PlanLayout, heights: ReadonlyMap<string, number>, wi
     }
     const runs = here.filter(({ e, i }) => left(e, i) !== left(e, i + 1))
       .map(({ e, i }) => ({ key: e.key, lo: Math.min(left(e, i), left(e, i + 1)), hi: Math.max(left(e, i), left(e, i + 1)), t: 0 }))
-      .sort((a, b) => a.lo - b.lo || a.key.localeCompare(b.key));
+      .sort((a, b) => a.lo - b.lo || compareIds(a.key, b.key));
     const ends: number[] = [];
     for (const r of runs) {
       let t = ends.findIndex((end) => end < r.lo - 2 * APART);

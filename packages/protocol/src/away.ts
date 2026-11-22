@@ -1,4 +1,4 @@
-// The user's away mode (PROTOCOL.md, "Away mode"): while it is on, level-2 steps are reviewed as level 3. Pure: the
+// The user's away mode (docs/protocol/review.md, "Away mode"): while it is on, level-2 steps are reviewed as level 3. Pure: the
 // file is read and written by the store (store.ts, readAway/writeAway), and written only by the server.
 import type { AwayFile, ReviewLevel } from "./schemas.ts";
 

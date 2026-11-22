@@ -91,7 +91,7 @@ test("nexus ideas matches lists the suggestions; accepting or rejecting one is r
   changeIdeaStatus(store, { request_id: "drop", revision: ideaStatuses(store, loadProjectState(store)).revision,
     ref: "docs/ideas/tags.md#2026-11-14", operation: "drop", reason: "User dropped this decision" });
   const before = readFileSync(join(store.dir, "idea-statuses.yaml"), "utf8");
-  const status = ideas("w", "status");
+  const status = ideas("w", "status", "--full");
   assert.ok(status.ok, status.out);
   const body = JSON.parse(status.out) as IdeaStatusesResponse;
   assert.equal(body.entries[0]!.disposition, "dropped");

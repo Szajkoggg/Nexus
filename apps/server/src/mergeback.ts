@@ -1,6 +1,6 @@
 // Merging a worktree queue back into its base, and cleaning up after it, with local git only.
 //
-// A queue with an integration step (PROTOCOL.md, "The integration step") goes back one way only: its base moves
+// A queue with an integration step (docs/protocol/git.md, "The integration step") goes back one way only: its base moves
 // forward to the integrated commit (`git merge --ff-only`), never with a merge commit on the base. Nexus does it by
 // itself when the project's merge_back is on (src/merger.ts), the user with Merge back in the dashboard; both go
 // through judgeMerge and fastForward here, one at a time (a lock per queue). It judges in this order (queue FX): what
@@ -25,6 +25,7 @@ import { checkoutOf, git, patchGit } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
 import { samePath } from "./worktree.ts";
 import { cleanupIdentity, cleanupPath, cleanupRefusal, cleanupSnapshot, removeVerifiedTree } from "./cleanup-proof.ts";
+import { gitLabel, perf } from "./perf.ts";
 
 const ENV = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_EDITOR: "true", GIT_MERGE_AUTOEDIT: "no" };
 
@@ -40,7 +41,7 @@ const ROUND_SETTLE_MS = 60_000;
 
 /** Runs git, returning its output or throwing with what git said. */
 function run(cwd: string, args: string[]): string {
-  try { return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: ENV, windowsHide: true, timeout: 60_000 }).trim(); }
+  try { return perf.measure(gitLabel(args), () => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: ENV, windowsHide: true, timeout: 60_000 })).trim(); }
   catch (e) {
     const err = e as { stderr?: string; stdout?: string; message: string };
     throw new Error([err.stdout, err.stderr].filter(Boolean).join("\n").trim() || err.message);
@@ -98,8 +99,9 @@ function runningIn(store: ProjectStore, state: ProjectState, path: string): Queu
 }
 
 /**
- * Queues with a step at work in checkout `path`: its step running or waiting for an answer, or a pause asked for that
- * waits for the step's end. A run between steps, held, paused, or with its step in review is not at work there.
+ * Queues with a step at work in checkout `path`: its step running, waiting for an answer or its checks running, or a
+ * pause asked for that waits for the step's end. A run between steps, held, paused, or with its step in review is not
+ * at work there.
  */
 function atWorkIn(store: ProjectStore, state: ProjectState, path: string): QueueView[] {
   return runningIn(store, state, path).filter((x) => {

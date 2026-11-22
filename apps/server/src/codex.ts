@@ -8,6 +8,7 @@ import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { join, relative, resolve, isAbsolute } from "node:path";
 import { EDGE_BLOCK, agentEnv, edgeBlock, shortInput, type AgentEvents, type RefusalItem, type TurnTokens, type AgentOptions, type AgentProcess, type Priority, type TurnFailure } from "./agent.ts";
+import { perf } from "./perf.ts";
 
 export interface CodexOptions extends AgentOptions {
   /** The thread to resume; a new thread is started without one. */
@@ -38,7 +39,7 @@ export interface CodexOptions extends AgentOptions {
    * `writableRoots` are then not sent, neither at thread/start nor in a turn's sandbox policy, since Codex lets the
    * older settings win over a profile. The orchestrator's (decided by the user 2026-11-16, queue OC): extends
    * `:read-only`, writes only its drafts folder and its own events.jsonl (a single file may be granted). Probed with
-   * Codex 0.167.2 on Windows (DESIGN.md, "An orchestrator on Codex can be kept to its drafts").
+   * Codex 0.167.2 on Windows (docs/design/runtimes.md, "An orchestrator on Codex can be kept to its drafts").
    */
   permissions?: CodexPermissions;
 }
@@ -66,6 +67,10 @@ type Json = Record<string, any>;
 
 /** thread/resume of a thread Codex never saved (0.167.2, probed 2026-11-15: JSON-RPC error -32600). */
 const NO_ROLLOUT = /no rollout found for thread id/i;
+/** How a request fails that the process's exit leaves unanswered (CodexSession.request). */
+const EXITED = "codex exited";
+/** How long after its exit event a process's stdout may still drain before the exit is handled. */
+const EXIT_DRAIN_MS = 1000;
 
 /** CodexErrorInfo values worth trying again: overloaded, the server's own error, the network, a short rate limit. */
 const CODEX_PASSING = new Set([
@@ -103,7 +108,7 @@ export function classifyCodexError(error: Json | null | undefined, resetsAt?: st
 export function gitWritableRoots(cwd: string): string[] {
   let gitDir: string, common: string;
   try {
-    const out = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const out = perf.measure("git rev-parse", () => execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
     [gitDir, common] = out.trim().split(/\r?\n/).map((p) => resolve(p)) as [string, string];
   } catch { return []; }
   const rel = relative(resolve(cwd), gitDir);
@@ -120,6 +125,10 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   private buffer = "";
   private nextId = 0;
   private readonly pending = new Map<number, { resolve: (v: Json) => void; reject: (e: Error) => void; method: string }>();
+  /** The process has exited, for good: no request is answered and no turn starts; its last lines may still be read. */
+  private exited = false;
+  /** Its exit has been handled (`exit` emitted): a line read after it changes nothing. */
+  private gone = false;
   private threadId?: string;
   private turnId?: string;
   /** Messages waiting for the running turn to end (or for the thread to be ready). */
@@ -171,7 +180,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     const script = /\.(m?[jt]s)$/.test(bin);
     const args = ["app-server"];
     this.proc = spawnRuntimeChild(script ? process.execPath : bin, script ? [bin, ...args] : args, {
-      cwd: options.cwd, env: agentEnv(options.env), owned: options.ownProcesses,
+      cwd: options.cwd, env: agentEnv(options.env), owned: options.ownProcesses, agent: options.agentRole,
     });
     this.proc.on("spawn", () => { if (this.proc.pid) this.emit("facts", { pid: this.proc.pid }); });
     // A write to a process that is exiting (killed, crashed) fails with EPIPE: its exit is handled, the write is moot.
@@ -182,18 +191,32 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     this.proc.stderr.on("data", (d: string) => { this.lastStderr = (this.lastStderr + d).slice(-2000); });
     this.proc.on("error", (err) => this.emit("activity", { kind: "error", text: `could not start codex: ${err.message}` }));
     this.proc.on("exit", (code) => {
-      this.state = "exited";
-      this.openCommands.clear();
-      this.openAgents.clear();
-      for (const p of this.pending.values()) p.reject(new Error("codex exited"));
-      if (code && this.lastStderr.trim()) this.emit("activity", { kind: "error", text: this.lastStderr.trim().slice(-500) });
-      this.emit("exit", code);
+      // Requests fail at once from here on, and no turn starts (`exited`); but Node may emit the exit before stdout has
+      // drained: the lines the process wrote before it ended (a turn's end) are read first, up to EXIT_DRAIN_MS, so
+      // they come before the exit and never after it, over its state (queue LH).
+      this.exited = true;
+      let done = false;
+      const finish = () => { if (done) return; done = true; clearTimeout(timer); this.ended(code); };
+      const timer = setTimeout(finish, EXIT_DRAIN_MS);
+      if (this.proc.stdout.readableEnded) finish(); else this.proc.stdout.once("end", finish);
     });
     void this.open();
   }
 
+  /** The process has ended and its output is read: everything after it is ignored. */
+  private ended(code: number | null): void {
+    this.gone = true;
+    this.state = "exited";
+    this.openCommands.clear();
+    this.openAgents.clear();
+    for (const p of this.pending.values()) p.reject(new Error(EXITED));
+    this.pending.clear();
+    if (code && this.lastStderr.trim()) this.emit("activity", { kind: "error", text: this.lastStderr.trim().slice(-500) });
+    this.emit("exit", code);
+  }
+
   send(text: string, priority?: Priority): void {
-    if (this.state === "exited") throw new Error("the session's process has exited");
+    if (this.exited) throw new Error("the session's process has exited");
     if (this.stopping) { this.afterStop.push(text); return; }
     if (!this.threadId) { this.queue.push(text); this.state = "working"; return; } // the thread is still starting
     if (this.state === "idle") { this.startTurn(this.withCarry(text)); return; }
@@ -221,7 +244,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
    * turn/started, a contextCompaction item, turn/completed. While the thread is still starting it waits for it.
    */
   compact(): boolean {
-    if (this.state === "exited") throw new Error("the session's process has exited");
+    if (this.exited) throw new Error("the session's process has exited");
     if (this.state === "working" && this.threadId) return false;
     this.state = "working";
     if (!this.threadId) { this.compactFirst = true; return true; }
@@ -231,6 +254,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
 
   private startCompact(): void {
     void this.request("thread/compact/start", { threadId: this.threadId }).catch((err) => {
+      if (this.exited) return; // its exit is the end, as turn/start's
       const text = (err as Error).message;
       this.emit("activity", { kind: "error", text: `thread/compact/start: ${text}` });
       this.state = "idle";
@@ -318,7 +342,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
    * not at thread/start (probed 2026-11-15), so a process that ended between the two left a thread id with nothing
    * behind it, and thread/resume fails with "no rollout found for thread id <id>". Then there is no conversation to
    * lose: a new thread is started instead, its id recorded (facts `nativeId`), and the session's message goes into it
-   * (queue RN; DESIGN.md, "When Claude Code saves a conversation"). Any other failure stays a failure.
+   * (queue RN; docs/design/engine.md, "When Claude Code saves a conversation"). Any other failure stays a failure.
    */
   private async resumeThread(threadId: string, common: Json): Promise<Json> {
     try {
@@ -331,6 +355,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   }
 
   private startTurn(text: string): void {
+    if (this.exited) return; // its exit is the end: no turn starts after it
     this.state = "working";
     const o = this.options;
     const sandboxPolicy = !o.permissions && o.sandbox === "workspace-write"
@@ -356,7 +381,13 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       });
   }
 
+  /**
+   * A JSON-RPC request; settles with its response, or fails when the process exits first. One made after the exit (a
+   * line read after it, a continuation of an earlier response) fails at once: nothing would ever answer it, and its
+   * write to the closed input fails silently.
+   */
   private request(method: string, params: Json): Promise<Json> {
+    if (this.exited) return Promise.reject(new Error(EXITED));
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject, method });
@@ -367,6 +398,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   private notify(method: string, params: Json): void { this.proc.stdin.write(JSON.stringify({ method, params }) + "\n"); }
 
   private read(chunk: string): void {
+    if (this.gone) return;
     this.buffer += chunk;
     let i: number;
     while ((i = this.buffer.indexOf("\n")) >= 0) {
@@ -612,7 +644,7 @@ export function webSearchText(it: Json): string {
 
 /**
  * A message's input items: its text, and each picture uploaded for a chat message (a line that is the absolute path of
- * a file under a `.nexus/uploads/` folder, PROTOCOL.md "Uploads") as a `localImage` item beside it. Codex does not
+ * a file under a `.nexus/uploads/` folder, docs/protocol/api.md "Uploads") as a `localImage` item beside it. Codex does not
  * open a picture from a path in the text (probed live, Codex 0.167.2 with gpt-6-luna, a partner's sandbox: "I can't
  * access that image path"); given the item, it sees the picture. The path stays in the text, so the chat and Claude
  * read the same message.

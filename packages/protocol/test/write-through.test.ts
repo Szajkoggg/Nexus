@@ -1,11 +1,11 @@
-// The store's write count (store.ts, writeCount): every write through the store moves it, a read never does. The
-// server passes one state snapshot on until it moves (apps/server/src/main.ts, stateOf).
+// The store's write-through (store.ts, onWrite): every write through the store tells its listeners, a read never does.
+// The server's model takes a write up so (model.ts), before the next decision reads.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectStore, addNote, approveQueue, deleteNote, loadProjectState, newId, writeCount, type Event } from "../src/index.ts";
+import { ProjectStore, addNote, approveQueue, deleteNote, loadProjectState, newId, onWrite, type Event } from "../src/index.ts";
 
 function project() {
   const root = mkdtempSync(join(tmpdir(), "nexus-writes-"));
@@ -14,16 +14,19 @@ function project() {
   return st;
 }
 
-test("every kind of write through the store moves the count; a read does not", () => {
+test("every kind of write through the store is told; a read is not", () => {
   const st = project();
-  const moved = (what: string, write: () => void) => { const before = writeCount(); write(); assert.ok(writeCount() > before, what); };
+  let told = 0;
+  const unhook = onWrite(() => { told++; });
+  const moved = (what: string, write: () => void) => { const before = told; write(); assert.ok(told > before, what); };
   moved("a YAML file", () => st.writeQueue({ ...st.readQueue("Q"), title: "Q2" }));
   moved("an appended line", () => st.appendEvent({ v: 1, id: newId(), at: new Date().toISOString(), session: "s1", type: "log", level: "info", text: "x" } as Event));
   moved("an approval", () => approveQueue(st, "Q"));
   moved("a note", () => addNote(st, "Q", "A", "look at the header"));
   const note = loadProjectState(st).queues[0]!.steps[0]!.notes[0]!;
   moved("a note withdrawn", () => deleteNote(st, "Q", "A", note.id));
-  const before = writeCount();
+  const before = told;
   loadProjectState(st); st.readQueue("Q"); st.readRun("Q");
-  assert.equal(writeCount(), before, "reads leave it");
+  assert.equal(told, before, "reads are not");
+  unhook();
 });

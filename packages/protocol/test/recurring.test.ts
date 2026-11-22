@@ -89,3 +89,21 @@ test("after N queues: the schedule's text, its place in the hash, and what it co
   assert.equal(countedQueues({ baseline: [] }, queues), 2, "not the open one, not a recurring's run");
   assert.equal(countedQueues({ baseline: ["A"] }, queues), 1, "not one done before the count began");
 });
+
+test("after N queues: where the count starts at an approval or a set: its last run's start, or now if it never ran", async () => {
+  const { countStart } = await import("../src/recurring.ts");
+  const done = (id: string, finished?: string, standing = false) =>
+    ({ id, status: "done", approvals: [standing ? { standing: { id: "X" } } : {}], steps: [{ ...(finished ? { finished_at: finished } : {}) }] });
+  const queues = [
+    done("OLD"), // done, with no finish time: taken as done before the run
+    done("A", "2026-11-10T10:00:00Z"),
+    done("X-20261111-0000", "2026-11-11T09:00:00Z", true),
+    done("B", "2026-11-12T10:00:00Z"),
+    { id: "C", status: "approved", approvals: [{}], steps: [{}] },
+  ];
+  assert.deepEqual(countStart({}, queues), ["OLD", "A", "B"], "never ran: what is done now");
+  const last = { queue: "X-20261111-0000", at: "2026-11-11T00:00:00Z", due: "2026-11-11T00:00:00Z" };
+  assert.deepEqual(countStart({ last: { ...last, baseline: ["A"] } }, queues), ["A"], "the start recorded with the run");
+  assert.deepEqual(countStart({ last }, queues), ["OLD", "A"], "an older file: the queues finished by the run's making");
+  assert.deepEqual(countStart({ last }, [{ id: "D", status: "done", approvals: [{}], steps: [], run: { ended_at: "2026-11-12T00:00:00Z" } }]), [], "the run's end is the finish");
+});

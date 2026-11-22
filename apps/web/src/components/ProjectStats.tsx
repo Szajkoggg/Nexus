@@ -10,21 +10,14 @@ import { usePage } from "../page.ts";
 import { nav } from "../nav.ts";
 import { formatDay, formatNumber, formatWeekday, t } from "../i18n.ts";
 import { metricCards, type MetricCard, type MetricPoint } from "../metrics.ts";
-import { dayOf, rangeSince, type Range } from "../stats.ts";
+import { rangeSinceIso, type Range } from "../stats.ts";
 import { ChartCard, DataTable, Sparkline, TimeChart, type Reference } from "./charts.tsx";
 import { RangeSwitch, chartOrTable } from "./Stats.tsx";
 
-/** The range's start as an ISO time (its first day's start, local); none for all. */
-const sinceIso = (range: Range) => {
-  const day = rangeSince(range);
-  return day && dayOf(day).toISOString();
-};
-
 export function ProjectStats({ project, queues, phone }: { project: string; queues: QueueView[]; phone: boolean }) {
   const [range, setRange] = useState<Range>("30d");
-  const { version } = usePage();
-  const data = useQuery<ProjectMetrics>(projectUrl(project, "/metrics"), version).data;
-  const cards = useMemo(() => (data ? metricCards(project, data, sinceIso(range)) : undefined), [data, project, range]);
+  const data = useQuery<ProjectMetrics>(projectUrl(project, "/metrics"), usePage().queues).data;
+  const cards = useMemo(() => (data ? metricCards(project, data, rangeSinceIso(range)) : undefined), [data, project, range]);
   const title = (p: MetricPoint) => queues.find((q) => q.id === p.queue)?.steps.find((s) => s.id === p.step)?.title;
   return (
     <div className={phone ? "pb-6" : "mx-auto max-w-6xl"}>

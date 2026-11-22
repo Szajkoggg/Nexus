@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { currentIndex, foldSteps, twoColumns } from "../src/steplist.ts";
+import { continuedShort, currentIndex, foldSteps, twoColumns } from "../src/steplist.ts";
 
 const steps = (spec: string) => spec.split(" ").map((x) => { const [id, status] = x.split(":"); return { id: id!, status: status! }; });
 // The 11-step queue of mockup 17: three done, two skipped, W4c stopped, five pending.
@@ -9,7 +9,7 @@ const ids = (xs: { id: string }[]) => xs.map((x) => x.id);
 
 test("the 11-step queue: the finished run folds, the stopped step and the next three show, the rest folds", () => {
   const f = foldSteps(W, "W4c");
-  assert.deepEqual(f.before, { from: "W1", to: "W4b", count: 5, done: 3, skipped: 2 });
+  assert.deepEqual(f.before, { from: "W1", to: "W4b", count: 5, done: 3, skipped: 2, continued: 0 });
   assert.deepEqual(ids(f.shown), ["W4c", "W4d", "W4e", "W5"]);
   assert.deepEqual(f.after, ["W6", "W7"]);
 });
@@ -38,17 +38,28 @@ test("without a current step the first unfinished one matters; a queue not start
 
 test("only the leading finished run folds: a rejected step before the current one breaks it", () => {
   const f = foldSteps(steps("D1:done D2:done D3:rejected D4:done D5:running"), "D5");
-  assert.deepEqual(f.before, { from: "D1", to: "D2", count: 2, done: 2, skipped: 0 });
+  assert.deepEqual(f.before, { from: "D1", to: "D2", count: 2, done: 2, skipped: 0, continued: 0 });
   assert.deepEqual(ids(f.shown), ["D3", "D4", "D5"]);
 });
 
 test("a finished queue folds into its finished run", () => {
   const f = foldSteps(steps("E1:done E2:done E3:skipped"));
-  assert.deepEqual(f.before, { from: "E1", to: "E3", count: 3, done: 2, skipped: 1 });
+  assert.deepEqual(f.before, { from: "E1", to: "E3", count: 3, done: 2, skipped: 1, continued: 0 });
   assert.deepEqual(f.shown, []);
 });
 
 test("two columns, filled down the left first", () => {
   assert.deepEqual(twoColumns(ids(W)), [["W1", "W2", "W3", "W4", "W4b", "W4c"], ["W4d", "W4e", "W5", "W6", "W7"]]);
   assert.deepEqual(twoColumns([]), [[], []]);
+});
+
+test("a step continued elsewhere folds as continued, not as skipped; where it went on reads short", () => {
+  const fl = steps("FL1:done FL2:skipped FL3:skipped FL4:done FL5:running FL6:pending FL7:pending FL8:pending")
+    .map((x) => (x.id === "FL2" || x.id === "FL3" ? { ...x, continued: { in: ["FL4"] } } : x));
+  assert.deepEqual(foldSteps(fl, "FL5").before, { from: "FL1", to: "FL4", count: 4, done: 2, skipped: 0, continued: 2 });
+  const order = ids(fl);
+  assert.equal(continuedShort(["FL4", "FL5"], order), "FL4, FL5");
+  assert.equal(continuedShort(["FL6", "FL7", "FL8"], order), "FL6 – FL8", "three or more in a row of the queue: a range");
+  assert.equal(continuedShort(["FL4", "FL6", "FL7", "FL8", "QX/QX2", "QX"], order), "FL4, FL6 – FL8, QX/QX2, QX");
+  assert.equal(continuedShort(["FL8", "FL7", "FL6"], order), "FL8, FL7, FL6", "not in the queue's order: as given");
 });

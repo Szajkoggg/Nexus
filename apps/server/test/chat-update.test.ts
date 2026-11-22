@@ -52,7 +52,8 @@ for (const now of [false, true]) {
     const port = await freePort();
     const log = join(base, "fake.log");
     const args = join(base, "fake-args.log");
-    Object.assign(process.env, { NEXUS_HOME: home, NEXUS_PORT: String(port), NEXUS_LOG: "", FAKE_LOG: log, FAKE_ARGS: args, FAKE_CHAT_SLOW_MS: "600000" });
+    const successorLog = join(base, "successor.log");
+    Object.assign(process.env, { NEXUS_HOME: home, NEXUS_PORT: String(port), NEXUS_LOG: successorLog, FAKE_LOG: log, FAKE_ARGS: args, FAKE_CHAT_SLOW_MS: "600000" });
     // Not a worker session's own (the tests may run inside one): the successor and its agents must not see them.
     delete process.env.NEXUS_SESSION; delete process.env.NEXUS_DIR;
     const work = holdWork();
@@ -96,7 +97,13 @@ for (const now of [false, true]) {
       },
       exit: () => { exited = true; },
     });
-    const show = () => `; update: ${JSON.stringify(lifecycle.status)}; received: ${JSON.stringify(received(log).map((m) => m.text.slice(0, 80)))}`;
+    // What a failure needs to tell: besides the update and what the fakes received, the partner's chat and record, the
+    // successor's log and, should it have ended on an uncaught exception, its crash record (queue KM: twice the partner
+    // was never resumed after the hand-over, and nothing said why).
+    const tail = (file: string) => (existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").slice(-15).join(" | ") : "none");
+    const show = () => `; update: ${JSON.stringify(lifecycle.status)}; received: ${JSON.stringify(received(log).map((m) => m.text.slice(0, 80)))}`
+      + `; partner chat: ${JSON.stringify(chat(conv.id).slice(-6).map((e) => [e.from, e.kind, e.text.slice(0, 70)]))}; partner record: ${JSON.stringify(store.readRuntime(conv.id))}`
+      + `; crash: ${tail(join(home, "crash.json"))}; successor log: ${tail(successorLog)}`;
     const orchSession = () => store.readProject().orchestrator!.session!;
     const chat = (session: string) => store.readChat(session).entries;
     const replied = (session: string, from: "orchestrator" | "partner", after: string) => () => {

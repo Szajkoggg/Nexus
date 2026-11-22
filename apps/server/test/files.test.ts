@@ -68,7 +68,7 @@ test("cutText ends at a line end, or else at a whole UTF-8 character", () => {
   assert.equal(cutText(Buffer.from("ab\u20ac", "utf8")).toString(), "ab\u20ac", "whole");
 });
 
-test("commitDetail: by hash in a local repository, a bad or unknown hash is nothing", () => {
+test("commitDetail: by hash in a local repository, a bad or unknown hash is nothing", async () => {
   const dir = mkdtempSync(join(tmpdir(), "nexus-commit-"));
   gitIn(dir, "init", "-q", "-b", "main");
   writeFileSync(join(dir, "a.txt"), "one\ntwo\n");
@@ -76,7 +76,7 @@ test("commitDetail: by hash in a local repository, a bad or unknown hash is noth
   gitIn(dir, "add", "a.txt", "pic.bin");
   gitIn(dir, "commit", "-q", "-m", "First commit", "-m", "Why it was made.");
   const sha = gitIn(dir, "rev-parse", "HEAD");
-  const c = commitDetail(dir, sha.slice(0, 7));
+  const c = await commitDetail(dir, sha.slice(0, 7));
   assert.ok(c);
   assert.equal(c.sha, sha);
   assert.equal(c.subject, "First commit");
@@ -84,11 +84,11 @@ test("commitDetail: by hash in a local repository, a bad or unknown hash is noth
   assert.match(c.at, /^\d{4}-\d\d-\d\dT/);
   assert.deepEqual(c.files, [{ path: "a.txt", insertions: 2, deletions: 0 }, { path: "pic.bin", insertions: null, deletions: null }]);
   assert.equal(c.insertions, 2);
-  assert.equal(commitDetail(dir, "0".repeat(40)), undefined, "unknown");
-  assert.equal(commitDetail(dir, "HEAD"), undefined, "a ref is not a hash");
-  assert.equal(commitDetail(dir, "--output=x"), undefined);
+  assert.equal(await commitDetail(dir, "0".repeat(40)), undefined, "unknown");
+  assert.equal(await commitDetail(dir, "HEAD"), undefined, "a ref is not a hash");
+  assert.equal(await commitDetail(dir, "--output=x"), undefined);
   const tree = gitIn(dir, "rev-parse", "HEAD^{tree}");
-  assert.equal(commitDetail(dir, tree), undefined, "a tree is not a commit");
+  assert.equal(await commitDetail(dir, tree), undefined, "a tree is not a commit");
   for (const bad of ["abc", "ABCDEF1", "abcdefg", "a".repeat(41), "abcdef1 ", "-abcdef1"]) assert.ok(!COMMIT_HASH.test(bad), bad);
 });
 

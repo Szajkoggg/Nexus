@@ -1,4 +1,4 @@
-// Recurring queues after every N queues, and maintenance runs (PROTOCOL.md, "Recurring queues"), against the fake
+// Recurring queues after every N queues, and maintenance runs (docs/protocol/planning.md, "Recurring queues"), against the fake
 // runtimes: an "after 5 queues" recurring runs once 5 of the project's queues are done (removed queues and recurring
 // runs not counted, so two of them never start each other); survey or fix_small is part of what the user approves; a
 // survey run that leaves a commit is stopped; a maintenance run with findings tells the orchestrator once, with the
@@ -104,6 +104,36 @@ test("after the 5th done queue it runs; a removed queue and the recurring runs d
     await sleep(800);
     assert.deepEqual([x.runs("A").length, x.runs("B").length], [1, 1]);
     assert.deepEqual(x.state().recurring.map((r) => r.counted), [0, 0]);
+  } finally { x.stop(); }
+});
+
+test("one that has run counts from its run through a new set and approval, and runs at the next change once N are done; one that never ran counts from the approval", async () => {
+  const x = setup();
+  try {
+    const counted = (id: string) => x.state().recurring.find((r) => r.id === id)?.counted;
+    x.engine.setRecurring({ id: "R", template: "tiny", params: {}, after_queues: 2, by: "orchestrator" });
+    x.engine.approveRecurring("R");
+    x.doneQueue("Q1"); x.doneQueue("Q2");
+    await x.until("R's first run done", () => x.runs("R").length === 1 && x.runs("R")[0]!.status === "done");
+    assert.deepEqual(x.store.readRecurring("R")!.last?.baseline, ["Q1", "Q2"], "the run keeps where its count started");
+    assert.equal(counted("R"), 0, "its own run is not counted");
+    x.doneQueue("Q3");
+    // A set (the same, or another value) takes the approval away; the count since the run goes on through it.
+    x.engine.setRecurring({ id: "R", template: "tiny", params: {}, after_queues: 2, by: "orchestrator" });
+    assert.equal(counted("R"), 1, "Q3, done since the run");
+    // A never-run recurring set now counts from its approval: Q4, done before it, does not count.
+    x.engine.setRecurring({ id: "N", template: "tiny", params: {}, after_queues: 2, by: "orchestrator" });
+    x.doneQueue("Q4");
+    x.engine.approveRecurring("N");
+    assert.equal(counted("N"), 0);
+    // R's 2nd queue came without its approval: that count passes without a run.
+    await x.until("R's count to pass without a run", () => x.store.readRecurring("R")!.skipped?.kind === "approval");
+    // The approval counts from the run again (Q3 and Q4), and is a change: R runs at once.
+    x.engine.approveRecurring("R");
+    await x.until("R's second run done", () => x.runs("R").length === 2 && x.runs("R").every((q) => q.status === "done"));
+    await sleep(600);
+    assert.deepEqual([x.runs("R").length, x.runs("N").length], [2, 0]);
+    assert.deepEqual([counted("R"), counted("N")], [0, 0], "the runs count for neither");
   } finally { x.stop(); }
 });
 

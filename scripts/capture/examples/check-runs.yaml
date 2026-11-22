@@ -1,0 +1,31 @@
+# The checks Nexus runs after a step's done (queue EC4), on scripts/capture/seed-check-runs.ts: demo's step while its
+# checks run, at three widths, and shop's while its checks wait for the machine behind demo's. New views: --no-before.
+#   NEXUS_TEST_LOCK=$TEMP/capture-test.lock node scripts/capture.ts scripts/capture/examples/check-runs.yaml --no-before
+seed: scripts/capture/seed-check-runs.ts
+views:
+  - key: step-checks-running@1440
+    route: "#/demo/CK/CK1"
+    label: "Egy lépés, amelynek checkjeit a Nexus futtatja"
+    actions:
+      - wait: 20000
+  - key: step-checks-running@492
+    route: "#/demo/CK/CK1"
+    label: "Futó checkek a lépésnél, keskeny ablakban"
+    actions:
+      - wait: 3000
+  - key: step-checks-running@390
+    route: "#/demo/CK/CK1"
+    label: "Futó checkek a lépésnél, telefonon"
+    actions:
+      - wait: 3000
+  - key: step-checks-queued@1440
+    route: "#/shop/PAY/PAY1"
+    label: "Sorban váró checkek: a gép egy másik projekt checkjeit futtatja"
+    actions:
+      - wait: 3000
+  - key: queue-checks-running@1440
+    route: "#/demo"
+    label: "A queue sora: a lépés checkjei futnak"
+    actions:
+      - click: All queues of Demo app
+      - wait: 1500

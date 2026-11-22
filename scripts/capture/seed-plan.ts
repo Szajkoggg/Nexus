@@ -1,4 +1,4 @@
-// A seed for the capture tool: a test project "demo" whose queues make a plan (PROTOCOL.md, "The plan"), for the
+// A seed for the capture tool: a test project "demo" whose queues make a plan (docs/protocol/planning.md, "The plan"), for the
 // Queues view's plan (queue PV). Run by scripts/capture.ts as `node <this> <data dir>` with NEXUS_HOME set to the
 // development instance's; it writes only there.
 //

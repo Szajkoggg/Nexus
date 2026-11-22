@@ -22,7 +22,7 @@ test("run settings on one line: steps, where and when, runtime with model and ef
     steps: [step("SC1"), step("SC2"), step("SC3", { runtime: "codex", model: "gpt-6-luna" }), step("SC4", { effort: "low" })],
     branch: "main", start: { after: "SF" }, review_level: undefined,
   } as never, project);
-  assert.deepEqual(r.parts, ["4 steps", "on main, after SF", "Claude, high", "after each step: the orchestrator reviews what it can"]);
+  assert.deepEqual(r.parts, ["4 steps", "on main, after SF", "Claude Code, high", "after each step: the orchestrator reviews what it can"]);
   assert.deepEqual(r.own, ["SC3 on Codex · gpt-6-luna", "SC4 on low effort"]);
 });
 

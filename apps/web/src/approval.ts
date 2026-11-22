@@ -5,6 +5,7 @@ import type { ChatEntry, ProjectFile, QueueView } from "@nexus/protocol";
 import { stepChecks, stepValuesText } from "@nexus/protocol/steps";
 import { formatClock, t, type Key } from "./i18n.ts";
 import { plannedAfter } from "./queueStatus.ts";
+import { runtimeName } from "./runtimes.ts";
 
 /** One check a queue's steps run; `project`: one of the project's (defaults.checks), not the queue's own. */
 export interface QueueCheck { name: string; project: boolean }
@@ -23,7 +24,6 @@ export function queueChecks(project: Pick<ProjectFile, "defaults">, q: Pick<Queu
 export const needsApproval = (q: Pick<QueueView, "approved" | "status">): boolean =>
   !q.approved && q.status !== "done" && q.status !== "cancelled";
 
-const RUNTIME = { claude: "Claude", codex: "Codex" } as const;
 const LEVEL_KEYS: Record<number, Key> = { 1: "approval.level.1", 2: "approval.level.2", 3: "approval.level.3" };
 /** How each step is reviewed, by its review level, in words: "wait for my review"; an unknown level as it is. */
 export const levelWords = (level: number): string => (LEVEL_KEYS[level] ? t(LEVEL_KEYS[level]) : String(level));
@@ -62,7 +62,7 @@ export function runSettings(q: Pick<QueueView, "steps" | "branch" | "worktree" |
     parts: [
       t("approval.run.steps", { count: n }),
       [where, when].filter(Boolean).join(", ") || undefined,
-      [RUNTIME[rt], model, effort].filter(Boolean).join(", "),
+      [runtimeName(rt), model, effort].filter(Boolean).join(", "),
       t("approval.run.afterEach", { level: levelWords(level) }),
     ].filter((x): x is string => !!x),
     own: q.steps.flatMap((s) => { const values = stepValuesText(s); return values ? [t("approval.run.stepOn", { step: s.id, values })] : []; }),

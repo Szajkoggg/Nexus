@@ -41,8 +41,8 @@ function setup() {
   emit(5, { type: "queue.stop", queue: "S", step: "S1", condition: "art", reason: "missing" });
   for (const n of [1, 2]) {
     emit(5 + n, { type: "step.started", queue: "X", step: `X${n}` });
-    emit(5 + n, { type: "step.done", queue: "X", step: `X${n}`, summary: "ok" });
-    emit(5 + n, { type: "review.accepted", queue: "X", step: `X${n}` }, "u"); // every step is reviewed
+    emit(5 + n + 0.1, { type: "step.done", queue: "X", step: `X${n}`, summary: "ok" });
+    emit(5 + n + 0.2, { type: "review.accepted", queue: "X", step: `X${n}` }, "u"); // every step is reviewed
   }
   orchestratorStatusChange(store, { queue: "C", to: "cancelled", reason: "no longer needed" });
   return store;

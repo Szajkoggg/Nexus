@@ -12,7 +12,8 @@ import { EventEmitter } from "node:events";
 import { ProjectStore, approveQueue, loadProjectState, newId, routeAnswers, type Event } from "@nexus/protocol";
 import type { AgentEvents, AgentProcess } from "../src/agent.ts";
 import { Engine } from "../src/engine.ts";
-import { branchState, recordBase, recordStepEnd, recordStepStart, stepCommits } from "../src/gitinfo.ts";
+import { branchState, checkoutStatus, headOnce, recordBase, recordStepEnd, recordStepStart, recordTurn, stepCommits } from "../src/gitinfo.ts";
+import { perf } from "../src/perf.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { until, LONGER } from "./wait.ts";
 
@@ -61,10 +62,15 @@ test("the engine records HEAD when a step opens and when its outcome's turn ends
     assert.equal(r1.end, r2.start, "Q1 ended where Q2 began");
     assert.equal(r2.end, git(root, ["rev-parse", "HEAD"]));
     assert.equal(r1.session, queue().run!.session);
-    const c1 = stepCommits(store, queue(), "Q1")!;
+    const c1 = (await stepCommits(store, queue(), "Q1"))!;
     assert.deepEqual(c1.rounds[0]!.commits.map((c) => [c.subject, c.files, c.insertions, c.deletions, c.foreign]), [["Q1 work", 1, 1, 0, false]]);
     assert.equal(c1.rounds[0]!.open, false);
-    assert.deepEqual(stepCommits(store, queue(), "Q2")!.rounds[0]!.commits.map((c) => c.subject), ["Q2 work"]);
+    assert.deepEqual((await stepCommits(store, queue(), "Q2"))!.rounds[0]!.commits.map((c) => c.subject), ["Q2 work"]);
+    // The step boundary read its HEADs from the .git files (queue GB): no git process for them.
+    const sections = perf.view().sections.filter((x) => x.what.startsWith("step boundary"));
+    // (Its review is accepted at once here: the review's record may not see the step in review.)
+    for (const what of ["step boundary: end", "step boundary: open"]) assert.ok(sections.some((x) => x.what === what && x.count > 0), what);
+    for (const x of sections) assert.deepEqual(x.git.filter((g) => g.what === "git rev-parse" || g.what === "git branch"), [], `${x.what}: ${JSON.stringify(x.git)}`);
   } finally { engine.shutdown(); }
 });
 
@@ -109,7 +115,7 @@ test("a step's round of commits begins before its worker hears of the step, and 
   } finally { engine.shutdown(); }
 });
 
-test("in the main checkout, a commit outside the worker's turns on the step is foreign; in a worktree none is", () => {
+test("in the main checkout, a commit outside the worker's turns on the step is foreign; in a worktree none is", async () => {
   const { root, store, commit } = repo();
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "approved", stop_conditions: [], checks: [], approvals: [], history: [],
     steps: [{ id: "Q1", title: "Step 1", goal: "", acceptance: [] }] });
@@ -117,28 +123,31 @@ test("in the main checkout, a commit outside the worker's turns on the step is f
   const now = Date.now();
   const at = (ms: number) => new Date(now + ms);
   recordStepStart(store, "Q", "Q1", session);
+  // As the engine does: the runtime's turn start and end in the activity, and the HEAD at each in git.yaml.
   store.appendActivity(session, { at: at(-60_000).toISOString(), kind: "turn_start", text: "turn started", queue: "Q", step: "Q1" });
+  recordTurn(store, "Q", "Q1", "start");
   const mine = commit(root, "mine", 3, at(-30_000));
   store.appendActivity(session, { at: at(-20_000).toISOString(), kind: "turn_end", text: "turn ended", queue: "Q", step: "Q1" });
+  recordTurn(store, "Q", "Q1", "end");
   const theirs = commit(root, "theirs", 2, at(-10_000)); // the user's, between turns
   recordStepEnd(store, "Q", "Q1");
   const view = () => loadProjectState(store).queues[0]!;
-  const commits = stepCommits(store, view(), "Q1")!.rounds[0]!.commits;
+  const commits = (await stepCommits(store, view(), "Q1"))!.rounds[0]!.commits;
   assert.deepEqual(commits.map((c) => [c.sha, c.subject, c.insertions, c.foreign]), [[theirs, "theirs subject", 2, true], [mine, "mine subject", 3, false]]);
 
   // The same queue in a worktree of its own: nobody else commits there, so nothing is marked.
   const wt = join(root, "..", "wt");
   git(root, ["worktree", "add", "-q", "-b", "nexus/Q", wt]);
   store.writeQueue({ ...store.readQueue("Q"), worktree: wt.replaceAll("\\", "/"), branch: "nexus/Q" });
-  assert.ok(stepCommits(store, view(), "Q1")!.rounds[0]!.commits.every((c) => !c.foreign));
+  assert.ok((await stepCommits(store, view(), "Q1"))!.rounds[0]!.commits.every((c) => !c.foreign));
 });
 
-test("a queue's branch: ahead and behind of its base and of the local remote-tracking ref, with that ref's age", () => {
+test("a queue's branch: ahead and behind of its base and of the local remote-tracking ref, with that ref's age", async () => {
   const { root, store, commit } = repo();
   const wt = join(root, "..", "wt");
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "approved", stop_conditions: [], checks: [], approvals: [], history: [],
     worktree: "auto", branch: "nexus/Q", steps: [{ id: "Q1", title: "Step 1", goal: "", acceptance: [] }] });
-  assert.equal(branchState(store, loadProjectState(store).queues[0]!), undefined, "no worktree yet: nothing");
+  assert.equal(await branchState(store, loadProjectState(store).queues[0]!), undefined, "no worktree yet: nothing");
   recordBase(store, store.readQueue("Q"), root); // as the engine does when it makes the worktree
   assert.equal(store.readGit("Q")!.base!.ref, "main");
   git(root, ["worktree", "add", "-q", "-b", "nexus/Q", wt, "main"]);
@@ -151,20 +160,59 @@ test("a queue's branch: ahead and behind of its base and of the local remote-tra
   git(root, ["update-ref", "-m", "fetch: as a test", "refs/remotes/origin/nexus/Q", a]);
   git(root, ["config", "branch.nexus/Q.remote", "origin"]);
   git(root, ["config", "branch.nexus/Q.merge", "refs/heads/nexus/Q"]);
-  const v = branchState(store, loadProjectState(store).queues[0]!)!;
+  const v = (await branchState(store, loadProjectState(store).queues[0]!))!;
   assert.equal(v.branch, "nexus/Q");
   assert.deepEqual(v.base, { ref: "main", ahead: 2, behind: 1 });
   assert.deepEqual([v.upstream?.ref, v.upstream?.ahead, v.upstream?.behind], ["origin/nexus/Q", 1, 0]);
   assert.ok(v.upstream?.at && Math.abs(Date.parse(v.upstream.at) - Date.now()) < 120_000, `the ref's age is when it was set: ${v.upstream?.at}`);
 });
 
-test("a project that is not a git repository shows nothing", () => {
+test("a project that is not a git repository shows nothing", async () => {
   const { store } = repo(false);
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "approved", stop_conditions: [], checks: [], approvals: [], history: [],
     steps: [{ id: "Q1", title: "Step 1", goal: "", acceptance: [] }] });
   recordStepStart(store, "Q", "Q1", "S1");
   recordStepEnd(store, "Q", "Q1");
   const q = loadProjectState(store).queues[0]!;
-  assert.equal(stepCommits(store, q, "Q1"), undefined);
-  assert.equal(branchState(store, q), undefined);
+  assert.equal(await stepCommits(store, q, "Q1"), undefined);
+  assert.equal(await branchState(store, q), undefined);
+});
+
+test("checkoutStatus gives HEAD and whether tracked files changed from one git call; untracked files do not count", () => {
+  const { base, root, commit } = repo();
+  const head = git(root, ["rev-parse", "HEAD"]);
+  assert.deepEqual(checkoutStatus(root), { head, clean: true });
+  writeFileSync(join(root, "new.txt"), "untracked\n");
+  assert.deepEqual(checkoutStatus(root), { head, clean: true });
+  writeFileSync(join(root, "start.txt"), "changed\n");
+  assert.deepEqual(checkoutStatus(root), { head, clean: false });
+  const next = commit(root, "next");
+  assert.deepEqual(checkoutStatus(root), { head: next, clean: true });
+  const empty = join(base, "empty");
+  mkdirSync(empty);
+  git(empty, ["init", "-q"]);
+  assert.deepEqual(checkoutStatus(empty), { head: null, clean: true });
+  const plain = join(base, "plain");
+  mkdirSync(plain);
+  assert.equal(checkoutStatus(plain), undefined);
+});
+
+test("one HEAD read serves a step's end and the next step's start recorded in one go", () => {
+  const { root, store, commit } = repo();
+  store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "approved", stop_conditions: [], checks: [], approvals: [], history: [],
+    steps: [{ id: "Q1", title: "Step 1", goal: "", acceptance: [] }, { id: "Q2", title: "Step 2", goal: "", acceptance: [] }] });
+  recordStepStart(store, "Q", "Q1", "S1");
+  const once = headOnce(store, "Q");
+  const head = git(root, ["rev-parse", "HEAD"]);
+  recordStepEnd(store, "Q", "Q1", once);
+  // HEAD moves between the two records (queue LH: the test counted its own wrapper's calls, not the reads). A second
+  // read would see the new commit; the one read made serves both, so the rounds meet where it read.
+  const moved = commit(root, "between");
+  assert.notEqual(moved, head);
+  recordStepStart(store, "Q", "Q2", "S1", once);
+  const g = store.readGit("Q")!;
+  assert.equal(g.steps.Q1!.at(-1)!.end, head);
+  assert.equal(g.steps.Q2!.at(-1)!.start, head, "the first read's HEAD, not read again");
+  assert.equal(once(), head);
+  assert.equal(headOnce(store, "Q")(), moved, "a new reader reads again");
 });

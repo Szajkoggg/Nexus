@@ -1,4 +1,4 @@
-// The language settings (PROTOCOL.md, "Languages"): the reader's language, global with a project override, and the
+// The language settings (docs/protocol/settings.md, "Languages"): the reader's language, global with a project override, and the
 // working language, a project's own.
 import { test } from "node:test";
 import assert from "node:assert/strict";

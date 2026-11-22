@@ -25,7 +25,7 @@ test("nexus help only reads: it writes nothing, so a thinking partner may run it
 
 test("nexus help lists the standards' topics", () => {
   const list = nexus("help");
-  for (const t of ["review", "summaries", "questions", "refusals", "commits", "tests"]) assert.match(list, new RegExp(`^  ${t} +[a-z]`, "m"), t);
+  for (const t of ["review", "summaries", "context", "questions", "refusals", "commits", "tests"]) assert.match(list, new RegExp(`^  ${t} +[a-z]`, "m"), t);
 });
 
 test("summaries: the four parts, in order, with an example", () => {
@@ -34,6 +34,14 @@ test("summaries: the four parts, in order, with an example", () => {
   assert.deepEqual(parts.map((p) => t.indexOf(p)).every((i, k, a) => i >= 0 && (k === 0 || i > a[k - 1]!)), true, "all four, in order");
   assert.match(t, /--commit/);
   assert.match(t, /Example:\n {2}nexus step done/);
+});
+
+test("context: the six parts, in order, the length and an example", () => {
+  const t = nexus("help", "context");
+  const parts = ["1. Where the work stands", "2. The decisions and why", "3. The traps found", "4. The important files", "5. What comes next", "6. What the orchestrator or the user asked for or promised"];
+  assert.deepEqual(parts.map((p) => t.indexOf(p)).every((i, k, a) => i >= 0 && (k === 0 || i > a[k - 1]!)), true, "all six, in order");
+  assert.match(t, /1,000 to 2,000 words/);
+  assert.match(t, /Example:\n {2}nexus context/);
 });
 
 test("questions: what it blocks, the options, the recommendation", () => {
@@ -61,7 +69,9 @@ test("commits: a clean tree at every step's end, the commit named, only the step
 test("tests: only the affected files while working, stopping at the first failure; the whole suite at the end", () => {
   const t = nexus("help", "tests");
   assert.match(t, /run only the tests that cover what you changed, and stop at the first failure/);
-  assert.match(t, /The whole suite runs once, at the step's end,\nas the queue's checks/);
+  assert.match(t, /The whole suite runs once, at the step's end, as the queue's\s+checks, and who runs them depends/);
+  assert.match(t, /Where it says Nexus runs the checks: do not run the whole suite and do not report it/);
+  assert.match(t, /Where it does not .*: you run the checks at the step's end and report\s+each with nexus check/);
   assert.match(t, /npm run test:files -- <test file>\.\.\./);
   assert.match(t, /A test that fails only now and then is not run again until it passes/);
 });

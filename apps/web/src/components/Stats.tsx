@@ -8,17 +8,21 @@ import { useQuery, type ProjectSummary } from "../api.ts";
 import { usePage } from "../page.ts";
 import { formatDate, formatDay, formatWeekday, t, type Key } from "../i18n.ts";
 import {
-  RANGES, compareRows, compareScales, dayOf, daysUrl, estimate, headline, statsUrl, windowPanels,
+  RANGES, compareRows, compareScales, dayOf, daysUrl, estimate, groupLabel, headline, rangeSinceIso, statsUrl, windowPanels,
   type CompareRow, type Range, type WindowPanel,
 } from "../stats.ts";
 import { AxisCell, BarCell, ChartCard, DataTable, DotCell, Scatter, Segmented, TimeChart, type ScatterPoint } from "./charts.tsx";
+import { ServerSpeed } from "./ServerSpeed.tsx";
+import { runtimeName } from "../runtimes.ts";
 
 const RANGE_LABEL: Record<Range, Key> = { "7d": "stats.range.7d", "30d": "stats.range.30d", "90d": "stats.range.90d", all: "stats.range.all" };
 const FACET_LABEL: Record<(typeof STAT_FILTERS)[number], Key> = { kind: "stats.facet.kind", activity: "stats.facet.activity", area: "stats.facet.area", size: "stats.facet.size", origin: "stats.facet.origin" };
 
 const pct = (v: number) => `${Math.round(v)} %`;
+/** A row's stops, and how many of its stopped steps continued elsewhere (a stop by design, not a step lost). */
+const stopsCell = (r: Pick<CompareRow, "stops" | "continued">) =>
+  r.continued ? <span title={t("stats.stopsContinued", { count: r.continued })}>{r.stops} <span className="text-ok/80">· {r.continued} →</span></span> : r.stops;
 const mins = (v: number) => (v > 0 && v < 1 ? t("stats.underMinute") : t("stats.minutes", { n: Math.round(v) }));
-const runtimeName = (r: string) => (r === "claude" ? "Claude Code" : r === "codex" ? "Codex" : r);
 
 /**
  * The version the view reads at: the page's cross-project version, followed at most once a minute (the report is
@@ -77,7 +81,7 @@ export function StatsView({ projects, phone }: { projects: ProjectSummary[]; pho
         <Pick label={t("stats.facet.project")} value={project} onChange={setProject} options={projects.map((p) => ({ value: p.id, label: p.name }))} />
         {STAT_FILTERS.map((f) => (
           <Pick key={f} label={t(FACET_LABEL[f])} value={filter[f] ?? ""} onChange={(v) => setFilter((x) => ({ ...x, [f]: v }))}
-            options={[...new Set([...(r?.facets[f] ?? []), ...(filter[f] ? [filter[f]] : [])])].map((v) => ({ value: v, label: v === "untagged" ? t("stats.untagged") : v }))} />
+            options={[...new Set([...(r?.facets[f] ?? []), ...(filter[f] ? [filter[f]] : [])])].map((v) => ({ value: v, label: v === "untagged" ? groupLabel(v) : v }))} />
         ))}
       </div>
       {r && <div className={`transition-opacity ${report.stale ? "opacity-60" : ""}`}>
@@ -87,6 +91,10 @@ export function StatsView({ projects, phone }: { projects: ProjectSummary[]; pho
           : <p className="rounded-xl border border-line bg-surface px-4 py-6 text-center text-sm text-fg-3">{t("stats.noSteps")}</p>}
         <p className="mt-2 text-xs text-fg-3">{t("stats.footnote")}</p>
       </div>}
+
+      <div className="mt-5" />
+      <Heading title={t("speed.title")} note={t("speed.titleNote")} phone={phone} />
+      <ServerSpeed since={rangeSinceIso(range)} version={version} phone={phone} />
     </div>
   );
 }
@@ -180,16 +188,15 @@ function Comparison({ report, phone, by }: { report: StatsReport; phone: boolean
     { value: "scatter" as const, label: t("stats.view.scatter") },
     { value: "table" as const, label: t("stats.view.table") },
   ];
-  const label = (row: CompareRow) => row.key === "untagged" ? t("stats.untagged") : row.key === "default" ? t("stats.defaultEffort") : row.label;
   return (
     <ChartCard<CompareView> title={t(by === "model" ? "stats.compare.model" : "stats.compare.effort")} initial="columns" store="nexus.stats.compare" views={views}>
-      {(view) => view === "columns" ? <Columns rows={rows} scales={scales} phone={phone} label={label} />
-        : view === "scatter" ? <ScatterView rows={rows} scales={scales} phone={phone} label={label} />
+      {(view) => view === "columns" ? <Columns rows={rows} scales={scales} phone={phone} />
+        : view === "scatter" ? <ScatterView rows={rows} scales={scales} phone={phone} />
         : <DataTable head={[t(by === "model" ? "stats.col.model" : "stats.col.effort"), t("stats.col.steps"), t("stats.col.first"), t("stats.col.rounds"), t("stats.col.median"), t("stats.col.middle"), t("stats.col.use"), t("stats.col.stops"), t("stats.col.failures"), t("stats.col.fallback")]}
-            rows={rows.map((r) => [label(r) + (r.few ? ` (${t("stats.few")})` : ""), r.steps, r.rate === undefined ? "–" : `${pct(r.rate)} (${r.first}/${r.decided})`,
+            rows={rows.map((r) => [r.label + (r.few ? ` (${t("stats.few")})` : ""), r.steps, r.rate === undefined ? "–" : `${pct(r.rate)} (${r.first}/${r.decided})`,
               r.rounds === undefined ? "–" : r.rounds.toFixed(2), r.median === undefined ? "–" : mins(r.median),
               r.p25 === undefined ? "–" : `${Math.round(r.p25)}–${Math.round(r.p75!)}`, r.uses.map((u) => `${runtimeName(u.runtime)} ${estimate(u.perStep)}`).join(", ") || "–",
-              r.stops, r.failures, r.fallback])} />}
+              stopsCell(r), r.failures, r.fallback])} />}
     </ChartCard>
   );
 }
@@ -224,11 +231,11 @@ function measures(rows: CompareRow[], scales: { minutes: number; use: number }):
   ];
 }
 
-function NameCell({ row, label }: { row: CompareRow; label: string }) {
+function NameCell({ row }: { row: CompareRow }) {
   return (
     <div className="flex h-9 min-w-0 flex-col justify-center border-t border-line">
       <span className="flex min-w-0 items-center gap-1 text-[13px] font-semibold text-fg">
-        <span className="truncate">{label}</span>
+        <span className="truncate">{row.label}</span>
         {row.few && <span className="shrink-0 rounded border border-line-strong px-1 text-[10px] font-normal text-fg-2">{t("stats.few")}</span>}
       </span>
       <span className="truncate text-[11px] text-fg-3">
@@ -238,7 +245,7 @@ function NameCell({ row, label }: { row: CompareRow; label: string }) {
   );
 }
 
-function Columns({ rows, scales, phone, label }: { rows: CompareRow[]; scales: { minutes: number; use: number }; phone: boolean; label: (r: CompareRow) => string }) {
+function Columns({ rows, scales, phone }: { rows: CompareRow[]; scales: { minutes: number; use: number }; phone: boolean }) {
   const ms = measures(rows, scales);
   if (phone) {
     // The phone: the four measures one under another, full width, each with every group.
@@ -248,7 +255,7 @@ function Columns({ rows, scales, phone, label }: { rows: CompareRow[]; scales: {
           <div className="text-xs font-semibold text-fg-2">{t(m.head)}</div>
           <div className="mb-1 text-[11px] text-fg-3">{t(m.sub)}</div>
           <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-3">
-            {rows.map((r) => <Fragment key={r.key}><NameCell row={r} label={label(r)} /><div className="border-t border-line">{m.cell(r)}</div></Fragment>)}
+            {rows.map((r) => <Fragment key={r.key}><NameCell row={r} /><div className="border-t border-line">{m.cell(r)}</div></Fragment>)}
             <div />{m.axis}
           </div>
         </div>
@@ -259,20 +266,20 @@ function Columns({ rows, scales, phone, label }: { rows: CompareRow[]; scales: {
     <div className="grid grid-cols-[11rem_repeat(4,minmax(0,1fr))] gap-x-4.5">
       <div />
       {ms.map((m) => <div key={m.head} className="pb-1 text-xs font-semibold text-fg-2">{t(m.head)}<small className="block font-normal text-fg-3">{t(m.sub)}</small></div>)}
-      {rows.map((r) => <Fragment key={r.key}><NameCell row={r} label={label(r)} />{ms.map((m) => <div key={m.head} className="min-w-0 border-t border-line">{m.cell(r)}</div>)}</Fragment>)}
+      {rows.map((r) => <Fragment key={r.key}><NameCell row={r} />{ms.map((m) => <div key={m.head} className="min-w-0 border-t border-line">{m.cell(r)}</div>)}</Fragment>)}
       <div />
       {ms.map((m) => <div key={m.head}>{m.axis}</div>)}
     </div>
   );
 }
 
-function ScatterView({ rows, scales, phone, label }: { rows: CompareRow[]; scales: { minutes: number; use: number }; phone: boolean; label: (r: CompareRow) => string }) {
+function ScatterView({ rows, scales, phone }: { rows: CompareRow[]; scales: { minutes: number; use: number }; phone: boolean }) {
   const placed = rows.filter((r) => r.rate !== undefined && r.median !== undefined);
   const lowest = Math.min(50, ...placed.map((r) => Math.floor(r.rate! / 25) * 25));
   const points: ScatterPoint[] = placed.map((r) => ({
     key: r.key, x: r.median!, y: r.rate!, low: r.p25, high: r.p75, few: r.few,
-    label: `${label(r)} · ${r.steps}${r.few ? ` · ${t("stats.few")}` : ""}`,
-    tip: [t("stats.tip.scatter", { rate: pct(r.rate!), median: mins(r.median!) }), `${label(r)} · ${t("stats.steps", { count: r.steps })} · ${r.rounds?.toFixed(2) ?? "–"} ${t("stats.col.rounds").toLowerCase()}`,
+    label: `${r.label} · ${r.steps}${r.few ? ` · ${t("stats.few")}` : ""}`,
+    tip: [t("stats.tip.scatter", { rate: pct(r.rate!), median: mins(r.median!) }), `${r.label} · ${t("stats.steps", { count: r.steps })} · ${r.rounds?.toFixed(2) ?? "–"} ${t("stats.col.rounds").toLowerCase()}`,
       ...r.uses.map((u) => t("stats.tip.use", { use: estimate(u.perStep), runtime: runtimeName(u.runtime) }))],
   }));
   return (
@@ -283,7 +290,7 @@ function ScatterView({ rows, scales, phone, label }: { rows: CompareRow[]; scale
           yTicks={[lowest, (lowest + 100) / 2, 100]} xFormat={(v) => mins(v)} yFormat={pct} xTitle={t("stats.scatterX")} yTitle={t("stats.scatterY")} />
       </div>
       <DataTable head={[t("stats.col.group"), t("stats.col.steps"), t("stats.col.rounds"), t("stats.col.use"), t("stats.col.stops"), t("stats.col.failures"), "↺"]}
-        rows={rows.map((r) => [label(r) + (r.few ? ` · ${t("stats.few")}` : ""), r.steps, r.rounds?.toFixed(2) ?? "–", r.uses.map((u) => estimate(u.perStep)).join(", ") || "–", r.stops, r.failures, r.fallback])} />
+        rows={rows.map((r) => [r.label + (r.few ? ` · ${t("stats.few")}` : ""), r.steps, r.rounds?.toFixed(2) ?? "–", r.uses.map((u) => estimate(u.perStep)).join(", ") || "–", stopsCell(r), r.failures, r.fallback])} />
     </div>
   );
 }

@@ -34,6 +34,20 @@ test("only what happened after the time, newest first: step outcomes, stops, fin
   assert.deepEqual(projectDigest({ state: s, events, refusals: [], activity: [] }, T("10:43")), [], "exactly at the time is not after it");
 });
 
+test("a skipped step marked as continued elsewhere: a line at the mark's time, after its stop; an older mark is not", () => {
+  const mark = (at: string, refs: string[]) => ({ in: refs, at, by: "orchestrator", reason: "cause found; the fix is planned as FL4 and FL5" });
+  const s = state([queue("FL", "running", { steps: [
+    { id: "FL1", status: "skipped", continued: mark(T("06:00", 12), ["QX"]) },
+    { id: "FL2", status: "skipped", continued: mark(T("13:09"), ["FL4", "FL5"]) },
+    { id: "FL3", status: "skipped" },
+  ] })]);
+  const events = [ev(T("12:40"), { type: "queue.stop", queue: "FL", step: "FL2", condition: "c", reason: "the cause is in the product" })];
+  const d = projectDigest({ state: s, events, refusals: [], activity: [] }, T("00:00"));
+  assert.deepEqual(brief(d), ["13:09 continued FL/FL2", "12:40 stopped FL/FL2"]);
+  assert.deepEqual(d[0]!.continued_in, ["FL4", "FL5"]);
+  assert.equal(d[0]!.text, "cause found; the fix is planned as FL4 and FL5");
+});
+
 test("refused actions and retries: one line per step with how many, at the latest", () => {
   const d = projectDigest({
     state: state([]), events: [],

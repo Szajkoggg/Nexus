@@ -4,7 +4,7 @@
  * Theme tokens. Every colour in the dashboard is one of these, used through Tailwind (`bg-surface`, `text-fg-2`,
  * `border-line`, `text-warn`, `bg-review/10`, …); Tailwind's own palette is switched off, so a class from that palette
  * produces nothing. The values below are the Graphite theme (docs/ux/mockups/mock.css), the default; Paper and Honey
- * set the same variables further down. The scheme is in docs/DESIGN.md.
+ * set the same variables further down. The scheme is in docs/design/dashboard.md, "Colours are theme tokens".
  */
 @theme {
   --color-*: initial;
@@ -126,4 +126,6 @@ body { background: var(--color-canvas); color: var(--color-fg); }
 /* The Markdown block a file was opened at. */
 .md .md-line { background: color-mix(in oklab, var(--color-accent) 12%, transparent); box-shadow: -0.75rem 0 0 color-mix(in oklab, var(--color-accent) 12%, transparent), -0.875rem 0 0 var(--color-accent); border-radius: 0 0.25rem 0.25rem 0; }
 
+/* A step skipped as continued elsewhere, in the progress line: the done colour, hatched (docs/design/continued.md). */
+.seg-continued { background: repeating-linear-gradient(135deg, var(--color-ok) 0 3px, color-mix(in srgb, var(--color-ok) 35%, transparent) 3px 6px); }
 .scroll-thin { scrollbar-width: thin; scrollbar-color: var(--color-line-strong) transparent; }

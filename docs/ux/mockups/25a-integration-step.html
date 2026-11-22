@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>25A The integration step: Merge back on it, and the way to the queue's panel</title>
+<link rel="stylesheet" href="dash-mock.css">
+<!-- Queue UF (UF1). Compared with the capture integration-step@1440 (scripts/capture/seed-merge-wait.ts): the same
+     queue W, whose merge back waits because the checkout of main has uncommitted changes. New here, marked with a
+     dashed outline: the panel's first line is a link to queue W's panel; the integration box has Merge into main…
+     and, beside it, the way to the worktree and its cleanup on the queue's panel. -->
+<style>
+  .chat-empty { text-align: center; color: var(--fg-2); margin-top: 64px; font-size: 14px; line-height: 1.75; }
+  .composer { margin: auto 28px 20px; height: 78px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); padding: 18px 54px; color: var(--fg-3); position: relative; }
+  .composer .send { position: absolute; right: 9px; bottom: 9px; background: color-mix(in srgb, var(--accent-strong) 45%, var(--surface)); color: var(--fg-3); }
+  .where-link { color: var(--accent); }
+  .where-link .chev { margin-left: 4px; }
+  .goal { font-size: 14px; line-height: 1.6; }
+</style></head>
+<body>
+<div class="desk">
+  <aside class="side">
+    <div class="brand">Nexus<span class="grow"></span><span class="xs fg3">live <span class="ok">●</span></span></div>
+    <div class="label" style="padding: 0 10px 6px">Projects</div>
+    <div class="proj"><span class="av">DA</span>Demo app<span class="grow"></span><span class="badge">1</span></div>
+    <div class="row" style="padding: 18px 12px; color: var(--fg-2)"><span>⫼</span><span class="fg">Stats</span><span class="grow"></span><span class="xs fg3">all projects</span></div>
+    <div class="grow"></div>
+    <div class="xs fg3" style="padding: 8px 10px">☾ Away…</div>
+    <div class="row xs fg3" style="padding: 8px 10px">notify off<span class="grow"></span>⚙ ▯</div>
+  </aside>
+
+  <main class="mid">
+    <div class="deskhead">
+      <span class="seg"><span class="on">● Orchestrator</span><span>Ideas</span><span>Stats</span></span>
+      <span class="xs fg2">starts with your first message</span><span class="xs fg">Tool calls</span>
+      <span class="search">⌕ Search history…<span class="grow"></span><span class="xs fg3" style="border:1px solid var(--line-strong); border-radius:4px; padding:0 4px">Ctrl K</span></span>
+    </div>
+    <p class="chat-empty">Plan queues with the orchestrator, ask where things stand, or have it start a run.<br>It reads the project and works through <span class="mono fg">nexus</span>; it never edits files or approves queues.</p>
+    <div class="composer">Message the orchestrator…<span class="btn primary send">Send</span></div>
+  </main>
+
+  <aside class="right">
+    <div class="panel-head">
+      <div class="row xs" style="justify-content: space-between">
+        <!-- new: the queue's line opens the queue's panel (every step has it) -->
+        <span class="where-link new"><span class="mono">W</span> · Statistics backend<span class="chev">›</span></span>
+        <span class="fg3" style="font-size: 18px; line-height: 1">×</span>
+      </div>
+      <h2 style="margin: 6px 0 0; font-size: 20px; font-weight: 600"><span class="mono fg3" style="margin-right: 8px">W.integrate</span>Integration</h2>
+      <div class="row wrap xs fg3" style="margin-top: 6px; gap: 4px 12px">
+        <span class="st ok"><span class="dot sm done"></span>done</span>
+        <span><span style="background: var(--surface-3); border-radius: 4px; padding: 0 4px; color: var(--fg)">L2</span> Orchestrator checks</span>
+        <span style="background: var(--surface-3); border-radius: 4px; padding: 1px 6px; color: var(--fg)">accepted by the orchestrator</span>
+        <span>started 21 Nov 22:35</span><span>finished 21 Nov 22:45</span><span>took 10 min</span>
+        <span class="mono">000000a3000000a3000000a3000000a3000000a3</span>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div class="box warn">
+        <p class="xs fg3">Integration, kept by Nexus: merges the current <span class="mono">main</span> into <span class="mono">nexus/W</span> in the queue's worktree and runs the checks; the base then moves forward to the result.</p>
+        <p class="warn" style="margin-top: 6px"><span class="fg3">Not merged back yet:</span> queue W: the checkout of main has uncommitted changes: commit or stash them, then merge (C:/Users/User/AppData/Local/Temp/…/demo) <span class="xs fg3">· just now</span></p>
+        <!-- new: the merge back right here, the same action as the queue panel's -->
+        <div class="row wrap new" style="margin-top: 10px; gap: 8px 12px">
+          <span class="btn">Merge into main…</span>
+          <span class="link">Worktree and cleanup: queue W's panel ›</span>
+        </div>
+      </div>
+      <div><span class="btn line" style="font-size: 14px">▭ Chat about this</span></div>
+      <div class="note"><span class="fg3">Summary:</span> Merged main (3 commits) into the branch; no conflict; both checks pass on the result.</div>
+      <div>
+        <div class="label" style="margin-bottom: 8px">Goal</div>
+        <p class="goal">Merge the current base branch into this queue's branch, in the queue's worktree, and run the queue's checks on the result, so that the queue's work and what reached the base meanwhile are tested together. The base then only moves forward to this step's result (a fast-forward), so nothing new arises on the base itself.</p>
+      </div>
+      <div>
+        <div class="label" style="margin-bottom: 8px">Acceptance</div>
+        <p class="goal">◇ The base branch the opening names is merged into the queue's branch (or the branch already contains it).</p>
+      </div>
+    </div>
+  </aside>
+</div>
+</body></html>

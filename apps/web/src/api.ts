@@ -1,8 +1,9 @@
 // Data access for the dashboard: the server's HTTP API and its change notifications.
 import { useEffect, useReducer, useRef, useState } from "react";
 import { Action, type ActionState } from "./action.ts";
-import { HttpError, request } from "./http.ts";
-import { Query, Reloads, Requests, fetchJson, type LiveMessage, type QueryView, type Version } from "./query.ts";
+import { HttpError, onReply, request } from "./http.ts";
+import { LiveView, Query, Reloads, Requests, Stream, fetchJson, fetchPositioned, type Applied, type PageMessage, type ProjectMessage, type QueryView, type Version } from "./query.ts";
+import { SEQ_HEADER, readPosition } from "@nexus/protocol/live";
 
 export { HttpError, open, request } from "./http.ts";
 
@@ -53,6 +54,42 @@ export function useQuery<T>(url: string | undefined, version?: Version): QueryVi
   return query.view(url);
 }
 
+/** The page's live stream (query.ts): App.tsx feeds it the socket's messages. */
+export const stream = new Stream();
+const liveViews = new Map<string, LiveView<unknown>>();
+
+/** Where each project's last write left the live stream (its answer's header), for the control to wait on. */
+const written = new Map<string, number>();
+onReply((url, r) => {
+  const project = /^\/api\/projects\/([^/?]+)\//.exec(url)?.[1];
+  const { epoch, seq } = readPosition(r.headers.get(SEQ_HEADER));
+  if (project && seq !== undefined && epoch === stream.epoch) written.set(decodeURIComponent(project), seq);
+});
+/** Where the project's last write left the stream (undefined: none known). */
+export const writtenAt = (project: string): number | undefined => written.get(project);
+
+/**
+ * A live read (query.ts, LiveView): read in full once, then the stream's messages applied to it (`apply`), so it is not
+ * asked again on a change. One view per URL, shared by every component that shows it.
+ */
+export function useLiveRead<T>(url: string | undefined, project: string | undefined, apply: (held: T, m: ProjectMessage) => Applied<T>): QueryView<T> {
+  const [, render] = useReducer((n: number) => n + 1, 0);
+  let view: LiveView<T> | undefined;
+  if (url && project) {
+    view = liveViews.get(url) as LiveView<T> | undefined;
+    if (!view) liveViews.set(url, (view = new LiveView<T>({ url, project, stream, fetcher: fetchPositioned, apply }) as LiveView<T>) as LiveView<unknown>);
+  }
+  useEffect(() => {
+    if (!view || !url) return;
+    // Registered again: a remount's cleanup of the same view may have let it go before this effect ran.
+    if (!liveViews.has(url)) liveViews.set(url, view as LiveView<unknown>);
+    const off = view.subscribe(render);
+    // Only this view is let go: another one may hold the URL by now.
+    return () => { off(); if (!view.active && liveViews.get(url) === view) liveViews.delete(url); };
+  }, [view, url]);
+  return view ? view.view() : { data: undefined, error: undefined };
+}
+
 /**
  * A user's action with its busy and error state (action.ts): `run(work, done)` marks it busy, clears the last error,
  * and keeps the failure's message as `error`; `done` gets a success's result. `fail` shows a failure found before
@@ -66,7 +103,7 @@ export function useAction(): ActionState & { run: Action["run"]; fail: Action["f
 
 export const fileUrl = (project: string, path: string) => projectUrl(project, `/file?path=${enc(path)}`);
 
-type Listener = (msg: LiveMessage) => void;
+type Listener = (msg: PageMessage) => void;
 
 /** One WebSocket for the page, reconnecting with backoff. */
 export function useLive(onMessage: Listener): boolean {

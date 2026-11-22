@@ -1,4 +1,4 @@
-// AgentHost: starts the agent processes of one role (workers, the orchestrator, thinking partners), one per session,
+// AgentHost: starts the agent processes of one role (workers, the orchestrator, thinking partners, review helpers), one per session,
 // and keeps what every role keeps the same way: the session's runtime record (sessions/<id>/runtime.json), the facts
 // read from the runtime's stream (the record, the runtime's own session id, the account's usage windows), and ending a
 // process so that the session's next message starts a new one. What a role does with its agent's texts, turns and
@@ -28,6 +28,7 @@ export const ROLE_RECORDS = {
   worker: { cost: true, workingFromModel: true, countTurns: true },
   orchestrator: { cost: true, workingFromModel: false, countTurns: false },
   conversation: { cost: false, workingFromModel: false, countTurns: false },
+  helper: { cost: true, workingFromModel: true, countTurns: true },
 } as const satisfies Record<string, RoleRecord>;
 
 /** A Claude Code session's briefing, in its session folder (ClaudeOptions.briefingFile). */
@@ -47,6 +48,8 @@ export interface HostHandlers {
   background?(work: readonly string[]): void;
   /** The runtime compacted the conversation's context (AgentProcess.compact). */
   compacted?(c: AgentEvents["compacted"][0]): void;
+  /** The process stopped settling after a turn's end with no turn of the runtime's own (AgentProcess.settling). */
+  settled?(): void;
   /** `byNexus`: the process was ended through AgentHost (retire, close, restartAfterTurn, shutdown). */
   exit?(code: number | null, byNexus: boolean): void;
   /** The queue and step a turn works on, for its record (a worker's run); asked when the turn begins. */
@@ -54,7 +57,8 @@ export interface HostHandlers {
 }
 
 /** A turn in progress, for its record: when it began, the windows then, what it works on. */
-interface OpenTurn { started: string; windows?: TurnRecord["windows_start"]; tag: TurnTag }
+/** `startedMs`: the monotonic clock at the start, for the turn's duration (a clock step does not change it). */
+interface OpenTurn { started: string; startedMs: number; windows?: TurnRecord["windows_start"]; tag: TurnTag }
 /** What a turn works on, for its record: the queue and step, and the fallback the step runs on, if it does. */
 type TurnTag = { queue?: string; step?: string; fallback?: TurnRecord["fallback"] };
 
@@ -70,6 +74,12 @@ export interface AgentHostOptions {
   spawn?: (launch: Launch) => AgentProcess;
   /** Which runtimes compact a conversation on request; tests name one that does not. By default COMPACTS (agent.ts). */
   compacts?: (runtime: "claude" | "codex") => boolean;
+  /**
+   * How long after a Claude turn's end a turn of the CLI's own may still begin (ClaudeOptions.lateTurnMs), for every
+   * Claude process this host starts whose launch does not set it. Tests shorten it, or hold it open, so that the
+   * settling and its `settled` end are not bound to the default's timing; by default Claude's own (claude.ts).
+   */
+  lateTurnMs?: number;
 }
 
 /** A launch's settings, without what differs between any two starts of one session (see AgentHost.stale). */
@@ -87,6 +97,7 @@ export class AgentHost<E extends object = object> {
   private readonly store: ProjectStore;
   private readonly record: RoleRecord;
   private readonly spawn: (launch: Launch) => AgentProcess;
+  private readonly lateTurnMs: number | undefined;
   private readonly live = new Map<string, Hosted<E>>();
   /** What each process was started with, to tell when the settings changed since (stale). */
   private readonly launched = new WeakMap<AgentProcess, Launch>();
@@ -104,6 +115,7 @@ export class AgentHost<E extends object = object> {
     this.store = store;
     this.record = record;
     this.spawn = options.spawn ?? spawnRuntime;
+    this.lateTurnMs = options.lateTurnMs;
   }
 
   /** The variables every agent's process gets: its session and the project's .nexus. */
@@ -123,8 +135,12 @@ export class AgentHost<E extends object = object> {
   /** The processes as last started, by session. */
   all(): Hosted<E>[] { return [...this.live.values()]; }
 
-  /** No process is in the middle of a turn. */
-  idle(): boolean { return !this.all().some((l) => l.proc.state === "working"); }
+  /**
+   * No process is in the middle of a turn, nor settling after one (AgentProcess.settling): then a turn of the
+   * runtime's own may still start with a message sent into the last one, which an update's drain ending the process
+   * now would lose (queue LH). Settling lasts a moment (lateTurnMs).
+   */
+  idle(): boolean { return !this.all().some((l) => l.proc.state === "working" || (l.proc.state === "idle" && !!l.proc.settling)); }
 
   /** A process is still running (after shutdown: not yet exited). */
   alive(): boolean { return this.all().some((l) => l.proc.state !== "exited"); }
@@ -135,7 +151,7 @@ export class AgentHost<E extends object = object> {
    * a runtime record) and its runtime saved its conversation: Claude Code saves it only when it reads the first
    * message, so a process that ended before left nothing to resume (`--resume` then fails with "No conversation
    * found"), and the session starts afresh with the same id. A record without the mark (`conversation_saved`, written
-   * before queue RN) is taken as saved: no conversation that may exist is dropped (DESIGN.md, "When Claude Code saves
+   * before queue RN) is taken as saved: no conversation that may exist is dropped (docs/design/engine.md, "When Claude Code saves
    * a conversation").
    */
   start(session: SessionFile, launch: (resume: boolean) => Launch, extra: E, handlers: (l: Hosted<E>) => HostHandlers): Hosted<E> {
@@ -143,8 +159,16 @@ export class AgentHost<E extends object = object> {
     const resume = record !== undefined && record.conversation_saved !== false;
     const how = launch(resume);
     // `launched` keeps the launch without the briefing's file: it is no setting (stale).
-    const owned = { ...how, options: { ...how.options, ownProcesses: session.role === "worker" ? true : undefined } } as Launch;
+    const late = how.runtime === "claude" && how.options.lateTurnMs === undefined && this.lateTurnMs !== undefined ? { lateTurnMs: this.lateTurnMs } : {};
+    const owned = { ...how, options: { ...how.options, ...late, ownProcesses: session.role === "worker" ? true : undefined, agentRole: session.role } } as Launch;
     const proc = this.spawn(this.withBriefingFile(session.id, owned));
+    // Whatever the agent is given to act on comes with the server's clock mark in .nexus/clock.json, so its `nexus`
+    // calls stamp their records after everything the server had seen (docs/design/state.md, "Clock steps").
+    const send = proc.send.bind(proc);
+    proc.send = (text, priority) => {
+      try { this.store.writeClock(); } catch (e) { console.error(`clock.json: ${(e as Error).message}`); }
+      send(text, priority);
+    };
     const l = { ...extra, session: session.id, proc } as Hosted<E>;
     this.live.set(session.id, l);
     this.launched.set(proc, how);
@@ -159,7 +183,7 @@ export class AgentHost<E extends object = object> {
     // before its token figures, and a record still `idle` from the start then read as a turn already over (queue FU4).
     const begin = (mark = true) => {
       if (open) return;
-      open = { started: now(), windows: this.windows(session.runtime), tag: on.tag?.() ?? {} };
+      open = { started: now(), startedMs: performance.now(), windows: this.windows(session.runtime), tag: on.tag?.() ?? {} };
       if (mark) this.write(session.id, { state: "working" });
     };
     proc.on("message", (text) => { begin(); on.message?.(text); });
@@ -168,6 +192,13 @@ export class AgentHost<E extends object = object> {
     proc.on("refusal", (r) => on.refusal?.(r));
     proc.on("background", (w) => on.background?.(w));
     proc.on("compacted", (c) => on.compacted?.(c));
+    // A restart held for the end of a turn (restartAfterTurn): its process ends now, the next start makes a new one.
+    const endHeld = () => { this.afterTurn.delete(proc); this.ended.add(proc); proc.kill(); this.forget(l); };
+    proc.on("settled", () => {
+      // A restart held for the moment a turn of the runtime's own could still start (turnEnd below): none came.
+      if (this.afterTurn.has(proc) && proc.state === "idle") endHeld();
+      on.settled?.();
+    });
     proc.on("facts", (f) => {
       if (f.model) model = f.model;
       if (f.contextTokens !== undefined) begin();
@@ -178,9 +209,13 @@ export class AgentHost<E extends object = object> {
       if (a) this.asked.set(proc, { turn: a.next, next: [] });
       begin(false);
       this.recordTurn(session, open!, model, end);
+      const last = { started_at: open!.started, ended_at: now() };
       open = undefined;
-      this.write(session.id, this.record.countTurns ? { state: "idle", turns: (this.store.readRuntime(session.id)?.turns ?? 0) + 1 } : { state: "idle" });
-      if (this.afterTurn.has(proc)) { this.afterTurn.delete(proc); this.ended.add(proc); proc.kill(); this.forget(l); }
+      this.write(session.id, this.record.countTurns ? { state: "idle", last_turn: last, turns: (this.store.readRuntime(session.id)?.turns ?? 0) + 1 } : { state: "idle", last_turn: last });
+      // A restart after the turn: not while the runtime may still run a message sent into this turn as a turn of its
+      // own (AgentProcess.settling, queue KM): killed now, the process would take that message with it. It ends after
+      // that turn, or once the moment is over (settled).
+      if (this.afterTurn.has(proc) && !proc.settling) endHeld();
       on.turnEnd?.(end);
     });
     proc.on("exit", (code) => {
@@ -234,12 +269,12 @@ export class AgentHost<E extends object = object> {
 
   /**
    * A new process from the next message on (another model or effort): a working process is ended when its turn ends,
-   * an idle one now.
+   * a settling one when its moment is over (or after the turn it still starts), an idle one now.
    */
   restartAfterTurn(session: string): void {
     const l = this.running(session);
     if (!l) return;
-    if (l.proc.state === "working") { this.afterTurn.add(l.proc); return; }
+    if (l.proc.state === "working" || l.proc.settling) { this.afterTurn.add(l.proc); return; }
     this.ended.add(l.proc);
     l.proc.kill();
     this.live.delete(session);
@@ -325,7 +360,7 @@ export class AgentHost<E extends object = object> {
       const s = this.store.readSession(session.id);
       const at = now();
       appendTurn({
-        v: 1, at, started_at: turn.started, duration_ms: Math.max(0, Date.parse(at) - Date.parse(turn.started)),
+        v: 1, at, started_at: turn.started, duration_ms: Math.round(performance.now() - turn.startedMs),
         project: s.project, session: s.id, role: s.role as TurnRecord["role"], runtime: s.runtime as TurnRecord["runtime"],
         model: model ?? s.model ?? undefined, effort: s.effort ?? undefined, ...turn.tag, tags: this.tagsOf(turn.tag),
         outcome: !end ? "interrupted" : end.ok ? "ok" : end.failure ? end.failure.kind : "interrupted",

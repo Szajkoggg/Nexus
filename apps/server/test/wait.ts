@@ -1,4 +1,4 @@
-// The waits of the tests that run fake runtimes, servers or git (decided 2026-11-14, queue TS; DESIGN.md, "The tests'
+// The waits of the tests that run fake runtimes, servers or git (decided 2026-11-14, queue TS; docs/design/tests.md, "The tests'
 // waits"). A test waits for something the code under test does by itself (a run to finish, a reply, a server to
 // answer): short, so that a change that breaks many tests fails the suite in minutes rather than hours of 20-30 s
 // timeouts, and polled often, so that a passing test does not idle.
@@ -43,8 +43,22 @@ export const LONGER = {
    * Work that starts many processes in a row and waits on them: a server's start (main.ts), an update's hand-over to a
    * successor process and its rollback (git, npm stand-ins), a run that commits in a worktree. In the full suite the
    * longest such wait took 12 s (a rollback); on a busy machine more (queue FU4 measured 14 s a step under load).
+   * Also the coordinator's chains of runs in worktrees of their own (coordinator.test.ts): one run's end and the next
+   * one's whole run, each through its integration step, so about six worker processes, each in its PowerShell job
+   * host, start or end one after another (and a step whose model differs restarts the process). Alone 6 s; under
+   * load-tests 18 to 26 s, past the 30 s of `run` in a full run (queue FL3, FL8; before FL8 the host reported each
+   * end 2.3 s late, alone 8 s).
    */
   processes: WAIT_MS * 6,
+  /**
+   * A coding queue's whole run in its own worktree, through its closing steps: its own step, the closing refactoring
+   * step and the integration step that merges the base, about ten node processes (the fake worker's turns, the nexus
+   * CLI) and the git worktree and merge commands, one after another. Alone it takes about 6 s, in a full run 18 s; on
+   * the user's slower machine (full runs of 700 to 760 s) one took 71 s, past the 60 s of `processes`, and the test of
+   * two such runs failed in 3 of 4 full runs (queue TM1). Twice `processes` leaves room over the worst one measured
+   * and still ends a hung run within two minutes (queue TT2).
+   */
+  closingRun: WAIT_MS * 12,
 } as const;
 
 /**

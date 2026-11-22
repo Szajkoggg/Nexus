@@ -1,4 +1,4 @@
-// Review levels, provisional acceptances and away mode in the dashboard (PROTOCOL.md, "Review"): the level picker of
+// Review levels, provisional acceptances and away mode in the dashboard (docs/protocol/review.md, "Review"): the level picker of
 // the approval view, a step's level and provisional mark on its line and panel, Confirm and Fix it on a provisional
 // acceptance (the return batch and the step), and the away-mode switch with its "until HH:MM" field and its sign.
 import { useState } from "react";
@@ -6,6 +6,7 @@ import { act, actResult, enc, projectUrl, request, useAction, type AttentionItem
 import { Button, TEXTAREA } from "./ui.tsx";
 import { formatClock, t } from "../i18n.ts";
 import { usePage } from "../page.ts";
+import { runtimeName } from "../runtimes.ts";
 
 type Level = 1 | 2 | 3;
 const LEVELS: Level[] = [1, 2, 3];
@@ -81,6 +82,22 @@ export function LevelMark({ step, always }: { step: Pick<StepView, "level" | "le
       {t("level.badge", { level: String(step.level) })}
     </span>
   );
+}
+
+// ---------------------------------------------------------------- who accepted a step (queue RH)
+
+/**
+ * Who accepted the step, and on what (queue RH, H17): the user, the orchestrator, the review helper with its runtime,
+ * model and effort, or Nexus (an integration without a model); while the review helper reviews it, that. Undefined
+ * otherwise.
+ */
+export function acceptedWord(s: Pick<StepView, "status" | "accepted" | "helper">): { parts: string[]; title?: string } | undefined {
+  if (s.status === "review" && s.helper?.state === "running") return { parts: [t("accepted.helperReviews")] };
+  const a = s.accepted;
+  if (s.status !== "done" || !a) return undefined;
+  const on = [a.runtime && runtimeName(a.runtime), a.model, a.effort].filter((x): x is string => !!x);
+  const text = t(`accepted.by.${a.by}`);
+  return { parts: a.by === "helper" || (a.by === "orchestrator" && a.model) ? [text, ...on] : [text], title: t("accepted.title", { at: new Date(a.at).toLocaleString() }) };
 }
 
 // ---------------------------------------------------------------- provisional acceptances

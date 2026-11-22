@@ -1,14 +1,17 @@
 // Running queues through Nexus-launched sessions: controls, live activity, sessions and usage.
-import { useEffect, useState, type ReactNode } from "react";
+import { activityApplier } from "../liveViews.ts";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { retryLine } from "@nexus/protocol/times";
+import { tokenCount } from "@nexus/protocol/tokens";
 import { questionBarrier, runGoing } from "@nexus/protocol/status-rules";
 import { QuestionWait } from "./QuestionWait.tsx";
-import { act, enc, projectUrl, useAction, useQuery, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
+import { act, enc, projectUrl, useAction, useQuery, useLiveRead, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
 import { Button, ReadError, RunTimes, Section, TimeAgo } from "./ui.tsx";
-import { formatClock, formatDateTime, formatTime, formatNumber, rich, t, type Key } from "../i18n.ts";
+import { formatClock, formatDateTime, formatDuration, formatTime, formatNumber, rich, t, type Key } from "../i18n.ts";
 import { EffortSelect, ModelSelect } from "./Settings.tsx";
 import { openPlan } from "../queueStatus.ts";
 import { usePage } from "../page.ts";
+import { RUNTIME_OPTIONS, runtimeName } from "../runtimes.ts";
 
 // The run's state as a dot and a word: [dot, text].
 const RUN_TONE: Record<string, [string, string]> = {
@@ -39,7 +42,6 @@ export function RetryNote({ run, className = "mt-1 text-xs" }: { run: NonNullabl
   return <p className={`${className} text-warn`}>↻ {line[0]!.toUpperCase() + line.slice(1)}</p>;
 }
 
-const RUNTIME_NAME: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
 
 const SEEDED: Record<string, Key> = {
   written: "run.seeded.written",
@@ -48,8 +50,8 @@ const SEEDED: Record<string, Key> = {
 };
 
 /**
- * Each time the run went on in a fresh session: the previous one's context was full (context care), or the step runs
- * on another runtime.
+ * Each time the run went on in a fresh session: the previous one's context was full, or it was idle past its cache's life
+ * with a summary (context care), or the step runs on another runtime.
  */
 function SessionSwitches({ run, sessions }: { run: NonNullable<QueueView["run"]>; sessions: SessionView[] }) {
   if (!run.switches?.length) return null;
@@ -62,8 +64,11 @@ function SessionSwitches({ run, sessions }: { run: NonNullable<QueueView["run"]>
             {rich("run.switch", {
               step: <span key="step" className="font-mono">{s.step}</span>, time: formatClock(s.at, new Date()),
               why: s.why === "runtime"
-                ? t("run.switch.runtime", { runtime: RUNTIME_NAME[sessions.find((x) => x.id === s.to)?.runtime ?? ""] ?? t("run.switch.anotherRuntime") })
-                : s.fill === undefined ? t("run.switch.full") : t("run.switch.fill", { pct: Math.round(s.fill * 100) }),
+                ? t("run.switch.runtime", { runtime: runtimeName(sessions.find((x) => x.id === s.to)?.runtime ?? "") || t("run.switch.anotherRuntime") })
+                : s.why === "idle" ? t("run.switch.idle", { duration: formatDuration((s.idle_minutes ?? 60) * 60_000) })
+                : s.fill === undefined ? t("run.switch.full")
+                  : s.tokens !== undefined ? t("run.switch.tokens", { tokens: tokenCount(s.tokens), pct: Math.round(s.fill * 100) })
+                    : t("run.switch.fill", { pct: Math.round(s.fill * 100) }),
               seeded: SEEDED[s.summary] ? t(SEEDED[s.summary]!) : s.summary,
             })}
           </span>
@@ -94,7 +99,7 @@ function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boole
   if (!p) return null;
   // The queues it waits for in the plan (the plan view shows them in full).
   const ids = openPlan(queue)?.after.map((e) => e.queue) ?? [];
-  const options = [p.session ? t("run.plan.continues", { session: p.session.slice(-8) }) : p.runtime === "codex" ? "Codex" : p.runtime === "claude" ? "Claude Code" : undefined, p.model, p.effort && t("run.effort", { effort: p.effort })].filter(Boolean);
+  const options = [p.session ? t("run.plan.continues", { session: p.session.slice(-8) }) : p.runtime ? runtimeName(p.runtime) : undefined, p.model, p.effort && t("run.effort", { effort: p.effort })].filter(Boolean);
   const after = ids.length > 0 && <span key="queue" className="font-mono">{ids.join(", ")}</span>;
   const tone = p.failed ? "border-stop/30 bg-stop/10" : p.blocked ? "border-warn/30 bg-warn/10" : "border-info/30 bg-info/10";
   return (
@@ -108,7 +113,7 @@ function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boole
             : (p.failed
               ? <span className="text-stop">{t("run.plan.atFailed", { time: formatClock(p.at!, new Date()), reason: p.failed.reason })}</span>
               : <span className="text-fg">{rich(p.usage ? "run.plan.atUsage" : "run.plan.at", {
-                time: <span key="time" className="font-medium">{formatClock(p.at!, new Date())}</span>, runtime: p.usage === "codex" ? "Codex" : "Claude Code",
+                time: <span key="time" className="font-medium">{formatClock(p.at!, new Date())}</span>, runtime: runtimeName(p.usage === "codex" ? "codex" : "claude"),
               })}</span>)}
           <span className="mt-1 block text-xs text-fg-2">
             {p.failed ? <>{t("run.plan.startYourself")} · <TimeAgo at={p.failed.at} /></>
@@ -216,8 +221,7 @@ export function RunControls({ project, queue }: { project: ProjectState; queue: 
           <label className="text-xs text-fg-2">
             <span className="mb-1 block">{t("run.field.runtime")}</span>
             <select value={runtime} onChange={(e) => { setRuntime(e.target.value as "claude" | "codex"); setModel(""); setEffort(""); }} disabled={!!session} className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg disabled:opacity-50">
-              <option value="claude">Claude Code</option>
-              <option value="codex">Codex</option>
+              {RUNTIME_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </label>
           <label className="max-w-full text-xs text-fg-2">
@@ -273,8 +277,8 @@ const KIND_ICON: Record<string, string> = { tool: "›", text: "¶", tool_error:
 
 /** What the agent did during a step, from the runtime's stream. */
 export function Activity({ project, session, queue, step }: { project: string; session: string; queue: string; step: string }) {
-  const { version } = usePage();
-  const { data: items, error } = useQuery<ActivityEntry[]>(projectUrl(project, `/sessions/${enc(session)}/activity?queue=${enc(queue)}&step=${enc(step)}`), version);
+  const apply = useMemo(() => activityApplier<ActivityEntry>(session, { queue, step }), [session, queue, step]);
+  const { data: items, error } = useLiveRead<ActivityEntry[]>(projectUrl(project, `/sessions/${enc(session)}/activity?queue=${enc(queue)}&step=${enc(step)}`), project, apply);
   const [all, setAll] = useState(false);
   if (!items && error) return <Section title={t("run.activity")}><ReadError error={error} /></Section>;
   if (!items?.length) return null;

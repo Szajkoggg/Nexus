@@ -1,0 +1,10 @@
+# A check-fix round (queue EC4), on scripts/capture/seed-check-runs.ts with FAKE_CHECK_FIX_MS set: demo's npm test
+# failed twice after the step's done, and the worker fixes it in round 1 of 3. A new view: --no-before.
+#   FAKE_CHECK_FIX_MS=600000 NEXUS_TEST_LOCK=$TEMP/capture-test.lock node scripts/capture.ts scripts/capture/examples/check-fix-round.yaml --no-before
+seed: scripts/capture/seed-check-runs.ts
+views:
+  - key: step-check-fix-round@1440
+    route: "#/demo/CK/CK1"
+    label: "Check-javítókör a lépésnél, a send-backtől külön"
+    actions:
+      - wait: 25000

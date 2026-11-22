@@ -49,3 +49,14 @@ test("a duration that is no number of seconds is refused, and nothing is written
   }
   assert.equal(x.checks().length, 0);
 });
+
+test("nexus status shows the run of a queue the user stopped, though its step still reads running (queue EF)", () => {
+  const x = setup();
+  const at = new Date().toISOString();
+  x.store.writeRun("Q", { protocol: 1, session: "w", state: "running", step: "Q1", started_at: at, updated_at: at });
+  assert.doesNotMatch(x.nexus("status"), /^ {2}run: /m, "a run at work needs no line");
+  x.store.writeRun("Q", { protocol: 1, session: "w", state: "paused", reason: "stopped by the user", step: "Q1", started_at: at, updated_at: at, ended_at: at });
+  const out = x.nexus("status");
+  assert.match(out, /^queue Q \[running\] Queue\b/m);
+  assert.match(out, /^ {2}run: paused at Q1 \(stopped by the user\)$/m);
+});

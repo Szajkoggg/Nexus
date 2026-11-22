@@ -1,4 +1,4 @@
-// Fallback in the middle of a step (PROTOCOL.md, "Fallback when usage runs out"), against the fake runtimes: before
+// Fallback in the middle of a step (docs/protocol/runtimes.md, "Fallback when usage runs out"), against the fake runtimes: before
 // each kind of turn within a step (a nudge, a send-back, an answer, an inbox message) a runtime beyond the threshold
 // hands the step to a fresh session on its fallback, seeded with the step's goal, progress, commits and uncommitted
 // files, which stay in the checkout; a `wait` rule waits in the middle of the step; a turn that failed on the usage
@@ -46,7 +46,7 @@ function setup(steps: Step[], o: { level?: 1 | 2 } = {}) {
   const sessions = () => loadProjectState(store).sessions.filter((s) => s.role === "worker");
   const received = () => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { text: string; session: string | null }) : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
-  const stop = () => { clearInterval(timer); engine.shutdown(); delete process.env.FAKE_USAGE; delete process.env.FAKE_SLOW_MS; delete process.env.FAKE_RESET_MS; delete process.env.FAKE_ASK_LINGER_MS; };
+  const stop = () => { clearInterval(timer); engine.shutdown(); delete process.env.FAKE_USAGE; delete process.env.FAKE_SLOW_MS; delete process.env.FAKE_RESET_MS; delete process.env.FAKE_ASK_LINGER_MS; delete process.env.FAKE_SUMMARY_FAIL; delete process.env.FAKE_CONTEXT_FILL; };
   return { root, git, store, engine, queue, sessions, received, until, stop };
 }
 
@@ -171,6 +171,25 @@ test("a turn that failed on the usage limit goes on on the next entry of the cha
     assert.match(x.queue().run!.fallbacks![0]!.reason, /^the usage limit was reached \(rate_limit: /);
     assert.equal(x.queue().run!.state === "usage_wait", false);
     assert.ok(readTurns().entries.some((t) => t.runtime === "claude" && t.outcome === "usage"));
+  } finally { x.stop(); }
+});
+
+test("the summary request's turn failing on the usage limit at a step boundary: the done step stays done, the next one opens on the fallback (queue LF, F2)", async () => {
+  const x = setup([{ fake: "done", kind: "mechanical" }, { fake: "done", kind: "mechanical" }]);
+  try {
+    process.env.FAKE_CONTEXT_FILL = "0.9"; // beyond the threshold (80 % of the fake's window): the summary is asked for
+    process.env.FAKE_SUMMARY_FAIL = "limit";
+    process.env.FAKE_RESET_MS = String(3_600_000);
+    x.engine.start("Q");
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+    const q = x.queue();
+    assert.deepEqual(q.steps.map((s) => s.status), ["done", "done"]);
+    assert.deepEqual(q.run!.switches?.map((s) => [s.step, s.why, s.summary]), [["Q2", "runtime", "fallback"]], "no usage switch of the done step Q1");
+    assert.deepEqual(x.sessions().map((s) => s.runtime), ["claude", "codex"]);
+    assert.equal(q.steps[1]!.session, x.sessions()[1]!.id, "Q2 ran on the fallback's fresh session");
+    const codex = x.received().filter((r) => r.session === x.sessions()[1]!.id).map((r) => r.text);
+    assert.ok(!codex.some((t) => /step Q1/.test(t) && /continue|take over/i.test(t)), `Q1 was not opened again: ${JSON.stringify(codex.map((t) => t.slice(0, 120)))}`);
+    assert.deepEqual(q.run!.fallbacks?.map((f) => [f.step, f.runtime]), [["Q2", "codex"]]);
   } finally { x.stop(); }
 });
 

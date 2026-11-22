@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { applyStateMessage } from "../liveViews.ts";
 import type { IdeaLinkAction, IdeaLinkView } from "@nexus/protocol";
 import type { IdeasResponse } from "@nexus/protocol/ideas";
-import { projectUrl, useQuery, type ProjectState } from "../api.ts";
+import { projectUrl, useQuery, useLiveRead, type ProjectState } from "../api.ts";
 import { t, type Key } from "../i18n.ts";
 import { nav, useNav } from "../nav.ts";
 import { layerValue } from "../layers.ts";
@@ -19,7 +20,7 @@ export function IdeasMatching({ project, phone }: { project: string; phone?: boo
   const note = layerValue(useNav(), "note");
   const { version, reload } = usePage();
   const { data, error } = useQuery<IdeasResponse>(projectUrl(project, "/ideas"), version);
-  const state = useQuery<ProjectState>(projectUrl(project, "/state"), version);
+  const state = useLiveRead<ProjectState>(projectUrl(project, "/state"), project, applyStateMessage);
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [edit, setEdit] = useState<Edit>();

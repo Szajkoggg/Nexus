@@ -10,8 +10,8 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, applyDraft, approveQueue, loadProjectState, newId, routeAnswers, updateSettings } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { leftBehind, recordStepEnd, recordStepStart, UNCOMMITTED_NOTE } from "../src/gitinfo.ts";
-import { decideStoppedWork } from "../src/stopwork.ts";
+import { leftBehind, recordStepEnd, recordStepStart, recordTurn, UNCOMMITTED_NOTE } from "../src/gitinfo.ts";
+import { decideStoppedWork, readStoppedWork } from "../src/stopwork.ts";
 import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
@@ -56,17 +56,20 @@ test("a stopped step with commits needs Keep or Discard; Keep records it and lif
   try {
     await x.stopped();
     writeFileSync(join(x.root, "scratch.txt"), "left by someone\n");
-    const left = leftBehind(x.store, x.queue())!;
+    const left = (await leftBehind(x.store, x.queue()))!;
     assert.equal(left.step, "Q1");
     assert.deepEqual(left.commits.map((c) => c.subject), ["Q1 work"]);
     assert.deepEqual(left.uncommitted, [{ status: "??", path: "scratch.txt" }]);
     assert.equal(left.uncommitted_note, UNCOMMITTED_NOTE);
     assert.equal(UNCOMMITTED_NOTE, "in the checkout, not necessarily this step's");
 
-    assert.throws(() => decideStoppedWork(x.store, "Q", undefined, "user_continue"), /step Q1 left 1 commit of its own: choose Keep or Discard/);
-    assert.throws(() => decideStoppedWork(x.store, "Q", "maybe", "user_continue"), /work is keep or discard/);
+    assert.throws(() => decideStoppedWork(x.store, "Q", undefined, "user_continue", left), /step Q1 left 1 commit of its own: choose Keep or Discard/);
+    assert.throws(() => decideStoppedWork(x.store, "Q", "maybe", "user_continue", left), /work is keep or discard/);
+    // The work is read before the action decides (queue SV2): a read for another stop is refused, nothing recorded.
+    assert.throws(() => decideStoppedWork(x.store, "Q", "keep", "user_continue", { ...left, step: "Q2" }), /now stopped at another step; try again/);
+    assert.throws(() => decideStoppedWork(x.store, "Q", "keep", "user_continue", undefined), /now stopped at another step; try again/);
     assert.equal(x.queue().changes.length, 0, "nothing recorded");
-    assert.deepEqual(decideStoppedWork(x.store, "Q", "keep", "user_continue"), { proceed: true });
+    assert.deepEqual(decideStoppedWork(x.store, "Q", "keep", "user_continue", left), { proceed: true });
     const kept = x.queue().changes.at(-1)!;
     assert.deepEqual([kept.kind, kept.by, kept.step, kept.to, kept.commits], ["work", "user_continue", "Q1", "kept", [left.commits[0]!.sha]]);
     x.engine.continueQueue("Q");
@@ -80,8 +83,8 @@ test("Discard records it, keeps the stop and tells the orchestrator once; approv
   try {
     updateSettings(x.store, { orchestrator: { notify: false } });
     await x.stopped();
-    const sha = leftBehind(x.store, x.queue())!.commits[0]!.sha;
-    const d = decideStoppedWork(x.store, "Q", "discard", "user_continue");
+    const sha = (await leftBehind(x.store, x.queue()))!.commits[0]!.sha;
+    const d = decideStoppedWork(x.store, "Q", "discard", "user_continue", await readStoppedWork(x.store, "Q"));
     assert.equal(d.proceed, false);
     assert.match((d as { message: string }).message, /the stop stays; the orchestrator drafts a revision that reverts its 1 commit/);
     assert.equal(x.queue().status, "stopped");
@@ -99,7 +102,7 @@ test("Discard records it, keeps the stop and tells the orchestrator once; approv
     applyDraft(x.store, { id: "Q", title: "Queue", steps: [
       { id: "Q1", title: "Step 1", goal: "FAKE: commitstop" }, { id: "Q1r", title: "Revert Q1", goal: "FAKE: done" }, { id: "Q2", title: "Step 2", goal: "FAKE: done" },
     ] });
-    assert.deepEqual(decideStoppedWork(x.store, "Q", undefined, "user_approval"), { proceed: true });
+    assert.deepEqual(decideStoppedWork(x.store, "Q", undefined, "user_approval", await readStoppedWork(x.store, "Q")), { proceed: true });
     approveQueue(x.store, "Q");
     assert.notEqual(x.queue().status, "stopped");
     assert.equal(x.queue().changes.filter((c) => c.kind === "work").length, 1, "no second choice recorded");
@@ -110,13 +113,15 @@ test("no commits of its own: nothing is asked", async () => {
   const x = setup(["stop", "done"]);
   try {
     await x.stopped();
-    assert.deepEqual(leftBehind(x.store, x.queue())!.commits, []);
-    assert.deepEqual(decideStoppedWork(x.store, "Q", undefined, "user_continue"), { proceed: true });
+    assert.deepEqual((await leftBehind(x.store, x.queue()))!.commits, []);
+    assert.deepEqual(decideStoppedWork(x.store, "Q", undefined, "user_continue", await readStoppedWork(x.store, "Q")), { proceed: true });
     assert.equal(x.queue().changes.length, 0);
   } finally { x.stop(); }
 });
 
-test("foreign commits are not listed among a stopped step's work", () => {
+// The HEADs around the worker's turns say which commits are the step's (recordTurn); a round recorded before them
+// (no `turns` in git.yaml) still goes by the turns' times in the activity.
+for (const how of ["the HEADs around its turns", "the turns' times, for a round recorded before"] as const) test(`foreign commits are not listed among a stopped step's work: ${how}`, async () => {
   const base = mkdtempSync(join(tmpdir(), "nexus-stopwork-"));
   process.env.NEXUS_HOME = join(base, "home");
   const root = join(base, "project");
@@ -137,16 +142,25 @@ test("foreign commits are not listed among a stopped step's work", () => {
   const w = "S1";
   store.writeSession({ protocol: 1, id: w, project: "p", role: "worker", runtime: "external", cwd: root, launched_by: "external", created_at: at(-120_000).toISOString() });
   recordStepStart(store, "Q", "Q1", w);
+  const old = how !== "the HEADs around its turns";
+  if (old) {
+    const g = store.readGit("Q")!;
+    for (const r of g.steps.Q1!) delete r.turns;
+    store.writeGit("Q", g);
+  }
   store.appendActivity(w, { at: at(-60_000).toISOString(), kind: "turn_start", text: "turn started", queue: "Q", step: "Q1" });
-  commit("mine.txt", at(-40_000));
+  if (!old) recordTurn(store, "Q", "Q1", "start");
+  // With the HEADs the commits' times do not count: here they say the opposite (a clock that stepped).
+  commit("mine.txt", at(old ? -40_000 : -100_000));
   store.appendEvent({ v: 1, id: newId(), at: at(-35_000).toISOString(), session: w, type: "step.started", queue: "Q", step: "Q1" });
   store.appendEvent({ v: 1, id: newId(), at: at(-30_000).toISOString(), session: w, type: "queue.stop", queue: "Q", step: "Q1", condition: "c", reason: "r" });
   store.appendActivity(w, { at: at(-25_000).toISOString(), kind: "turn_end", text: "turn ended", queue: "Q", step: "Q1" });
-  commit("theirs.txt", at(-10_000)); // the user's, after the turn
+  if (!old) recordTurn(store, "Q", "Q1", "end");
+  commit("theirs.txt", at(old ? -10_000 : -50_000)); // the user's, after the turn
   recordStepEnd(store, "Q", "Q1");
   const q = loadProjectState(store).queues[0]!;
   assert.equal(q.status, "stopped");
-  assert.deepEqual(leftBehind(store, q)!.commits.map((c) => c.subject), ["mine.txt"]);
+  assert.deepEqual((await leftBehind(store, q))!.commits.map((c) => c.subject), ["mine.txt"]);
 });
 
 test("the worker briefing asks to commit and leave the tree clean before stopping; the orchestrator's says how to revert", async () => {
@@ -163,5 +177,23 @@ test("the worker briefing asks to commit and leave the tree clean before stoppin
     assert.match(orchestrator, /draft a revision whose first pending step reverts exactly those commits with git revert, nothing else/);
     assert.match(orchestrator, /never cleans, resets or deletes files it cannot attribute to those commits/);
     assert.match(orchestrator, /ask the user about them instead/);
+  } finally { x.stop(); }
+});
+
+test("a new stop at the same step after the read: the choice is refused, not decided on the old stop's commits (queue LH, finding 12)", async () => {
+  const x = setup(["commitstop", "done"]);
+  try {
+    await x.stopped();
+    const read = await readStoppedWork(x.store, "Q");
+    assert.ok(read?.commits.length, "the first stop left commits");
+    // Another stop at the same step comes while the lift awaited its read (its queue.stop, later).
+    const session = x.queue().run!.session;
+    const stop = x.store.readEvents(session).entries.findLast((e) => e.type === "queue.stop")!;
+    x.store.appendEvent({ ...stop, id: newId(), at: new Date(Date.parse(stop.at) + 1000).toISOString() });
+    const changes = x.store.readQueue("Q").changes.length;
+    assert.throws(() => decideStoppedWork(x.store, "Q", "keep", "user_continue", read), /stopped again since its work was read; try again/);
+    assert.equal(x.store.readQueue("Q").changes.length, changes, "no choice recorded");
+    const again = await readStoppedWork(x.store, "Q");
+    assert.deepEqual(decideStoppedWork(x.store, "Q", "keep", "user_continue", again), { proceed: true }, "decided on a read of this stop");
   } finally { x.stop(); }
 });

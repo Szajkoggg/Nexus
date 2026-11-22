@@ -1,4 +1,4 @@
-// The integration step in the engine (PROTOCOL.md, "The integration step"), against the fake runtimes and temporary
+// The integration step in the engine (docs/protocol/git.md, "The integration step"), against the fake runtimes and temporary
 // git repositories: a queue with a worktree of its own ends with it (after the closing step, whatever `coding` says);
 // its worker merges the current base into the queue's branch in the worktree. A clean merge is done; a conflict is
 // resolved only when the project's resolve_conflicts allows it; one not resolved stops the queue for the user, whose
@@ -81,8 +81,10 @@ test("a worktree queue without coding ends with the integration step: a clean me
     assert.ok(opening.includes(`git merge --no-edit main (the base branch main is at ${main} now)`), opening);
     assert.ok(opening.includes("- A conflict: do not resolve it (the project's resolve_conflicts setting is off)"), "off by default");
     assert.ok(opening.includes(`--condition "${INTEGRATION_CONDITION}"`), opening);
-    assert.ok(opening.includes("This is the queue's last step."), "the report is the integration step's");
-    assert.ok(!x.openings().find((o) => o.step === "Q2")!.text.includes("This is the queue's last step."));
+    // The report is the last step's before the integration step (queue MI): the integration step's worker writes none.
+    assert.ok(!opening.includes("This is the queue's last step"), opening);
+    assert.ok(x.openings().find((o) => o.step === "Q2")!.text.includes("This is the queue's last step before its integration step"));
+    assert.ok(q.report, "the queue has its report");
 
     // The merge is on the queue's branch, with both sides; main has not moved (the fast-forward is not this step's).
     const head = x.git(x.wt(), "rev-parse", "HEAD");
@@ -167,12 +169,16 @@ test("with resolve_conflicts off, a conflict is not resolved: the merge is abort
   } finally { hold.done(); x.stop(); }
 });
 
+// One test, not two (queue TT2): each wait below is one run to its end, which a split would keep as it is; and a second
+// test starting from a finished first run would need that run's end made by hand (the worktree and its merge, the
+// integration mark, the closing step's first stretch at work in the events, the finished run and its session), a copy
+// of what the engine does, which this test checks. The two runs wait LONGER.closingRun instead.
 test("after the closing step, and again at the end once a revision's new step has run", async () => {
   const x = setup([step("Q1", "done")], { coding: true });
   try {
     const e = x.engine();
     e.start("Q", { runtime: "claude" });
-    await x.until("the first run finished", () => x.queue().run?.state === "finished" && x.queue().status === "done");
+    await x.until("the first run finished", () => x.queue().run?.state === "finished" && x.queue().status === "done", LONGER.closingRun);
     assert.deepEqual(x.openings().map((o) => o.step), ["Q1", "Q.refactor", "Q.integrate"]);
     const first = x.queue().run!.started_at;
 
@@ -182,7 +188,7 @@ test("after the closing step, and again at the end once a revision's new step ha
     assert.deepEqual(x.queue().steps.map((s) => s.id), ["Q1", "Q2", "Q.refactor", "Q.integrate"]);
     assert.notEqual(x.queue().status, "done");
     e.start("Q", { runtime: "claude" });
-    await x.until("the second run finished", () => x.queue().run?.started_at !== first && x.queue().run?.state === "finished");
+    await x.until("the second run finished", () => x.queue().run?.started_at !== first && x.queue().run?.state === "finished", LONGER.closingRun);
     assert.deepEqual(x.openings().map((o) => o.step), ["Q1", "Q.refactor", "Q.integrate", "Q2", "Q.refactor", "Q.integrate"]);
     const q = x.queue();
     assert.equal(q.status, "done");

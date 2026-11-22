@@ -1,5 +1,5 @@
 // Pictures in chat messages reach each runtime as it needs them. The message carries the uploaded picture's absolute
-// path on its own line (PROTOCOL.md, "Uploads"). Claude Code opens it from the path with Read, which its chat roles
+// path on its own line (docs/protocol/api.md, "Uploads"). Claude Code opens it from the path with Read, which its chat roles
 // may use; Codex does not open a path from the text, so the adapter adds a localImage item beside it (both probed
 // live, see codex.ts). Against the fake runtimes.
 import { test } from "node:test";

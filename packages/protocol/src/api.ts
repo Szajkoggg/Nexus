@@ -1,6 +1,6 @@
 // The server's replies that the dashboard reads, as types only (this module has no code, so the browser may import it):
 // the server builds each reply as one of these and the dashboard reads it as the same, so a change on one side that
-// the other does not follow fails the typecheck. PROTOCOL.md ("Server API") describes the endpoints.
+// the other does not follow fails the typecheck. docs/protocol/api.md ("Server API") describes the endpoints.
 import type { AttentionItem } from "./state.ts";
 import type { MergedTemplates, TemplateLayer, TemplateProblem } from "./templates.ts";
 
@@ -9,6 +9,8 @@ export interface ProjectSummary {
   id: string; name: string; root: string; error?: string;
   running: number; waiting: number; stopped: number; open_questions: number;
   attention: AttentionItem[];
+  /** Where the project's live stream stood when the line was read (docs/protocol/live.md); absent in a live summary. */
+  seq?: number;
 }
 
 /** One commit in a step's round (git log with its diffstat). */
@@ -42,6 +44,8 @@ export interface LeftBehind {
   /** `git status` of the queue's checkout (read only): `status` is its two-letter code, `path` the file. */
   uncommitted: { status: string; path: string }[];
   uncommitted_note: string;
+  /** When the stop this was read for came (its queue.stop); a lift decides only on a read of the present stop. */
+  stopped_at?: string;
 }
 
 /** GET …/queues/:queue/left: what the stopped step left, and whether a Discard is recorded for this stop; null when not stopped at a step. */
@@ -58,7 +62,7 @@ export interface ModelInfo { value: string; label: string; description?: string;
 
 /**
  * GET /api/projects/:id/removal: whether the project may be removed from Nexus now, and what goes with it or stays
- * (PROTOCOL.md, "Removing a project"). Neither removal touches the project's own files.
+ * (docs/protocol/files.md, "Removing a project"). Neither removal touches the project's own files.
  */
 export interface RemovalView {
   /** The project's name: "Delete Nexus's data" asks for it to be typed, and the server checks it. */
