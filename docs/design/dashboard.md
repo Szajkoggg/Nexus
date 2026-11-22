@@ -357,3 +357,40 @@ measures their heights, and places them and the lines from the drawing. Decision
 - The capture tool drags as the plan view takes it: HTML5 drag events dispatched in the page with one DataTransfer
   (`scripts/capture/drag.ts`), since a headless window cannot be driven to a native drag; React's handlers take them
   as a user's. Its click dispatches the event where an element has no `click()` (an SVG shape).
+
+## Merge back where it waits (queue UF)
+
+Asked by the user on 2026-11-16 (docs/ideas/parallel-worktrees-and-merge-back.md, 2026-11-16): the "Merging back"
+waiting item opens the integration step, whose box says "Merge back on the queue's page", without a button and without
+a way there; the one Merge into main… is in the queue panel's Worktree section (`WorktreeActions` in
+`apps/web/src/components/details/git.tsx`). Designed in UF1 (mockups `docs/ux/mockups/25a-integration-step.html`,
+`docs/ux/mockups/25b-waiting-merging-back.html`, compared with captures of `scripts/capture/seed-merge-wait.ts`), built
+in UF2. One recommendation each:
+
+- **On the integration step**: the box (`IntegrationBox`) gets **Merge into main…** under the merge back's state,
+  wherever the queue panel offers it (a base branch to name, not merged yet, the queue done, not a survey run). It
+  opens the queue panel's question in place, with its text, and posts to the same action
+  (`POST /api/projects/:id/queues/:queue/merge`), so it goes through the same judgement, the same lock per queue and
+  `merged.by: user`; nothing new on the server. Beside it a link, "Worktree and cleanup: queue W's panel ›", since the
+  worktree, the branch and Clean up… stay there. The sentence "Merging back is yours here … on the queue's page" goes:
+  the button says it. With `merge_back` on, "Nexus merges it back by itself once nothing holds it" stays, and so does
+  the button (a run again past the limit waits for the user's Merge back).
+- **From any step to its queue**: the panel's first line (the queue's id and title) becomes a link that opens the
+  queue's panel, for every step and on the phone too; Back returns to the step (a layer, docs/design/dashboard.md,
+  "Back closes the topmost layer"). Recommended over a link in the integration box alone: the user looks for the
+  queue from other steps as well, and the first line is where a breadcrumb is expected.
+- **On the waiting item**: a card of kind `merge` gets its way on as a stopped queue's card has Continue: **Merge into
+  main…** and **Open** (Open goes to the integration step, as a tap on the card does today). The question opens in the
+  card; a refusal shows the server's words there (in red, as the stop's panel does), and a merge clears the item with
+  the next state. The same row in the waiting list across projects (the phone's Waiting tab, the right rail) and in
+  the project's waiting panel. One hook, as the stop has `useStopActions`, gives the button and its question to all
+  three places, so they cannot word it differently.
+- **When the button cannot help** (the checkout of main has uncommitted changes, a step is at work there): the button
+  stays, and the server refuses with the same reason. Not disabled: the merge back is looked at again only every 30
+  seconds, so a disabled button would stay disabled for up to half a minute after the user committed.
+
+Effect on the protocol: no file, event or command changes. The waiting card needs the words of its question (which
+branch goes into which base) where it has no queue at hand (the list across projects): the attention item of kind
+`merge` gets an optional `merge: { into, branch }`, derived from `git.yaml` and the queue, a change to the state API
+only (docs/protocol, the dashboard's state). The alternative, a card saying only "Merge back…", was rejected: a
+question that moves a branch says which and where.

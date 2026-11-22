@@ -33,7 +33,9 @@ The design is split by topic, one file each in `docs/design/`. New text goes int
 - [Updating Nexus](design/updates.md): updating Nexus: hand-over, rolling back, pushing, planned deploys.
   Sections: Updating Nexus
 - [The dashboard](design/dashboard.md): the dashboard's decisions: layers, the file viewer, colours, texts, the phone, the queue views, layout faults.
-  Sections: Back closes the topmost layer; Details beside the chat on a wide screen (replaced); The file viewer; Colours are theme tokens; The interface texts in one place; One action bar; The phone; A queue's steps as a list, with one honest status; Approving: the whole queue in one scroll; Continue at the stop; Reviewing: the pictures first, the decision in the viewer; Layout faults (queue PL)
+  Sections: Back closes the topmost layer; Details beside the chat on a wide screen (replaced); The file viewer; Colours are theme tokens; The interface texts in one place; One action bar; The phone; A queue's steps as a list, with one honest status; Approving: the whole queue in one scroll; Continue at the stop; Reviewing: the pictures first, the decision in the viewer; Layout faults (queue PL); Merge back where it waits (queue UF)
+- [Done here, continued elsewhere](design/continued.md): a step whose own work is done while its fix goes on in another step or queue: the case, the options, the mark on a skipped step, where it shows, the effect on the protocol (queue UF).
+  Sections: The case; Options; The mark (B); Where it shows; Effect on the protocol (for the user's decision)
 - [The chat](design/chat.md): the chat: layout, the right rail, refs, the morning digest, drafts, quoting, search, pictures, speech.
   Sections: Chat-first on a desktop; The right rail; Refs in the chat; The morning digest; Drafts stay in the browser; Each chat keeps its place; Quoting in a chat; Long replies and message actions; Search in a chat, and pinned messages; Stopping a chat agent's turn; Pictures in a chat message; Speaking into a chat
 - [Tests](design/tests.md): the tests' waits, speed, the full-test lock, flaky and hung tests, the tests reading through the model.
