@@ -276,3 +276,44 @@ local port without an approval), so a Codex worker could reach this machine's Ne
   the model called `fxprobe.fx_probe_echo` (the call did not complete under the read-only sandbox with approval
   `never`, which is the probe's setting, not the subject). Cost: two short turns on the ChatGPT subscription,
   1910 + 8368 input tokens (24704 + 31872 cached) and 31 + 75 output tokens; no model call otherwise.
+
+## The window between a Codex exit and its handling (queue CXD)
+
+Since queue LH, `CodexSession` reads its process's stdout for up to `EXIT_DRAIN_MS` (1 s) after the exit event, so
+that a turn's end the process wrote before it ended comes before its exit, never after it (Node may give the exit
+first). In that window the process is gone but its exit is not emitted yet: `send` and `compact` throw, while `state`
+is still what the last line left, `idle` after a drained turn's end. Every caller looked at `state === "exited"` only.
+
+- **Reproduced** (`apps/server/test/codex-drain-window.test.ts`; LC21's finding 1 had it from the code only): a
+  worker's turn ended without an outcome inside the window, and the engine's look after it (`turnSettleMs`) sent the
+  nudge to the exited process. The throw was not the uncaught exception LC21 expected: `advance` catches whatever its
+  decision throws and halts the run, so the run halted with "engine error: the session's process has exited" where a
+  crash is tried again. A message to the orchestrator in the window was refused with the same error.
+- **Decided: the callers look at a new mark, the state stays.** `AgentProcess.exiting` (Codex: exited, its exit not
+  emitted yet) tells a caller about to send that nothing reaches the process. Setting `state` to `exited` at the exit
+  event instead, as before LH, was not taken: the drained turn's end must still come as a turn's end with the process
+  idle, before its exit (`codex-exit.test.ts`; AgentHost records the turn and writes the record idle), and the engine
+  would have halted the run ("the session's process is not running") instead of waiting for the exit. The drain runs
+  as before.
+- **The engine waits for the exit.** What an exit means (a crash: the turn tried again on a process that resumes the
+  session; a step that reported its outcome first: its review) is the exit handler's, so in the window `advance`
+  decides nothing, `openStep` sends nothing (a Resume then: the exit tries the turn again), the inbox waits for the
+  next process, a Stop sends no stop message, and the usage gate takes nothing over. The run then goes on exactly as
+  after a crash: no nudge, one retry.
+- **A role the user waits on starts afresh at once.** The orchestrator, and a conversation (`AgentHost.reachable`),
+  start a new process for the message, resuming the session's thread, as after the exit. The old process's exit,
+  handled later, leaves the session's runtime record to the new one: AgentHost writes `exited` only when no other
+  process runs the session (before, the late exit of a process let go, as at `restartAfterTurn`, could mark a running
+  one's record exited).
+- **Where the window opens.** On Windows every agent runs in a job host (`worker-job.cs`): a worker for its
+  processes, and since queue HG every role for its agent job (`AgentOptions.agentRole`). The job host ends the job's
+  descendants when the runtime exits and only then reports the exit: stdout has ended by then, and the window lasts a
+  few ticks. On other systems agents run as plain child processes: a descendant that outlives the runtime (a command
+  Codex started) holds stdout, and the window, open for the full second. The test runs its processes without the job
+  host for that reason.
+- **The test's helpers.** `CodexOptions.exitDrainMs` (as `lateTurnMs` is Claude's) lengthens the window, so that the
+  fake's held stdout ends it, not the machine's timing. The fake (`fake-behaviour.ts`, `exitHeld`: `FAKE: noopexit1`,
+  `FAKE-EXIT-HELD`) exits with its stdout held by a descendant for `FAKE_CODEX_HOLD_STDOUT_MS`; with
+  `FAKE_CODEX_EXIT_GATE` that descendant writes the turn's end after the exit, once the test opens the gate, so the
+  turn ends inside the window whatever the load. The descendant is detached: on Windows Node (libuv) puts its children
+  in a job that ends them with their parent, so an attached one died with the fake and its stdout with it (probed).
