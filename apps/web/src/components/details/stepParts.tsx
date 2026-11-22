@@ -174,7 +174,6 @@ export function MessageAgent({ project, queue, step, session }: Writes & { sessi
   );
 }
 
-/** The state recorded on the step by hand (nexus queue set). */
 /**
  * A step skipped as continued elsewhere (docs/design/continued.md): its own work is done, and where it went on, each a
  * link with its title and status; the mark's reason, and that it was no review (the step stays unaccepted).
@@ -182,13 +181,17 @@ export function MessageAgent({ project, queue, step, session }: Writes & { sessi
 export function ContinuedBox({ project, queue, step }: InQueue & { project: ProjectState }) {
   const c = step.continued;
   if (!c) return null;
+  // A reference is a step of this queue (FL4), a queue (QX) or a step of another queue (QX/QX2).
   const target = (ref: string) => {
     const [a, b] = ref.split("/") as [string, string | undefined];
-    const own = b === undefined ? queue.steps.find((s) => s.id === a) : undefined;
-    if (own) return { queue: queue.id, step: own.id, title: own.title, status: own.status };
-    const q = project.queues.find((x) => x.id === a);
-    const s = b !== undefined ? q?.steps.find((x) => x.id === b) : undefined;
-    return { queue: a, step: b, title: s?.title ?? (b === undefined ? q?.title : undefined), status: s?.status ?? (b === undefined ? q?.status : undefined) };
+    if (b === undefined) {
+      const own = queue.steps.find((s) => s.id === a);
+      if (own) return { queue: queue.id, step: own.id, title: own.title, status: own.status };
+      const q = project.queues.find((x) => x.id === a);
+      return { queue: a, title: q?.title, status: q?.status };
+    }
+    const s = project.queues.find((x) => x.id === a)?.steps.find((x) => x.id === b);
+    return { queue: a, step: b, title: s?.title, status: s?.status };
   };
   return (
     <div className="mb-5 rounded-lg border border-ok/35 bg-ok/5 px-4 py-3 text-sm">
@@ -211,6 +214,7 @@ export function ContinuedBox({ project, queue, step }: InQueue & { project: Proj
   );
 }
 
+/** The state recorded on the step by hand (nexus queue set). */
 export function StatusNote({ step }: StepProps) {
   if (!step.status_note) return null;
   return (
