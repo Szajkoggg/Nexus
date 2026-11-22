@@ -23,6 +23,11 @@ const MOVED = ["GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_NAMESPACE", "G
 const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 /** Refs a worktree keeps in its own folder (git's per-worktree refs). */
 const PER_WORKTREE = /^(?:[A-Z][A-Z0-9_]*$|refs\/(?:worktree|bisect|rewritten)\/)/;
+/** A symbolic ref's line: `ref: <the ref it points to>`. */
+const SYMREF = /^ref:\s*(.+)$/;
+
+/** A ref file's first line, which is what git reads of it. */
+const firstLine = (text: string) => text.split(/\r?\n/)[0]!.trim();
 
 interface GitDirs { git: string; common: string }
 
@@ -63,8 +68,9 @@ function resolveRef(dirs: GitDirs, name: string, depth = 0): string | null | und
   const loose = read(join(PER_WORKTREE.test(name) ? dirs.git : dirs.common, name));
   if (loose === undefined) return undefined;
   if (loose !== null) {
-    const first = loose.split(/\r?\n/)[0]!.trim();
-    if (first.startsWith("ref:")) return resolveRef(dirs, first.slice(4).trim(), depth + 1);
+    const first = firstLine(loose);
+    const to = SYMREF.exec(first)?.[1];
+    if (to) return resolveRef(dirs, to, depth + 1);
     // A pseudo-ref such as MERGE_HEAD may list several commits (an octopus merge), one per line: git takes the first.
     const sha = first.split(/\s/)[0]!;
     return SHA.test(sha) ? sha : undefined;
@@ -107,9 +113,9 @@ export function branchFromFiles(cwd: string): { branch: string | null } | undefi
   const dirs = dirsOf(cwd);
   const head = dirs && read(join(dirs.git, "HEAD"));
   if (!head) return undefined;
-  const first = head.split(/\r?\n/)[0]!.trim();
-  if (!first.startsWith("ref:")) return SHA.test(first) ? { branch: null } : undefined;
-  const ref = first.slice(4).trim();
+  const first = firstLine(head);
+  const ref = SYMREF.exec(first)?.[1];
+  if (!ref) return SHA.test(first) ? { branch: null } : undefined;
   // `branch --show-current` names only a branch; HEAD pointing elsewhere (a rare hand-made state) is left to git.
   return ref.startsWith("refs/heads/") && ref.length > "refs/heads/".length ? { branch: ref.slice("refs/heads/".length) } : undefined;
 }
