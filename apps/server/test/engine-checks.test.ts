@@ -263,10 +263,14 @@ function withOrchestrator(queues: string[]) {
     applyDraft(store, { id, title: `Queue ${id}`, checks: [s.cmd(`${id}-unit`, "shared")], steps: [{ id: `${id}1`, title: "Step 1", goal: "FAKE: done", acceptance: [] }] });
     approveQueue(store, id);
   }
-  const cap = capacity();
-  let orchestrator: Orchestrator;
-  const engine: Engine = new Engine(store, () => tick(), { ...FAST, capacity: cap });
-  orchestrator = new Orchestrator(store, engine, () => tick());
+  let cap: Capacity, engine: Engine, orchestrator: Orchestrator;
+  // The server: its capacity, engine and orchestrator; `restart` is the next server on the same files.
+  const serve = () => {
+    cap = capacity();
+    engine = new Engine(store, () => tick(), { ...FAST, capacity: cap });
+    orchestrator = new Orchestrator(store, engine, () => tick());
+  };
+  serve();
   function tick() { routeAnswers(store); acceptReviews(store); const st = loadProjectState(store); orchestrator.onChange(st); engine.onChange(st); }
   const timer = setInterval(tick, 150);
   const queue = (id: string) => loadProjectState(store).queues.find((q) => q.id === id)!;
@@ -275,8 +279,10 @@ function withOrchestrator(queues: string[]) {
   const until = (what: string, pred: () => boolean, ms = LONGER.run) => waitUntil(what, pred, ms, () => `; ${queues.map((id) => `${id}: ${queue(id).steps[0]!.status} run=${queue(id).run?.state}`).join("; ")}; chat: ${JSON.stringify(orchestrator.view().chat.slice(-3).map((c) => c.text.slice(0, 160)))}`);
   const hello = async () => { orchestrator.say("Hello"); await until("the orchestrator's session", () => !!orchestrator.session(), LONGER.step); };
   const decide = (q: string, verdict: string, reason: string) => orchestrator.say(`FAKE-NEXUS: ${JSON.stringify(["check", "decide", q, `${q}1`, verdict, "--reason", reason])}`);
-  const stop = () => { clearInterval(timer); engine.shutdown(); orchestrator.shutdown(); cap.shutdown(); delete process.env.FAKE_CHECK_DISPUTE; delete process.env.FAKE_REVIEW_ACCEPT; };
-  return { store, engine, ...s, queue, sets, said, until, hello, decide, stop };
+  const down = () => { engine.shutdown(); orchestrator.shutdown(); cap.shutdown(); };
+  const restart = () => { down(); serve(); };
+  const stop = () => { clearInterval(timer); down(); delete process.env.FAKE_CHECK_DISPUTE; delete process.env.FAKE_REVIEW_ACCEPT; };
+  return { store, get engine() { return engine; }, ...s, queue, sets, said, until, hello, decide, restart, stop };
 }
 
 test("a disputed failure that fails on the base too is accepted: the step goes to its review, a fix queue is proposed, the orchestrator is told; the same test again goes to that queue (P6)", async () => {
@@ -451,22 +457,32 @@ test("a base run stopped while checks.yaml cannot be written: its worktree is st
   } finally { fault?.clear(); rmSync(hook, { force: true }); x.stop(); }
 });
 
-test("an accept decided before a restart and not yet recorded as accepted is finished by the next look: the step goes to its review (queue LF, F5)", async () => {
+test("an accept decided before a restart and not yet recorded as accepted is finished by the next server: the step goes to its review, with the fix queue already there (queue LF, F5)", async () => {
   const x = withOrchestrator(["Q"]);
+  let fault: ReturnType<typeof ProjectStore.faultWrites> | undefined;
   x.plan("Q-unit", [1]); // no base plan: the stand-in cannot run there, the orchestrator decides
   try {
     await x.hello();
     x.engine.start("Q", { runtime: "claude" });
     await x.until("Q1 to wait for the decision", () => x.queue("Q").steps[0]!.checking?.phase === "decision");
-    // What a server killed between decide()'s write and accept()'s leaves: the decision recorded, no outcome.
+    // The server ends inside accept(): its fix queue proposed, the set's outcome not written (queue LH: the test made
+    // no restart, and never reached the fix queue being there already). The decision is recorded (decide()'s write,
+    // the test's here: the one write the fault lets through); accept's write of the set fails, as at a server's end.
+    fault = ProjectStore.faultWrites({ file: "queues/Q/checks.yaml", after: 1 });
     const file = x.store.readChecks("Q")!;
-    const set = file.steps.Q1!.sets[0]!;
-    set.dispute!.decided = { verdict: "accept", reason: "the machine's network fails it", at: new Date().toISOString(), event: "e-decided" };
+    file.steps.Q1!.sets[0]!.dispute!.decided = { verdict: "accept", reason: "the machine's network fails it", at: new Date().toISOString(), event: "e-decided" };
     x.store.writeChecks("Q", file);
+    await x.until("the fix queue proposed, the set's write refused", () => fault!.failed() > 0 && x.store.queueIds().includes("CI"));
+    x.restart();
+    fault.clear();
+    const set = () => x.sets("Q")[0]!;
+    assert.deepEqual([set().dispute?.outcome, set().fix_queue], [undefined, undefined], "nothing of the acceptance recorded in the set");
+    if (x.queue("Q").run?.state !== "running") x.engine.resume("Q");
     await x.until("Q to finish", () => x.queue("Q").run?.state === "finished");
-    const [accepted] = x.sets("Q");
-    assert.deepEqual([accepted!.state, accepted!.dispute?.outcome, accepted!.fix_queue?.created], ["accepted", "accepted", true]);
-  } finally { x.stop(); }
+    assert.deepEqual([set().state, set().dispute?.outcome, set().fix_queue], ["accepted", "accepted", { id: "CI", created: true }], "the fix queue found, and named as made for this failure");
+    assert.deepEqual(x.store.queueIds().filter((id) => id.startsWith("CI")), ["CI"], "no second fix queue");
+    assert.equal((x.store.readQueue("CI").description ?? "").split("\n").filter((l) => /^- \S+: queue Q, step Q1 /.test(l)).length, 1, "the occurrence once");
+  } finally { fault?.clear(); x.stop(); }
 });
 
 test("an unreadable checks.yaml while the checks run: the step does not go to its review, the run halts with the reason, and the check's end is no crash (queue LF, F6)", async () => {

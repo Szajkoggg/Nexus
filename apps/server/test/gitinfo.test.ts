@@ -198,19 +198,21 @@ test("checkoutStatus gives HEAD and whether tracked files changed from one git c
 });
 
 test("one HEAD read serves a step's end and the next step's start recorded in one go", () => {
-  const { root, store } = repo();
+  const { root, store, commit } = repo();
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "approved", stop_conditions: [], checks: [], approvals: [], history: [],
     steps: [{ id: "Q1", title: "Step 1", goal: "", acceptance: [] }, { id: "Q2", title: "Step 2", goal: "", acceptance: [] }] });
   recordStepStart(store, "Q", "Q1", "S1");
-  let reads = 0;
   const once = headOnce(store, "Q");
-  const counted = () => { reads++; return once(); };
-  recordStepEnd(store, "Q", "Q1", counted);
-  recordStepStart(store, "Q", "Q2", "S1", counted);
   const head = git(root, ["rev-parse", "HEAD"]);
+  recordStepEnd(store, "Q", "Q1", once);
+  // HEAD moves between the two records (queue LH: the test counted its own wrapper's calls, not the reads). A second
+  // read would see the new commit; the one read made serves both, so the rounds meet where it read.
+  const moved = commit(root, "between");
+  assert.notEqual(moved, head);
+  recordStepStart(store, "Q", "Q2", "S1", once);
   const g = store.readGit("Q")!;
   assert.equal(g.steps.Q1!.at(-1)!.end, head);
-  assert.equal(g.steps.Q2!.at(-1)!.start, head);
-  assert.equal(reads, 2);
+  assert.equal(g.steps.Q2!.at(-1)!.start, head, "the first read's HEAD, not read again");
   assert.equal(once(), head);
+  assert.equal(headOnce(store, "Q")(), moved, "a new reader reads again");
 });
