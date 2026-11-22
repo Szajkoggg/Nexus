@@ -71,10 +71,12 @@ function removeFile(file: string): void {
  * The work this process's reads have done through this module, counted rather than timed so a test can hold it on a
  * busy machine (queue SM's gate, packages/protocol/test/work-gate.test.ts): `files` read whole, the `bytes` they had,
  * `probes` (a file's existence asked) and `listings` (a folder's entries listed), and `rebuilds`, whole derivations of
- * a project's state (loadProjectState). Reads outside the store (templates, the ideas' notes) are not counted.
+ * a project's state (loadProjectState), and `resets`, logs read again whole because they contradicted the position
+ * a model read them to (model.ts; docs/design/model.md, "When a file contradicts its position"). Reads outside the
+ * store (templates, the ideas' notes) are not counted.
  */
-export interface WorkCounts { files: number; bytes: number; probes: number; listings: number; rebuilds: number }
-const work: WorkCounts = { files: 0, bytes: 0, probes: 0, listings: 0, rebuilds: 0 };
+export interface WorkCounts { files: number; bytes: number; probes: number; listings: number; rebuilds: number; resets: number }
+const work: WorkCounts = { files: 0, bytes: 0, probes: 0, listings: 0, rebuilds: 0, resets: 0 };
 /** The work counted since the process started (or since the last resetWork). */
 export const workCounts = (): WorkCounts => ({ ...work });
 export const resetWork = (): void => { for (const k of Object.keys(work) as (keyof WorkCounts)[]) work[k] = 0; };

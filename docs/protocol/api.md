@@ -269,7 +269,9 @@ spans that ended in it, `what` and `ms`; empty when nothing measured ran); `sect
 GB: `step boundary: end`, the turn in which a step got its outcome; `step boundary: review`, a step's HEAD recorded as
 it enters review; `step boundary: open`, the engine going on to the next step), each with `count`, `total_ms`,
 `mean_ms`, `max_ms`, `git_calls` and `git_ms` (the synchronous git processes run within them) and `git` (those by kind:
-`what`, `count`, `total_ms`). The same blocks and the requests of
+`what`, `count`, `total_ms`); `model` (`resets`: logs the models of the files read again whole because they contradicted
+the position they were read to, docs/design/model.md, "When a file contradicts its position"; each is also logged with
+its path, a `model: … contradicts …` line). The same blocks and the requests of
 `block_ms` or more are written to the server's log as they happen (`perf: …` lines), with a summary every 10 minutes.
 
 **Server crash.** An uncaught exception still ends the server (it logs the stack and exits with 1); it also writes

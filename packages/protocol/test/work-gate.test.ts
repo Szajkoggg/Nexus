@@ -173,8 +173,8 @@ test("rule: the start reads the project once and derives its state once, at 1x a
 });
 test("rule: a request makes no read; the counts are the same at 1x and 4x", () => {
   for (const { model: m } of [x1, x4]) {
-    assert.deepEqual(m.request, { files: 0, bytes: 0, probes: 0, listings: 0, rebuilds: 0 });
-    assert.deepEqual(m.conversations, { files: 0, bytes: 0, probes: 0, listings: 0, rebuilds: 0 });
+    assert.deepEqual(m.request, { files: 0, bytes: 0, probes: 0, listings: 0, rebuilds: 0, resets: 0 });
+    assert.deepEqual(m.conversations, { files: 0, bytes: 0, probes: 0, listings: 0, rebuilds: 0, resets: 0 });
   }
   const same = (k: "activityLine" | "eventLine" | "runtime" | "decisions") => ({ ...x1.model[k], line: 0, bytes: x1.model[k].bytes - x1.model[k].line });
   const at4 = (k: "activityLine" | "eventLine" | "runtime" | "decisions") => ({ ...x4.model[k], line: 0, bytes: x4.model[k].bytes - x4.model[k].line });

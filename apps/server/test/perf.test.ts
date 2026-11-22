@@ -5,6 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Hono } from "hono";
+import { countWork, resetWork } from "@nexus/protocol";
 import { Perf, gitLabel } from "../src/perf.ts";
 
 const busy = (ms: number) => { const end = Date.now() + ms; while (Date.now() < end) { /* blocking on purpose */ } };
@@ -83,4 +84,11 @@ test("a measured section counts its runs and the git calls within it, once howev
   assert.ok(s.total_ms >= 12, `${s.total_ms} ms`); // three calls of at least 4 ms each (Date.now's granularity)
   // Spans keep their paths as before.
   assert.equal(perf.view().spans.find((x) => x.what === "engine (p) > step boundary: open > git rev-parse")?.count, 1);
+});
+
+test("the model's resets are in the view (queue LH)", () => {
+  const p = new Perf({ log: () => {} });
+  resetWork();
+  countWork("resets", 3);
+  assert.equal(p.view().model.resets, 3);
 });

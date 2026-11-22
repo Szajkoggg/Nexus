@@ -217,3 +217,19 @@ test("Node's watcher's reports: a folder's change keeps what lies in it; a folde
   assert.ok(!p.model.store.sessionIds().includes(worker));
   assert.deepEqual(p.model.store.readActivity(worker).entries, []);
 });
+
+test("a log that contradicts its position is counted in the work counts and logged with its path (queue LH)", (t) => {
+  const p = project();
+  const worker = p.files.sessionIds().find((s) => s.startsWith("w-"))!;
+  const file = join(p.files.sessionDir(worker), "activity.jsonl");
+  p.model.store.readActivity(worker);
+  const warned: string[] = [];
+  t.mock.method(console, "warn", (...a: unknown[]) => { warned.push(a.map(String).join(" ")); });
+  resetWork();
+  writeFileSync(file, `${JSON.stringify({ at: "2026-11-20T10:00:00.000Z", kind: "tool", text: "rewritten" })}\n`);
+  p.model.touched(file);
+  p.model.store.readActivity(worker);
+  assert.equal(workCounts().resets, 1);
+  assert.equal(warned.length, 1);
+  assert.ok(warned[0]!.includes(file), `the file's path in: ${warned[0]}`);
+});

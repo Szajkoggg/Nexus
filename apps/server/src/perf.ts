@@ -13,6 +13,7 @@
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import type { Context, Next } from "hono";
 import { matchedRoutes, routePath } from "hono/route";
+import { workCounts } from "@nexus/protocol";
 
 type IntervalHistogram = ReturnType<typeof monitorEventLoopDelay>;
 
@@ -48,6 +49,8 @@ export interface PerfView {
   blocks: Block[];
   /** The measured sections (the step boundary: queue GB), by name. */
   sections: SectionStats[];
+  /** The models of the files (model.ts): `resets`, logs read again whole because they contradicted their position. */
+  model: { resets: number };
 }
 
 const round = (ms: number) => Math.round(ms * 10) / 10;
@@ -250,6 +253,7 @@ export class Perf {
         return { what, count: s.count, total_ms: Math.round(s.total_ms), mean_ms: s.count ? round(s.total_ms / s.count) : 0, max_ms: round(s.max_ms),
           git_calls: git.reduce((n, g) => n + g.count, 0), git_ms: git.reduce((n, g) => n + g.total_ms, 0), git };
       }),
+      model: { resets: workCounts().resets },
     };
   }
 }
