@@ -15,6 +15,41 @@ function fileKey(p: string): string {
   return process.platform === "win32" ? k.toLowerCase() : k;
 }
 
+/** A read fault a test set (FileCache.faultReads): opens of the file it names fail with `code`, `times` times. */
+interface ReadFault { file: string; code: string; left: number; failed: number }
+let readFault: ReadFault | undefined;
+
+/** openSync for reading, through the test's read fault (the file named by its path's end, forward slashes). */
+function openOnce(file: string): number {
+  const f = readFault;
+  if (f && f.left > 0 && `/${file.replaceAll("\\", "/")}`.endsWith(`/${f.file}`)) {
+    f.left--; f.failed++;
+    throw Object.assign(new Error(`${f.code}: injected read fault, open '${file}'`), { code: f.code });
+  }
+  return openSync(file, "r");
+}
+
+/** An error that says nothing of the file's content: Windows refuses it for a moment (another process holds it). */
+const TRANSIENT = new Set(["EBUSY", "EPERM", "EACCES", "EMFILE", "ENFILE"]);
+const transient = (e: unknown): boolean => TRANSIENT.has((e as NodeJS.ErrnoException)?.code ?? "");
+/** How long an open refused for a moment is tried again (as a write's rename is: store.ts, renameRetrying). */
+const OPEN_RETRY_MS = 200;
+
+/**
+ * Opens the file for reading, tried again after 5, 10, 20, … ms for up to OPEN_RETRY_MS while the error is a passing
+ * one (queue LH); then the last error is thrown, and the caller keeps nothing of it as the file's content.
+ */
+function openRead(file: string): number {
+  const start = Date.now();
+  for (let wait = 5; ; wait = Math.min(wait * 2, 50)) {
+    try { return openOnce(file); }
+    catch (e) {
+      if (!transient(e) || Date.now() - start >= OPEN_RETRY_MS) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait);
+    }
+  }
+}
+
 /** The bytes before a log's position compared on each read (a file rewritten under it is read again whole). */
 const GUARD = 64;
 
@@ -82,6 +117,17 @@ export class FileCache implements Reader {
     this.unhook = onWrite((f) => this.touched(f));
   }
 
+  /**
+   * Test seam (queue LH): the next `times` opens of the file named by its path's end (`file`: "applied.jsonl",
+   * "queues/Q/queue.yaml") fail with `code` (EBUSY, EPERM, EMFILE: what Windows gives while another process holds a
+   * file), in this process and for every cache, until `clear`. `failed` counts the opens refused.
+   */
+  static faultReads(o: { file: string; code?: string; times?: number }): { failed(): number; clear(): void } {
+    const f: ReadFault = { file: o.file.replaceAll("\\", "/"), code: o.code ?? "EBUSY", left: o.times ?? 1, failed: 0 };
+    readFault = f;
+    return { failed: () => f.failed, clear: () => { if (readFault === f) readFault = undefined; } };
+  }
+
   /** Stops hearing of this process's writes. */
   close(): void { this.unhook(); }
 
@@ -144,7 +190,11 @@ export class FileCache implements Reader {
     const k = fileKey(file);
     let p = this.parsedFiles.get(k);
     if (!p) {
-      try { p = { ok: true, value: freeze(parse(readWhole(file))) }; } catch (error) { p = { ok: false, error }; }
+      try { p = { ok: true, value: freeze(parse(readWhole(file))) }; } catch (error) {
+        // A read refused for a moment is not the file's content: not kept, read again at the next read (queue LH).
+        if (transient(error)) throw error;
+        p = { ok: false, error };
+      }
       this.parsedFiles.set(k, p);
     }
     if (!p.ok) throw p.error;
@@ -199,19 +249,21 @@ export class FileCache implements Reader {
   /** Whether the file has more than was read, or is not the file read (then it is read again whole). */
   private grew(log: Log): boolean {
     try {
-      const fd = openSync(log.file, "r");
+      const fd = openRead(log.file);
       try {
         const st = fstatSync(fd, { bigint: true });
         return st.ino !== log.ino || Number(st.size) !== log.seen;
       } finally { closeSync(fd); }
-    } catch { return log.seen > 0; }
+    } catch (e) { return transient(e) || log.seen > 0; }
   }
 
   /** Reads the log on from its position: the complete lines added since, once each. */
   private readOn(log: Log, o: boolean): void {
     log.dirty = false;
     let fd: number;
-    try { fd = openSync(log.file, "r"); } catch {
+    try { fd = openRead(log.file); } catch (e) {
+      // Refused for a moment (queue LH): what was read is kept, and the log is read on at its next read.
+      if (transient(e)) { log.dirty = true; return; }
       // Gone (or never there): nothing, as a read of a missing log gives.
       this.reset(log);
       return;
@@ -228,6 +280,8 @@ export class FileCache implements Reader {
         if (!buf.subarray(0, log.pos - from).equals(log.guard)) fresh = true;
       }
       if (fresh) {
+        // Read before and now not what it was read as: a contradiction, counted and logged (docs/design/model.md).
+        if (log.pos > 0) { countWork("resets"); console.warn(`model: ${log.file} contradicts the position it was read to (${log.pos} bytes); read again from its start`); }
         this.reset(log);
         buf = readAt(fd, 0, size);
       }
@@ -273,7 +327,7 @@ function readAt(fd: number, from: number, length: number): Buffer {
   return buf.subarray(0, got);
 }
 function readWhole(file: string): string {
-  const fd = openSync(file, "r");
+  const fd = openRead(file);
   try { return readAt(fd, 0, Number(fstatSync(fd).size)).toString("utf8"); } finally { closeSync(fd); }
 }
 /** The clock has taken `at` up (or a later time). */

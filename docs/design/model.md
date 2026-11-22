@@ -133,8 +133,14 @@ A log is append-only by the protocol, but a person may edit one, a tool may trun
 copy. The model reads a log's tail from 64 bytes before its position (in the same read) and compares those bytes with
 what it read there before; it also compares the file id. The file **contradicts** its position when it is shorter than
 the position, the 64 bytes differ, or the id changed. Then that file alone is read again from its start, its part
-replaced, the version moved; the event is counted (`model resets` in `perf`) and logged with the file's path. Nothing
+replaced, the version moved; the event is counted (`model.resets` in `/api/server/perf`, the process's work count
+`resets`) and logged with the file's path (since queue LH; before it only the cache's own count moved). Nothing
 else is read again: the state is derived from memory anyway.
+
+A read refused for a moment (EBUSY, EPERM, EACCES, EMFILE, ENFILE: another process holds the file on Windows) is not
+the file's content (queue LH): the open is tried again for up to 200 ms, and if it still fails a log keeps what was
+read and is read on at its next read, and a YAML or JSON file is not kept (the error is thrown, the next read tries
+again). Before, such a log stayed empty and such a file a parse error until the file's next change.
 
 A YAML or JSON file rewritten is the ordinary case, not a contradiction: it is parsed again whole. A file whose stat
 did not change while the watcher reported a change is parsed again all the same (a write within the modification
