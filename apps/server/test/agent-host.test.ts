@@ -143,3 +143,24 @@ test("only worker sessions get process ownership, regardless of the host's recor
     assert.equal(!!proc().launch.options.ownProcesses, role === "worker");
   }
 });
+
+test("lateTurnMs: a host's own goes to every Claude process whose launch sets none (queue LH)", () => {
+  const root = mkdtempSync(join(tmpdir(), "nexus-host-"));
+  process.env.NEXUS_HOME = join(root, "home");
+  const store = ProjectStore.init(root, { id: "p", name: "P", root });
+  const s: SessionFile = { protocol: 1, id: newId(), project: "p", role: "conversation", runtime: "claude", title: "S", native_id: "uuid-1", cwd: root, launched_by: "nexus", created_at: now() };
+  store.writeSession(s);
+  const spawned: Stand[] = [];
+  const host = new AgentHost(store, ROLE_RECORDS.conversation, { lateTurnMs: 7, spawn: (l) => { const p = new Stand(l); spawned.push(p); return p; } });
+  const claude = (late?: number): Launch => ({ runtime: "claude", options: { cwd: root, uuid: "uuid-1", resume: false, permissionMode: "dontAsk", allowedTools: [], env: {}, ...(late === undefined ? {} : { lateTurnMs: late }) } });
+  const late = () => (spawned.at(-1)!.launch.options as { lateTurnMs?: number }).lateTurnMs;
+  host.start(s, () => claude(), {}, () => ({}));
+  assert.equal(late(), 7, "the host's");
+  host.start(s, () => claude(40), {}, () => ({}));
+  assert.equal(late(), 40, "the launch's own wins");
+  host.start(s, () => ({ runtime: "codex", options: { cwd: root, resume: false, sandbox: "read-only", env: {} } } as unknown as Launch), {}, () => ({}));
+  assert.equal("lateTurnMs" in spawned.at(-1)!.launch.options, false, "Codex has none");
+  const plain = new AgentHost(store, ROLE_RECORDS.conversation, { spawn: (l) => { const p = new Stand(l); spawned.push(p); return p; } });
+  plain.start(s, () => claude(), {}, () => ({}));
+  assert.equal(late(), undefined, "without one: Claude's default");
+});

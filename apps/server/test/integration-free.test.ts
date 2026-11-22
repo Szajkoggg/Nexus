@@ -18,9 +18,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { INTEGRATION_CONDITION, NEXUS_SESSION, ProjectStore, approveQueue, wrote, loadProjectState, readCapacity, routeAnswers, setStepLevel, updateSettings, type StepDef } from "@nexus/protocol";
 import { Capacity } from "../src/capacity.ts";
-import { ClaudeSession } from "../src/claude.ts";
 import { Engine, type EngineOptions } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { gatedCleanup } from "./gated-cleanup.ts";
 import { LONGER, QUICK_ENGINE, holdWork, until as waitUntil } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -65,15 +65,7 @@ setTimeout(() => {
  * cleanup limit (15 s, worker-process.ts): a cleanup asked of a process before its first turn fails as it would there,
  * "worker cleanup timed out" (queue CI8). Later cleanups work as usual.
  */
-const slowHosts: EngineOptions["spawn"] = (launch) => {
-  if (launch.runtime !== "claude") throw new Error("these tests run Claude Code's fake");
-  const proc = new ClaudeSession(launch.options);
-  const send = proc.send.bind(proc), cleanup = proc.cleanup.bind(proc);
-  let turned = false;
-  proc.send = (text, priority) => { turned = true; send(text, priority); };
-  proc.cleanup = () => (turned ? cleanup() : Promise.reject(new Error("worker cleanup timed out")));
-  return proc;
-};
+const slowHosts = () => gatedCleanup({ failBeforeTurn: "worker cleanup timed out" }).spawn;
 
 function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean; jobs?: boolean; slowHosts?: boolean } = {}) {
   const base = mkdtempSync(join(TMP, "nexus-free-"));
@@ -103,7 +95,7 @@ function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean; jobs?
   // Objects where a test ends a check mid-run (else its child keeps running).
   const server = () => {
     const cap = new Capacity({ testLock: join(mkdtempSync(join(TMP, "nexus-free-lock-")), "full-test.lock"), pollMs: 20, jobs: !!o.jobs });
-    const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store, free()); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, checkDrainWaitMs: 300, capacity: cap, ...(o.slowHosts ? { spawn: slowHosts } : {}) });
+    const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store, free()); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, checkDrainWaitMs: 300, capacity: cap, ...(o.slowHosts ? { spawn: slowHosts() } : {}) });
     return { engine, cap };
   };
   let now = server();

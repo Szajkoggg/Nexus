@@ -74,6 +74,12 @@ export interface AgentHostOptions {
   spawn?: (launch: Launch) => AgentProcess;
   /** Which runtimes compact a conversation on request; tests name one that does not. By default COMPACTS (agent.ts). */
   compacts?: (runtime: "claude" | "codex") => boolean;
+  /**
+   * How long after a Claude turn's end a turn of the CLI's own may still begin (ClaudeOptions.lateTurnMs), for every
+   * Claude process this host starts whose launch does not set it. Tests shorten it, or hold it open, so that the
+   * settling and its `settled` end are not bound to the default's timing; by default Claude's own (claude.ts).
+   */
+  lateTurnMs?: number;
 }
 
 /** A launch's settings, without what differs between any two starts of one session (see AgentHost.stale). */
@@ -91,6 +97,7 @@ export class AgentHost<E extends object = object> {
   private readonly store: ProjectStore;
   private readonly record: RoleRecord;
   private readonly spawn: (launch: Launch) => AgentProcess;
+  private readonly lateTurnMs: number | undefined;
   private readonly live = new Map<string, Hosted<E>>();
   /** What each process was started with, to tell when the settings changed since (stale). */
   private readonly launched = new WeakMap<AgentProcess, Launch>();
@@ -108,6 +115,7 @@ export class AgentHost<E extends object = object> {
     this.store = store;
     this.record = record;
     this.spawn = options.spawn ?? spawnRuntime;
+    this.lateTurnMs = options.lateTurnMs;
   }
 
   /** The variables every agent's process gets: its session and the project's .nexus. */
@@ -147,7 +155,8 @@ export class AgentHost<E extends object = object> {
     const resume = record !== undefined && record.conversation_saved !== false;
     const how = launch(resume);
     // `launched` keeps the launch without the briefing's file: it is no setting (stale).
-    const owned = { ...how, options: { ...how.options, ownProcesses: session.role === "worker" ? true : undefined } } as Launch;
+    const late = how.runtime === "claude" && how.options.lateTurnMs === undefined && this.lateTurnMs !== undefined ? { lateTurnMs: this.lateTurnMs } : {};
+    const owned = { ...how, options: { ...how.options, ...late, ownProcesses: session.role === "worker" ? true : undefined } } as Launch;
     const proc = this.spawn(this.withBriefingFile(session.id, owned));
     // Whatever the agent is given to act on comes with the server's clock mark in .nexus/clock.json, so its `nexus`
     // calls stamp their records after everything the server had seen (docs/design/state.md, "Clock steps").

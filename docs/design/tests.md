@@ -226,7 +226,13 @@ git dozens of times. In the full suite every core is busy, so each file takes ab
   start a turn of its own). The late-turn test (context-care.test.ts, queue LF, F3) starts that turn only once the
   engine shows it waits, so the turn begins as long after the result as the engine takes to look: 0.5 s alone, 1.0 to
   1.7 s under load, past the default (queue CI3). The test holds the moment open and its gate decides when the turn
-  starts; every other test keeps the default.
+  starts; every other test keeps the default. The orchestrator's and the partners' processes take it from
+  `AgentHostOptions.lateTurnMs` (queue LH), for every Claude launch that sets none; with `FAKE_LATE_NEXT=inside` the
+  fake reads the message inside its turn, so a test reaches the settling that ends with no late turn (`settled`).
+- **The workers' cleanup barrier has one stand-in** (gated-cleanup.ts, queue LH): `gatedCleanup()` makes the fakes'
+  processes with every cleanup counted (`calls`, each with whether the process had run a turn) and passed through a
+  gate the test holds, releases or makes fail; `failBeforeTurn` fails the cleanups before a first turn, as a busy
+  machine's slow job host does.
 - **"Nothing happens" waits are kept, shorter, sized to what would have happened**: twice the timer that would have
   acted (500 ms past `startupMs`, 200 ms past a retry or a nudge), and a push that would have started is waited for
   with `pusher.settled()` after twice the test's 150 ms look.

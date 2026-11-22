@@ -4,9 +4,8 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { setStepLevel } from "@nexus/protocol";
-import { ClaudeSession } from "../src/claude.ts";
-import { CodexSession } from "../src/codex.ts";
 import { setup } from "./engine-setup.ts";
+import { gatedCleanup } from "./gated-cleanup.ts";
 import { holdWork, until, LONGER } from "./wait.ts";
 
 interface Family { root: number; direct: number; orphan: number; bridge: number }
@@ -112,11 +111,9 @@ for (const runtime of ["claude", "codex"] as const) {
   });
 
   test(`${runtime}: cleanup failure halts the queue before its next step`, { skip: process.platform !== "win32" }, async () => {
-    const fixture = setup(["procdone", "done"], { spawn: (launch) => {
-      const proc = launch.runtime === "claude" ? new ClaudeSession(launch.options) : new CodexSession(launch.options);
-      proc.cleanup = () => Promise.reject(new Error("injected cleanup failure"));
-      return proc;
-    } });
+    const cleanups = gatedCleanup();
+    cleanups.fail("injected cleanup failure");
+    const fixture = setup(["procdone", "done"], { spawn: cleanups.spawn });
     const file = `${process.env.FAKE_LOG}.children-Q1`;
     try {
       fixture.engine.start("Q", { runtime });
@@ -132,18 +129,13 @@ for (const runtime of ["claude", "codex"] as const) {
   });
 
   test(`${runtime}: a resume during cleanup waits for it, then continues`, { skip: process.platform !== "win32" }, async () => {
-    let release!: () => void;
-    const barrier = new Promise<void>((resolve) => { release = resolve; });
-    let cleaning = false;
-    const fixture = setup(["procdone", "done"], { spawn: (launch) => {
-      const proc = launch.runtime === "claude" ? new ClaudeSession(launch.options) : new CodexSession(launch.options);
-      const cleanup = proc.cleanup.bind(proc);
-      proc.cleanup = async () => { cleaning = true; await barrier; await cleanup(); };
-      return proc;
-    } });
+    const cleanups = gatedCleanup();
+    cleanups.hold();
+    const release = () => cleanups.release();
+    const fixture = setup(["procdone", "done"], { spawn: cleanups.spawn });
     try {
       fixture.engine.start("Q", { runtime });
-      await until("cleanup barrier", () => cleaning, LONGER.step);
+      await until("cleanup barrier", () => cleanups.held() > 0, LONGER.step);
       fixture.engine.pause("Q");
       fixture.engine.resume("Q");
       assert.equal(fixture.queue().run?.state, "paused");

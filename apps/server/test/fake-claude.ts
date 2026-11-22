@@ -59,12 +59,15 @@ async function turn(text: string): Promise<void> {
   // FAKE_LATE_NEXT: the process's first turn writes its result only once a message comes in after its reply, and that
   // message, come too late to be read in the turn, runs as a turn of its own after it (as Claude Code runs a `next`
   // message that reached it as its turn ended): Nexus sent it into a turn whose result it had not read yet (queue OF).
+  // FAKE_LATE_NEXT=inside: the message is read inside the turn instead, and no turn follows: the process settles with
+  // no late turn, the other half of the settling's paths (queue LH).
   if (process.env.FAKE_LATE_NEXT && turns === 0) {
     for (const t = Date.now(); !unread.length && Date.now() - t < 300_000;) await new Promise((r) => setTimeout(r, 20));
     // FAKE_LATE_GATE: that turn starts only once the file it names exists (a busy machine: after Nexus looked at the
     // turn's end), polled every 10 ms.
     const gate = process.env.FAKE_LATE_GATE;
-    if (gate) {
+    if (process.env.FAKE_LATE_NEXT === "inside") fake.history!.push(...unread);
+    else if (gate) {
       const late = unread;
       lateTurns++;
       const start = () => { if (!existsSync(gate)) return void setTimeout(start, 10); lateTurns--; queue.unshift(...late); void pump(); };

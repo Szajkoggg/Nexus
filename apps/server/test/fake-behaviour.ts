@@ -75,7 +75,8 @@
 // never saved or to start a saved one anew; FAKE_START_MS: it reads its input only after that long (Claude Code's
 // start-up), so a test can end it before it saved anything; FAKE_REFUSE: it refuses every start, each in its way;
 // FAKE_LATE_NEXT: its first turn's result waits for a message sent after its reply, which then runs as a turn of its own
-// (once the file FAKE_LATE_GATE names exists, when set; the process runs it before it exits, its input closed or not).
+// (once the file FAKE_LATE_GATE names exists, when set; the process runs it before it exits, its input closed or not);
+// FAKE_LATE_NEXT=inside: that message is read inside the turn, and no turn of its own follows.
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

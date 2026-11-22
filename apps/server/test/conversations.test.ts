@@ -12,6 +12,7 @@ import { Orchestrator } from "../src/orchestrator.ts";
 import { CODEX_WEB_SEARCH, Conversations } from "../src/conversations.ts";
 import { CodexSession, webSearchText } from "../src/codex.ts";
 import type { AgentEvents, AgentProcess } from "../src/agent.ts";
+import type { AgentHostOptions } from "../src/agent-host.ts";
 import { longReply } from "./fake-behaviour.ts";
 import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
@@ -19,7 +20,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
 process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 
-function setup(notes?: string) {
+function setup(notes?: string, host: AgentHostOptions = {}) {
   const root = mkdtempSync(join(tmpdir(), "nexus-conv-"));
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_ARGS = join(root, "args.log");
@@ -28,7 +29,7 @@ function setup(notes?: string) {
   if (notes) updateSettings(store, { conversations: { notes_dir: notes } });
   const engine = new Engine(store, () => {});
   const orchestrator = new Orchestrator(store, engine, () => {});
-  const conversations = new Conversations(store, orchestrator, () => {});
+  const conversations = new Conversations(store, orchestrator, () => {}, host);
   const args = () => (existsSync(process.env.FAKE_ARGS!) ? readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>) : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms);
   const stop = () => { conversations.shutdown(); orchestrator.shutdown(); engine.shutdown(); };
@@ -329,4 +330,27 @@ test("a message sent as a partner's turn ends, with its settings changed meanwhi
     assert.equal(x.args().length, 2, "a new process from the message after");
     assert.ok((x.args()[1]!.argv as string[]).includes("Edit(Dev/Late/**)"), "on the changed settings");
   } finally { delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_CHAT_SLOW_MS; x.stop(); }
+});
+
+test("a message read inside the partner's turn: the process settles with no late turn, in the host's lateTurnMs (queue LH)", async () => {
+  // FAKE_LATE_NEXT=inside: the first turn's result waits for the next message and reads it inside the turn, so no turn
+  // of the CLI's own follows; the moment it might have begun ends after the host's lateTurnMs, not Claude's 1.5 s.
+  process.env.FAKE_LATE_NEXT = "inside";
+  const x = setup(undefined, { lateTurnMs: 50 });
+  try {
+    const c = x.conversations.create({ title: "Inside" });
+    x.conversations.say(c.id, "first");
+    const proc = () => x.conversations["host"].get(c.id)?.proc;
+    const replies = () => x.store.readChat(c.id).entries.filter((e) => e.from === "partner" && e.kind === "message").length;
+    await x.until("the first reply, its turn still running", () => replies() === 1);
+    assert.equal(proc()?.state, "working");
+    let settled = false;
+    proc()!.on("settled", () => { settled = true; });
+    x.conversations.say(c.id, "second");
+    await x.until("the process settled", () => settled);
+    assert.equal(proc()!.state, "idle", "no late turn: idle, not working");
+    assert.equal(proc()!.settling, false);
+    assert.equal(replies(), 1, "no reply of a late turn");
+    assert.equal(x.args().length, 1, "the same process");
+  } finally { delete process.env.FAKE_LATE_NEXT; x.stop(); }
 });
