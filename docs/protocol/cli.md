@@ -54,7 +54,10 @@ nexus review pass-on W W3 --why criterion,doubt --findings "what it checked and 
 # orchestrator only
 nexus queue draft <file.yaml|->                # a new queue, or a change to one: a new revision
 nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift [--continued-in <refs>] --reason "..."   # housekeeping (see "The orchestrator"); done, approving and lifting are the user's
-nexus review accept|send-back|ask-user|provisional <queue> <step> ...   # the orchestrator's decision on a step waiting for its review (see "The orchestrator"); a review helper has the first two for its own step (below)
+nexus review accept <queue> <step> [--note "..."]   # the orchestrator's decision on a step waiting for its review (see "The orchestrator"); a review helper has accept (level 2) and send-back for its own step (below)
+nexus review send-back <queue> <step> <what to fix>   # back to its worker
+nexus review ask-user <queue> <step> <why>     # hand the review to the user
+nexus review provisional <queue> <step> [--note "..."]   # level 3 (or 2 while the user is away): accept provisionally
 nexus run <queue> cancel-start --reason "..."   # takes a queue the orchestrator planned out of the plan
 nexus plan propose <queue> [--after <queue>]... --reason "..."   # propose to the user a new list of predecessors that changes ones the user set (see "The plan")
 nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF]   # writes .nexus/drafts/BF.yaml to complete and upload
