@@ -5,7 +5,7 @@
 // commits; approving a revision then lifts the stop without asking again. With no commits of the step's own nothing
 // is asked. Uncommitted changes in the checkout are shown, labelled as not necessarily the step's, and never cleaned.
 import { ActionError, loadProjectState, now, type LeftBehind, type ProjectStore, type QueueView, type StatusChange } from "@nexus/protocol";
-import { leftBehind } from "./gitinfo.ts";
+import { leftBehind, stopAt } from "./gitinfo.ts";
 
 /**
  * What the stopped queue's stopped step left, read before a lift (queue SV2): its git runs without holding the loop,
@@ -18,10 +18,6 @@ export async function readStoppedWork(store: ProjectStore, queueId: string): Pro
 }
 
 
-/** When the queue's stop came: the stopped step's latest queue.stop (an imported stop has none). */
-function stopAt(q: QueueView): string | undefined {
-  return q.steps.find((s) => s.id === q.stop_step)?.timeline.findLast((e) => e.type === "queue.stop")?.at;
-}
 
 /** A Discard recorded for the queue's present stop. */
 export function discardRecorded(q: QueueView): StatusChange | undefined {
@@ -44,8 +40,10 @@ export function decideStoppedWork(store: ProjectStore, queueId: string, choice: 
   if (by === "user_approval" && q.approved) throw new ActionError("this revision is already approved", 409);
   // Once Discard is recorded, approving a revision (the orchestrator's revert) lifts without asking again.
   if (by === "user_approval" && discardRecorded(q)) return { proceed: true };
-  // Read before (readStoppedWork): for this stop only. A stop that came since was not read: try again.
+  // Read before (readStoppedWork): for this stop only. A stop that came since was not read: try again. At another
+  // step, or at the same one again (its queue.stop later than the read's: queue LH).
   if (read?.step !== q.stop_step) throw new ActionError(`queue ${queueId} is now stopped at another step; try again`, 409);
+  if (read?.stopped_at !== stopAt(q)) throw new ActionError(`queue ${queueId} was stopped again since its work was read; try again`, 409);
   const left = read;
   if (!left || !left.commits.length) return { proceed: true }; // nothing of the step's own: nothing to decide
   if (!choice) {

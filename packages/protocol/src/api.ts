@@ -44,6 +44,8 @@ export interface LeftBehind {
   /** `git status` of the queue's checkout (read only): `status` is its two-letter code, `path` the file. */
   uncommitted: { status: string; path: string }[];
   uncommitted_note: string;
+  /** When the stop this was read for came (its queue.stop); a lift decides only on a read of the present stop. */
+  stopped_at?: string;
 }
 
 /** GET …/queues/:queue/left: what the stopped step left, and whether a Discard is recorded for this stop; null when not stopped at a step. */

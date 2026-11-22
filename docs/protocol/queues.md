@@ -177,14 +177,16 @@ the user decides about what the stopped step (`stop_step`) left (`apps/server/sr
 - The server works it out, reading git only (no network, `status` without optional locks): the step's own commits from
   `git.yaml` (every round), leaving out those marked foreign; and the uncommitted changes of the queue's checkout
   (`git status`), labelled "in the checkout, not necessarily this step's". `GET /api/projects/:id/queues/:q/left`
-  answers `{ step, commits, uncommitted: [{ status, path }], uncommitted_note, discarded }` (`discarded`: the Discard
-  recorded for this stop, or null), or null when the queue is not stopped at a step.
+  answers `{ step, commits, uncommitted: [{ status, path }], uncommitted_note, stopped_at, discarded }` (`stopped_at`:
+  when the stop it was read for came, its `queue.stop`; `discarded`: the Discard recorded for this stop, or null), or
+  null when the queue is not stopped at a step.
 - When the step left commits of its own, the lift takes a choice, `work: keep | discard` in the body of `continue` and
   `approve`; without it they are refused (409, naming the step and the number of commits). With none nothing is asked.
   What the lift itself would refuse (a run still going; Continue on an unapproved revision; approving an approved
   one) is refused first, so no choice is recorded for a lift that does not happen. The step's work is read (git)
   before the lift checks and records anything; a queue stopped at another step by the time it decides is refused (409,
-  "now stopped at another step; try again"), with nothing recorded.
+  "now stopped at another step; try again"), and so is one stopped again at the same step since the read (409,
+  "stopped again since its work was read; try again", queue LH), with nothing recorded.
 - **Keep** appends a `work` change (`to: kept`, `commits`, `by`) and lifts as before. The commits stay, and go out
   with the next accepted commit when the project pushes what was accepted.
 - **Discard** appends a `work` change (`to: discarded`, `commits`) and does not lift: Continue does not go on, and the

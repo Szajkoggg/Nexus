@@ -286,8 +286,15 @@ export const UNCOMMITTED_NOTE = "in the checkout, not necessarily this step's";
  * git without holding the loop: an action that decides by it reads it first, then decides and writes in one go
  * (src/stopwork.ts).
  */
+/** When the queue's stop came: the stopped step's latest queue.stop (an imported stop has none). */
+export function stopAt(q: QueueView): string | undefined {
+  return q.steps.find((s) => s.id === q.stop_step)?.timeline.findLast((e) => e.type === "queue.stop")?.at;
+}
+
 export async function leftBehind(store: ProjectStore, q: QueueView): Promise<LeftBehind | undefined> {
   if (q.status !== "stopped" || !q.stop_step) return undefined;
+  // The stop this read is for, taken before the git reads are awaited: a lift decides only on it (queue LH).
+  const stoppedAt = stopAt(q);
   const dir = checkoutOf(store, q);
   // --no-optional-locks: status does not refresh the index, so it writes nothing. Untrimmed: a trim would eat the
   // leading space of the first line's status code.
@@ -297,5 +304,5 @@ export async function leftBehind(store: ProjectStore, q: QueueView): Promise<Lef
   ]);
   const commits = (view?.rounds ?? []).flatMap((r) => r.commits).filter((c) => !c.foreign);
   const uncommitted = (status ?? "").split(/\r?\n/).filter(Boolean).map((l) => ({ status: l.slice(0, 2).trim(), path: l.slice(3) }));
-  return { step: q.stop_step, commits, uncommitted, uncommitted_note: UNCOMMITTED_NOTE };
+  return { step: q.stop_step, commits, uncommitted, uncommitted_note: UNCOMMITTED_NOTE, ...(stoppedAt ? { stopped_at: stoppedAt } : {}) };
 }

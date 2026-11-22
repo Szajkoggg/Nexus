@@ -179,3 +179,21 @@ test("the worker briefing asks to commit and leave the tree clean before stoppin
     assert.match(orchestrator, /ask the user about them instead/);
   } finally { x.stop(); }
 });
+
+test("a new stop at the same step after the read: the choice is refused, not decided on the old stop's commits (queue LH, finding 12)", async () => {
+  const x = setup(["commitstop", "done"]);
+  try {
+    await x.stopped();
+    const read = await readStoppedWork(x.store, "Q");
+    assert.ok(read?.commits.length, "the first stop left commits");
+    // Another stop at the same step comes while the lift awaited its read (its queue.stop, later).
+    const session = x.queue().run!.session;
+    const stop = x.store.readEvents(session).entries.findLast((e) => e.type === "queue.stop")!;
+    x.store.appendEvent({ ...stop, id: newId(), at: new Date(Date.parse(stop.at) + 1000).toISOString() });
+    const changes = x.store.readQueue("Q").changes.length;
+    assert.throws(() => decideStoppedWork(x.store, "Q", "keep", "user_continue", read), /stopped again since its work was read; try again/);
+    assert.equal(x.store.readQueue("Q").changes.length, changes, "no choice recorded");
+    const again = await readStoppedWork(x.store, "Q");
+    assert.deepEqual(decideStoppedWork(x.store, "Q", "keep", "user_continue", again), { proceed: true }, "decided on a read of this stop");
+  } finally { x.stop(); }
+});
