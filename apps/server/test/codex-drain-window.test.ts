@@ -25,11 +25,6 @@ const DRAIN_MS = 60_000;
 /** How long the fake's descendant holds stdout after it wrote the turn's end. */
 const HOLD_MS = 3000;
 
-/** The adapter's own mark that its process has exited; its `exit` may not be emitted yet (read, never set). */
-const hasExited = (p: CodexSession) => (p as unknown as { exited: boolean }).exited;
-/** In the window: the process has exited, its exit is not emitted yet. */
-const inWindow = (p: CodexSession) => hasExited(p) && p.state !== "exited";
-
 /** Makes Codex processes that keep their stdout's drain open, recorded in `made`, without the Windows job host. */
 function codexMaker(made: CodexSession[]) {
   return (launch: Launch): CodexSession => {
@@ -66,12 +61,11 @@ function release(gate: string): void {
 
 /** Waits for the process to exit, then lets its turn's end through and waits for it: read inside the window. */
 async function turnEndsInWindow(p: CodexSession, gate: string, ms: number): Promise<void> {
-  await waitUntil("the process to exit", () => hasExited(p), ms);
-  assert.notEqual(p.state, "exited", "its exit is not emitted while stdout is held");
+  await waitUntil("the process to exit, its exit not emitted while stdout is held", () => p.exiting, ms);
   const ended = new Promise((r) => p.once("turnEnd", r));
   writeFileSync(gate, "");
   await ended;
-  assert.ok(inWindow(p) && p.state === "idle", "the turn ended inside the window, leaving the process idle");
+  assert.ok(p.exiting && p.state === "idle", "the turn ended inside the window, leaving the process idle");
 }
 
 test("codex worker: its process exits after a turn without an outcome, stdout held open; nothing is sent to it in the window, and the run goes on as after a crash (queue CXD)", async () => {
@@ -90,7 +84,7 @@ test("codex worker: its process exits after a turn without an outcome, stdout he
       await sleep(40);
       try { engine.onChange(loadProjectState(store)); } catch (e) { thrownByChange.push((e as Error).message); }
     }
-    assert.ok(inWindow(first), "every look above was inside the window");
+    assert.ok(first.exiting, "every look above was inside the window");
     assert.deepEqual(uncaught.thrown, [], "no uncaught exception");
     assert.deepEqual(thrownByChange, [], "engine.onChange does not throw in the window");
     assert.notEqual(queue().run?.state, "halted", `the run does not halt in the window (${queue().run?.reason})`);
@@ -134,7 +128,7 @@ test("codex orchestrator: a message in the drain window starts a fresh process t
     await until("its reply", () => replies().some((c) => c.text === "exit reply"));
     let refused: string | undefined;
     try { orchestrator.say("After the exit"); } catch (e) { refused = (e as Error).message; }
-    assert.ok(inWindow(first), "the message came inside the window");
+    assert.ok(first.exiting, "the message came inside the window");
     assert.equal(refused, undefined, "the message is taken, not refused with the exited process's error");
     await until("the reply to the message", () => replies().length >= 2, LONGER.step);
     assert.equal(made.length, 2, "a fresh process");
