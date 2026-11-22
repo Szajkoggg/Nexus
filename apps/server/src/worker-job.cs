@@ -162,11 +162,10 @@ public static class NexusWorkerJob
         if (family == 2) return (Marshal.ReadInt32(row, 4) & 0xff) == 127; // 127.0.0.0/8, first byte in memory
         var address = new byte[16];
         Marshal.Copy(row, address, 0, 16);
-        bool v4mapped = address[10] == 0xff && address[11] == 0xff && address[12] == 127;
-        bool one = address[15] == 1;
-        for (int i = 0; i < 15; i++) if (address[i] != 0) { one = false; break; }
-        if (v4mapped) for (int i = 0; i < 10; i++) if (address[i] != 0) { v4mapped = false; break; }
-        return one || v4mapped;
+        for (int i = 0; i < 10; i++) if (address[i] != 0) return false;
+        if (address[10] == 0xff && address[11] == 0xff) return address[12] == 127; // ::ffff:127.0.0.0/104
+        for (int i = 10; i < 15; i++) if (address[i] != 0) return false;
+        return address[15] == 1; // ::1
     }
 
     [StructLayout(LayoutKind.Sequential)] struct ProcessInfo {
