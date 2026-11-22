@@ -30,6 +30,8 @@ The design is split by topic, one file each in `docs/design/`. New text goes int
   Sections: Worktrees; Merging back; The integration step without a model (queue MI); Never two queues in one checkout; Resuming worktree cleanup (queue CW1)
 - [Runtimes and findings from building](design/runtimes.md): runtimes and authentication, findings from building phase 3, the web for thinking partners, the user's Codex tools.
   Sections: Runtimes and authentication; Findings from building phase 3; The web for thinking partners (queue WB); The user's Codex tools for workers (queue FX)
+- [Security on this machine](design/security.md): what keeps the agents Nexus runs from doing the user's actions: the local HTTP gap reproduced, who it matters for, the options for closing it (queue HG).
+  Sections: The local HTTP gap (queue HG)
 - [Updating Nexus](design/updates.md): updating Nexus: hand-over, rolling back, pushing, planned deploys.
   Sections: Updating Nexus
 - [The dashboard](design/dashboard.md): the dashboard's decisions: layers, the file viewer, colours, texts, the phone, the queue views, layout faults.
@@ -60,4 +62,4 @@ The design is split by topic, one file each in `docs/design/`. New text goes int
 1. **The local HTTP gap.** Any agent with a free shell on this machine (Codex's sandbox leaves loopback open) can
    send the dashboard's writes with a forged `Origin` ("An orchestrator on Codex can be kept to its drafts"). The
    orchestrator on Codex is built (queue OC), but the user does not switch to it until this is closed, in a queue of
-   its own.
+   its own: queue HG, whose options are in [Security on this machine](design/security.md#options).
