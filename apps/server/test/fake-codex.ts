@@ -1,6 +1,7 @@
 // A stand-in for `codex app-server` (JSON-RPC over stdio), for testing without a model. It answers the methods Nexus
 // uses and sends the notifications Nexus reads. What it does with a message is in fake-behaviour.ts; a turn/steer
 // is recorded with priority "next", like Claude's mid-turn messages.
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   PARTIAL, actOnRead, contextTokens, contextWindow, fakeSaved, interrupt, onBackgroundEnd, record, recordArgs, respond, saveFakeConversation, type Background, type Fake, type FakeFailure,
@@ -53,7 +54,29 @@ async function runTurn(id: string, text: string): Promise<void> {
   fake.background = undefined;
   if (bg) startBackground(id, bg);
   turnId = undefined;
-  notify("turn/completed", { threadId, turn: { id, status: "completed", items: [] } });
+  const completed = { method: "turn/completed", params: { threadId, turn: { id, status: "completed", items: [] } } };
+  if (fake.exitHeld) exitHoldingStdout(completed); else out(completed);
+}
+
+/**
+ * Ends the process with its stdout held open (Fake.exitHeld, fake-behaviour.ts): a descendant inherits stdout and
+ * outlives it by FAKE_CODEX_HOLD_STDOUT_MS. With FAKE_CODEX_EXIT_GATE, that descendant writes the turn's last line
+ * once the gate file exists (giving up after a minute), and holds stdout from then; without it, the process writes the
+ * line itself before it exits. Exits once what it wrote is flushed.
+ */
+function exitHoldingStdout(last: unknown): void {
+  const gate = process.env.FAKE_CODEX_EXIT_GATE ?? "";
+  const hold = process.env.FAKE_CODEX_HOLD_STDOUT_MS ?? "3000";
+  if (!gate) out(last);
+  const holder = `const fs = require("node:fs"); const [line, gate, hold] = process.argv.slice(1); const until = Date.now() + 60000;
+const go = () => { if (gate) fs.writeSync(1, line + String.fromCharCode(10)); setTimeout(() => {}, Number(hold)); };
+const wait = () => { if (!gate || fs.existsSync(gate)) go(); else if (Date.now() < until) setTimeout(wait, 20); };
+wait();`;
+  // Detached: on Windows Node (libuv) puts its children in a job that ends them with their parent, so an attached one
+  // would die with this process and its stdout with it (probed, queue CXD). A runtime that is not Node, as Codex is
+  // not, leaves its commands running.
+  spawn(process.execPath, ["-e", holder, JSON.stringify(last), gate, hold], { stdio: ["ignore", "inherit", "ignore"], windowsHide: true, detached: true }).unref();
+  process.stdout.write("", () => process.exit(0));
 }
 
 /**

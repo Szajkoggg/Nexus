@@ -592,7 +592,7 @@ export class Engine implements Member {
     this.clearTimer(queueId);
     this.writeRun(queueId, toPausedByUser(run, "stopped by the user"));
     this.checks?.stop(queueId);
-    if (live && live.proc.state === "working") {
+    if (live && live.proc.state === "working" && !live.proc.exiting) {
       live.proc.send(
         userStopNow(text),
         "now",
@@ -818,6 +818,10 @@ export class Engine implements Member {
     const q = this.queue(state, queueId);
     if (this.restarting.has(run.session)) return; // the process restarts with another model or effort
     let live = this.host.get(run.session);
+    // Its process has exited and its last output is still being read (AgentProcess.exiting): nothing can reach it, and
+    // a turn's end read then leaves it idle. Its exit decides, as any exit does (a crash: the turn is tried again on a
+    // new process), and looks again then. A nudge sent now threw, and the run halted with an engine error (queue CXD).
+    if (live?.proc.exiting) return;
     const current = run.step ? q.steps.find((s) => s.id === run.step) : undefined;
     // The checks file cannot be read: whether the step's checks passed is unknown, and the derivation holds it in
     // `checking` (protocol checks.ts, holdUnread). Nothing here can run them or tell: the run halts with the reason
@@ -1170,7 +1174,7 @@ export class Engine implements Member {
    */
   private usageGate(queueId: string, state: ProjectState, run: RunFile, live: Live | undefined, failed?: { until: string; reason: string }): boolean {
     if (questionsHold(state, queueId, run.step)) return true;
-    if (!live || live.proc.state === "working" || live.proc.state === "exited" || this.ending.has(live.session)) return false;
+    if (!live || live.proc.state === "working" || live.proc.state === "exited" || live.proc.exiting || this.ending.has(live.session)) return false;
     const q = state.queues.find((x) => x.id === queueId);
     const step = q?.steps.find((s) => s.id === run.step);
     const session = state.sessions.find((x) => x.id === run.session);
@@ -1305,6 +1309,8 @@ export class Engine implements Member {
     const run = this.run(queueId);
     const live = this.host.get(run.session);
     if (!live) { this.halt(queueId, "the session's process is not running"); return false; }
+    // Exited, its exit still to come (a Resume in that moment): the exit tries the turn again, as after a crash.
+    if (live.proc.exiting) return false;
     const state = loadProjectState(this.store);
     const project = state.project;
     // The step to open and the one the run was at: open questions of either hold the turn (checked again before sending).
@@ -1448,7 +1454,7 @@ export class Engine implements Member {
   /** Hands unread inbox entries to a live session: inside a running turn, or as a new turn when it is idle. */
   private deliverInbox(state: ProjectState, l: Live): void {
     // A process Nexus is ending gets nothing more (a session taken over had its unread entries carried across).
-    if (l.proc.state === "exited" || this.ending.has(l.session) || this.cleaning.has(l.proc)) return;
+    if (l.proc.state === "exited" || l.proc.exiting || this.ending.has(l.session) || this.cleaning.has(l.proc)) return;
     const s = state.sessions.find((x) => x.id === l.session);
     // While a switch waits for the old session's settling (switchWaits), only a stop reaches it: anything else would
     // start a turn there, taken for a late turn and ended with its process (queue LH); unread, it goes to the fresh

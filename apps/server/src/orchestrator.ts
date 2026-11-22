@@ -462,7 +462,9 @@ ${n.text}` });
     // into that turn), resuming the conversation; an idle one ends now (retireStale).
     if (this.proc?.state === "working" && this.host.stale(s.id, this.launcher(s))) this.host.restartAfterTurn(s.id);
     else this.retireStale(s);
-    if (!this.proc || this.proc.state === "exited") this.spawn(s);
+    // Exited, its last output still being read (AgentProcess.exiting): nothing reaches it, so a fresh process resumes
+    // the conversation now, as after its exit (queue CXD).
+    if (!this.proc || this.proc.state === "exited" || this.proc.exiting) this.spawn(s);
     return s;
   }
 

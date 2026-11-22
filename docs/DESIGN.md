@@ -28,7 +28,7 @@ The design is split by topic, one file each in `docs/design/`. New text goes int
   Sections: Context management; Usage limits; Estimating a turn's use; Sub-agent tokens; Measuring token use; Compacting a conversation (queue CC3)
 - [Worktrees and merging](design/git.md): worktrees, merging back, the integration step without a model, one queue per checkout, resuming worktree cleanup.
   Sections: Worktrees; Merging back; The integration step without a model (queue MI); Never two queues in one checkout; Resuming worktree cleanup (queue CW1)
-- [Runtimes and findings from building](design/runtimes.md): runtimes and authentication, findings from building phase 3, the web for thinking partners, the user's Codex tools.
+- [Runtimes and findings from building](design/runtimes.md): runtimes and authentication, findings from building phase 3, the web for thinking partners, the user's Codex tools, the window between a Codex exit and its handling.
   Sections: Runtimes and authentication; Findings from building phase 3; The web for thinking partners (queue WB); The user's Codex tools for workers (queue FX)
 - [Updating Nexus](design/updates.md): updating Nexus: hand-over, rolling back, pushing, planned deploys.
   Sections: Updating Nexus

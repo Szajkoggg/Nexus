@@ -42,6 +42,12 @@ export interface CodexOptions extends AgentOptions {
    * Codex 0.167.2 on Windows (docs/design/runtimes.md, "An orchestrator on Codex can be kept to its drafts").
    */
   permissions?: CodexPermissions;
+  /**
+   * How long after its exit event the process's stdout may still drain before the exit is handled (EXIT_DRAIN_MS by
+   * default). Tests lengthen it, so that the window (the process gone, its exit not yet emitted: `exiting`) is held open
+   * by the fake's held stdout rather than by the machine's timing, as lateTurnMs is for Claude.
+   */
+  exitDrainMs?: number;
 }
 
 /** A Codex permission profile: its name, the built-in profile it extends, and its paths with their access. */
@@ -129,6 +135,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   private exited = false;
   /** Its exit has been handled (`exit` emitted): a line read after it changes nothing. */
   private gone = false;
+  /** Exited, its last lines still being read (AgentProcess.exiting): nothing can be sent to it. */
+  get exiting(): boolean { return this.exited && !this.gone; }
   private threadId?: string;
   private turnId?: string;
   /** Messages waiting for the running turn to end (or for the thread to be ready). */
@@ -197,7 +205,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       this.exited = true;
       let done = false;
       const finish = () => { if (done) return; done = true; clearTimeout(timer); this.ended(code); };
-      const timer = setTimeout(finish, EXIT_DRAIN_MS);
+      const timer = setTimeout(finish, this.options.exitDrainMs ?? EXIT_DRAIN_MS);
       if (this.proc.stdout.readableEnded) finish(); else this.proc.stdout.once("end", finish);
     });
     void this.open();

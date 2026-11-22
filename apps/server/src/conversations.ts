@@ -392,7 +392,8 @@ ${text}`;
   }
 
   private ensure(s: SessionFile): Live {
-    const existing = this.host.running(s.id);
+    // One that has exited, its last output still being read, takes nothing more: a new process, as after its exit.
+    const existing = this.host.reachable(s.id);
     // Settings it was started with changed since (the conversation settings it follows, the notes folder): a new
     // process from this message on (a working one ends after its turn), resuming the conversation.
     if (existing && !this.host.stale(s.id, this.launcher(s))) return existing;

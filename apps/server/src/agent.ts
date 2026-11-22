@@ -118,6 +118,15 @@ export interface AgentProcess extends EventEmitter<AgentEvents> {
    * stand-in without it never settles.
    */
   readonly settling?: boolean;
+  /**
+   * Its process has exited and `exit` is not emitted yet: the runtime's last output is still being read (Codex reads
+   * stdout up to EXIT_DRAIN_MS after the exit event, so that a turn's end the process wrote comes before its exit).
+   * `state` is still what the last line left (`idle` after a drained turn's end), but nothing can reach the process:
+   * `send` and `compact` throw. A caller about to send treats it as gone; what its exit decides (a crash's retry)
+   * waits for `exit` (queue CXD; docs/design/runtimes.md, "The window between a Codex exit and its handling").
+   * Optional: a runtime without such a window never has it.
+   */
+  readonly exiting?: boolean;
   /** No priority: a new turn (after the running one). `next`: into the running turn. `now`: interrupt it. */
   send(text: string, priority?: Priority): void;
   /**
