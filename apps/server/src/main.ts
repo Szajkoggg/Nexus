@@ -1231,7 +1231,10 @@ async function release(): Promise<void> {
  * port cannot be had; the error says so.
  */
 async function reacquire(): Promise<void> {
-  projects.clear(); // their engines are shut down for good
+  // Their engines are shut down for good (release); each is dropped as a removed project is: its model stops hearing
+  // of this process's writes, the coordinator forgets its engine (queue LH: they were only cleared, two write listeners
+  // per project left behind, and every write after the next activate touched the old models too).
+  for (const e of [...projects.values()]) dropProject(e);
   const http = server as Server;
   reacquiring = true;
   try {

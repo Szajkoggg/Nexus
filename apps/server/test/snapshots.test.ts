@@ -41,3 +41,15 @@ test("the note names each copy once, and is empty without one", () => {
   assert.match(note, /^While it ran, Windows made a volume shadow copy \(at 2026-11-20T17:44:20\.360Z, 32\.5 s, asked by taskhostw\.exe; at 2026-11-20T17:52:51\.000Z, still being made at the run's end, 10 s\): file writes/);
   assert.equal(note.match(/17:44:20/g)!.length, 1);
 });
+
+test("the two logs' shadow copy ids, as this machine's event log has them, pair a start with its end (queue LH, finding 14)", () => {
+  // Read on 2026-11-22 from the user's machine (Windows 11, read-only, no administrator): event 126's Properties[1]
+  // and NTFS event 4's Properties[0] are the same GUID, lower case, without braces. NTFS also mounts copies made
+  // before (the zero GUID): those pair with nothing.
+  const events: SnapshotEvent[] = [
+    { kind: "start", at: "2026-11-21T18:52:22.214Z", id: "5136fc2f-e5dc-11f1-81d7-f8e4e3caaeda" },
+    { kind: "end", at: "2026-11-21T11:00:41.047Z", id: "00000000-0000-0000-0000-000000000000" },
+    { kind: "end", at: "2026-11-21T18:52:26.129Z", id: "5136fc2f-e5dc-11f1-81d7-f8e4e3caaeda" },
+  ];
+  assert.deepEqual(snapshotsOf(events, "2026-11-21T18:52:00.000Z", "2026-11-21T18:53:00.000Z"), [{ at: "2026-11-21T18:52:22.214Z", seconds: 3.9 }]);
+});
