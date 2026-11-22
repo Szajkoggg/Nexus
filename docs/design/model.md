@@ -70,6 +70,14 @@ project's two watchers (Node's recursive one feeding the model, chokidar's), `wa
 watchers from a `WatchFactory` (by default `realWatch`), so a test gives stand-ins and drives their reports and errors
 without a server (`watchers.test.ts`).
 
+Node closes a watcher's handle when it emits `error`, so a project's Node watcher is made again a second after its
+error (and again while making it fails, also at the start); the model is read again whole after the error and once the
+new watcher stands (queue LH: before, the dead watcher left chokidar alone to feed the model). NEXUS_HOME is watched as
+a folder (depth 0, its four files by name), not as files named to chokidar, which reports nothing of one that did not
+exist yet (away.yaml before away mode was first turned on). A change of settings.yaml or away.yaml, by hand too, is a
+change of every project: its decisions run and its state goes out. A home watcher's error reads NEXUS_HOME's files
+again and looks at every project and the registry again.
+
 - **A JSONL log**: the model keeps the byte position of the end of the last complete line it read. On a change it
   reads from that position to the end of the file in one read, takes the complete lines (a final line without a
   newline is being written: it is left for the next change, as `readJsonl` leaves it today), parses each once, adds

@@ -3,6 +3,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { watchHome, watchProject, type NativeWatcher, type TreeOptions, type TreeWatcher, type WatchFactory } from "../src/watchers.ts";
 
@@ -44,12 +46,13 @@ function project() {
 }
 
 const dir = join("C:", "p", ".nexus");
+const home = mkdtempSync(join(tmpdir(), "nexus-watch-home-"));
 
 test("a project's watchers: Node's feeds the model, chokidar's touches it, each leaves out temporary files (queue LH)", () => {
   const { factory, natives, trees } = stands();
   const { calls, hooks } = project();
   const w = watchProject("p", dir, hooks, factory);
-  assert.equal(w.native, natives[0]);
+  assert.equal(w.native(), natives[0]);
   assert.equal(w.tree, trees[0]);
   assert.equal(trees[0]!.paths, dir);
   natives[0]!.listener("change", join("queues", "Q", "run.yaml"));
@@ -78,7 +81,7 @@ test("Node's watcher not made: chokidar's still watches (queue LH)", () => {
   const { factory, trees } = stands({ nativeThrows: true });
   const { calls, hooks } = project();
   const w = watchProject("p", dir, hooks, factory);
-  assert.equal(w.native, undefined);
+  assert.equal(w.native(), undefined);
   trees[0]!.emit("all", "change", join(dir, "queues", "Q", "queue.yaml"));
   assert.deepEqual(calls, ["touched:queue.yaml", "changed"]);
 });
@@ -86,9 +89,58 @@ test("Node's watcher not made: chokidar's still watches (queue LH)", () => {
 test("NEXUS_HOME's watchers: the shared files and the registry (queue LH)", () => {
   const { factory, trees } = stands();
   const seen: string[] = [];
-  watchHome(join("C:", "home"), { touched: (path) => seen.push(`touched:${path.split(/[\\/]/).at(-1)}`), registry: () => seen.push("registry") }, factory);
-  assert.deepEqual(trees.map((t) => [t.paths].flat().map((p) => p.split(/[\\/]/).at(-1))), [["settings.yaml", "away.yaml", "turns.jsonl"], ["projects.yaml"]]);
-  trees[0]!.emit("all", "change", join("C:", "home", "away.yaml"));
-  trees[1]!.emit("all", "change", join("C:", "home", "projects.yaml"));
-  assert.deepEqual(seen, ["touched:away.yaml", "registry"]);
+  watchHome(home, { touched: (path) => seen.push(`touched:${path.split(/[\\/]/).at(-1)}`), settings: () => seen.push("settings"), registry: () => seen.push("registry"), failed: () => seen.push("failed") }, factory);
+  assert.deepEqual([trees.length, trees[0]!.paths, trees[0]!.options.depth], [1, home, 0], "the folder, not the files: a file not there yet is reported once made");
+  assert.deepEqual(["away.yaml", "projects.yaml", "other.yaml", "uploads"].map((f) => trees[0]!.options.ignored!(join(home, f))), [false, false, true, true]);
+  assert.equal(trees[0]!.options.ignored!(home), false);
+  trees[0]!.emit("all", "change", join(home, "away.yaml"));
+  trees[0]!.emit("all", "add", join(home, "projects.yaml"));
+  assert.deepEqual(seen, ["touched:away.yaml", "settings", "registry"]);
+});
+
+test("Node's watcher after its error: a new one is made, the dead one closed (queue LH, finding 4)", async () => {
+  const { factory, natives } = stands();
+  const { calls, hooks } = project();
+  const w = watchProject("p", dir, hooks, factory, { retryMs: 10 });
+  natives[0]!.emit("error", new Error("EPERM"));
+  assert.deepEqual(calls.splice(0), ["rebuild", "changed"]);
+  assert.equal(natives[0]!.closed, true, "Node closes a watcher's handle at its error: closed here too");
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(natives.length, 2, "watched again");
+  natives[1]!.listener("change", join("queues", "Q", "run.yaml"));
+  assert.deepEqual(calls.splice(0), ["rebuild", "changed", "watched:change:run.yaml", "changed"], "made again: the model read again whole, then fed by the new one");
+  w.close();
+  assert.equal(natives[1]!.closed, true);
+});
+
+test("Node's watcher not made at the start: tried again until it is (queue LH, finding 4)", async () => {
+  let fails = 2;
+  const { factory, natives } = stands();
+  const make = factory.native;
+  factory.native = (d, l) => { if (fails-- > 0) throw new Error("EMFILE"); return make(d, l); };
+  const { calls, hooks } = project();
+  const w = watchProject("p", dir, hooks, factory, { retryMs: 10 });
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(natives.length, 1, "made at the third try");
+  assert.ok(calls.filter((c) => c === "rebuild").length >= 1, "once made, the model is read again: changes before it went unseen");
+  w.close();
+  const made = natives.length;
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(natives.length, made, "closed: no more tries");
+});
+
+test("NEXUS_HOME's watchers: an error is handled, and a change of the settings or away mode is a change of every project (queue LH, finding 5)", () => {
+  const { factory, trees } = stands();
+  const seen: string[] = [];
+  watchHome(home, {
+    touched: (path) => seen.push(`touched:${path.split(/[\\/]/).at(-1)}`),
+    settings: () => seen.push("settings"),
+    registry: () => seen.push("registry"),
+    failed: (err) => seen.push(`failed:${err.message}`),
+  }, factory);
+  trees[0]!.emit("all", "change", join(home, "turns.jsonl"));
+  trees[0]!.emit("all", "change", join(home, "settings.yaml"));
+  trees[0]!.emit("error", new Error("overflow"));
+  trees[0]!.emit("error", new Error("EPERM"));
+  assert.deepEqual(seen, ["touched:turns.jsonl", "touched:settings.yaml", "settings", "failed:overflow", "failed:EPERM"]);
 });

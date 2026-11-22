@@ -43,7 +43,7 @@ import { LiveStream, type LiveSources } from "./live.ts";
 import { SEQ_HEADER, type LogKind } from "@nexus/protocol/live";
 import { searchProject } from "./search.ts";
 import { perf } from "./perf.ts";
-import { watchHome, watchProject as watchProjectFiles, type NativeWatcher, type TreeWatcher } from "./watchers.ts";
+import { watchHome, watchProject as watchProjectFiles, type ProjectWatch, type TreeWatcher } from "./watchers.ts";
 import { dashboardFiles, isPublicFile } from "./web-static.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
@@ -325,11 +325,11 @@ function logChanged(id: string, path: string): void {
   if (logPending.has(key)) return;
   logPending.set(key, setTimeout(() => { logPending.delete(key); publish(id); }, 150));
 }
-/** Each project's own Node watcher, feeding its model (watchers.ts), by project id. */
-const modelWatchers = new Map<string, NativeWatcher>();
+/** Each project's own Node watcher, feeding its model (watchers.ts; made again after an error), by project id. */
+const modelWatchers = new Map<string, ProjectWatch>();
 function watchProject(id: string, dir: string): void {
   const w = watchProjectFiles(id, dir, { model: () => projects.get(id)?.model, changed: () => changed(id), log: (path) => logChanged(id, path) });
-  if (w.native) modelWatchers.set(id, w.native);
+  modelWatchers.set(id, w);
   watchers.set(id, w.tree);
 }
 
@@ -337,16 +337,19 @@ function watchProject(id: string, dir: string): void {
 // this server's writes reach the model as they are made, a change by hand through this watcher.
 const homeFiles = new FileCache(nexusHome());
 useHomeReader(homeFiles);
+/** The settings or away mode changed (by hand too): every project's state goes out and its decisions run (queue LH). */
+const homeChanged = () => { for (const e of projects.values()) { e.model.changed(); changed(e.id); } };
+const registryChanged = () => {
+  if (!active) return;
+  refreshRegistry();
+  broadcast({ type: "projects" });
+};
 watchHome(nexusHome(), {
-  touched: (path) => {
-    homeFiles.touched(path);
-    if (!path.endsWith("turns.jsonl")) for (const e of projects.values()) e.model.changed();
-  },
-  registry: () => {
-    if (!active) return;
-    refreshRegistry();
-    broadcast({ type: "projects" });
-  },
+  touched: (path) => homeFiles.touched(path),
+  settings: homeChanged,
+  registry: registryChanged,
+  // A watcher that failed may have missed a change: NEXUS_HOME's files are read again, and everything looked at again.
+  failed: (err) => { console.error(`watch ${nexusHome()}: ${err.message}; its files are read again`); homeFiles.clear(); homeChanged(); registryChanged(); },
 });
 
 // ---------------------------------------------------------------- files the dashboard may show
