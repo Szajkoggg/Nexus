@@ -20,7 +20,7 @@ nexus review add W3 $TEMP/nexus-review/W3/lit.png --before $TEMP/nexus-review/W3
 nexus help review                              # the standard for review material (nexus help: the topics)
 nexus help summaries|context|questions|refusals|commits|tests   # the other standards
 nexus check W3 "npm test" --ok --summary "548 passed" --duration 190   # the name exactly as "Checks for every step" lists it (another counts as not reported); how long it ran, in seconds: the metric check:npm test. Refused where Nexus runs the step's checks
-nexus check W3 "npm test" --unrelated --evidence "it fails on main too"   # a check Nexus ran fails not because of your work: Nexus runs it on the queue's base commit (see "Checks run by Nexus")
+nexus check W3 "npm test" --unrelated --evidence "it fails on main too"   # worker only: a check Nexus ran fails not because of your work: Nexus runs it on the queue's base commit (see "Checks run by Nexus")
 nexus metric record bundle-kb 512 [--step W3]  # worker only: a value of a project metric for the step at work, with HEAD
 nexus metric list                              # the project's metrics (any session)
 nexus stats [--by model|effort|kind|activity|area|size|origin] [--project <id>] [--since <date>]   # see "Statistics"
@@ -66,18 +66,23 @@ nexus tags rename <old> <new> [--reason ...]    # the user accepts it (see "Tags
 nexus metric define bundle-kb --unit KB [--show line|bar|number] [--target 400] [--warn-above 500 | --warn-below=-1]
                                                # a project metric, or a change to one (see "Project metrics")
 # setup
-nexus attach                                   # register a hand-started session as external (no role: it sets up the session itself)
+nexus attach [--role worker|orchestrator] [--runtime claude|codex|external]   # register a hand-started session (default: a worker, external: it sets up the session itself); a role or runtime the protocol does not know is refused
 nexus project list                             # the registered projects
 nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring), registers the project, prints the rules files' check;
                                                # a kept .nexus/ (a project removed from Nexus) brings it back under its id
 nexus import <file.md> [--prefix X]            # one-time import of queues written as Markdown tables
-nexus note <queue> <step> <text>               # until the dashboard can add notes
+nexus note <queue> <step> <text> [--from user|orchestrator]   # until the dashboard can add notes
 nexus server perf                              # the server's measurements since its start: event loop delay, requests by route, measured operations, the latest blocks over 200 ms
 nexus server away [on --until <8:00|ISO> | off]  # the user's away mode (refused from any agent session); no argument: its state
 nexus server update --after <queue>[/<step>] [--ref <ref>]   # plan a deploy for after a step or queue of this project (the user, or an orchestrator the user asked)
 nexus server update --at <HH:MM|"YYYY-MM-DD HH:MM"> [--deadline <time>] [--ref <ref>]   # plan a deploy for a time, with an optional deadline
 nexus server cancel-plan                       # cancel the planned deploy (and the drain it started)
 ```
+
+A command line the CLI cannot take (an unknown option, an option without its value, a value the protocol does not know)
+ends with `nexus: <what is wrong>` on stderr and exit code 2, as every refusal does, never with a stack trace. A
+negative number reads as an option: a positional one goes after `--` (`nexus metric record delta -- -5`), an option's
+with `=` (`--warn-below=-5`); the message says so.
 
 `nexus status` prints each step of a queue on a line of its own (id, status, title); a step that names its own
 runtime, model or effort ends with them, `[on Codex · gpt-6-luna · low effort]` (what it leaves out is the run's).
@@ -113,7 +118,7 @@ notes), and a HEAD that moved since the step started (the round's `start` in `qu
 recorded as `warning` on the `step.done` event (the session's own log). Nothing else changes: the step is done.
 
 `nexus help <topic>` prints one of Nexus's standards (needs no session or project, records nothing); `nexus help`
-alone prints the commands and the topics. The topics live in `packages/cli/src/help.ts`:
+alone prints the commands and the topics, as do `nexus --help` and `nexus` without a command. The topics live in `packages/cli/src/help.ts`:
 
 | Topic | The standard |
 |---|---|
