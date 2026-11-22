@@ -274,6 +274,9 @@ it enters review; `step boundary: open`, the engine going on to the next step), 
 the position they were read to, docs/design/model.md, "When a file contradicts its position"; each is also logged with
 its path, a `model: … contradicts …` line). The same blocks and the requests of
 `block_ms` or more are written to the server's log as they happen (`perf: …` lines), with a summary every 10 minutes.
+`GET /api/benchmarks/server-speed` (read-only) gives `{ runs }`: the latest 200 runs of the server's speed benchmark
+from `<NEXUS_HOME>/benchmarks/server-speed.jsonl` (docs/protocol/files.md), oldest first, lines that do not parse
+left out; the global Stats view draws them beside `GET /api/server/perf`.
 
 **Server crash.** An uncaught exception still ends the server (it logs the stack and exits with 1); it also writes
 `<NEXUS_HOME>/crash.json` first (docs/protocol/files.md). `GET /api/server` gives `crash`: the latest crash as `at`

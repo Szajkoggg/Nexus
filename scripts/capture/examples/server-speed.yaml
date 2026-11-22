@@ -1,0 +1,22 @@
+# The server's speed in the global Stats view (queue SB): the live server's own measurements since its start, and the
+# speed benchmark's runs as a trend, one small chart per configuration. On the demo project of
+# scripts/capture/seed-server-speed.ts, with eight made-up runs; the live numbers are the development instance's own.
+#   node scripts/capture.ts scripts/capture/examples/server-speed.yaml --step <queue>/<step> --no-before
+seed: scripts/capture/seed-server-speed.ts
+views:
+  - key: stats-server-speed@1440
+    route: "#/demo"
+    script: scripts/capture/open-stats.js
+    settle: 3000
+    actions:
+      - scroll: "Server speed"
+      - wait: 500
+    label: "A szerver sebessége a Statisztika nézetben: az élő szerver adatai és a benchmark trendje, asztali nézet"
+  - key: stats-server-speed@390
+    route: "#/demo"
+    script: scripts/capture/open-stats.js
+    settle: 3000
+    actions:
+      - scroll: "Server speed"
+      - wait: 500
+    label: "A szerver sebessége a Statisztika nézetben telefonon"
