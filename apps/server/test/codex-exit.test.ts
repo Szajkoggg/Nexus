@@ -42,7 +42,7 @@ test("a request made after the process exited fails at once", async () => {
   assert.equal(inside.pending.size, 0);
 });
 
-test("a turn's end read after the exit starts no turn with what waited for it", async () => {
+test("a turn's end read after the exit was handled changes nothing and starts no turn with what waited for it (queue KM, LH)", async () => {
   const proc = await exited();
   const inside = proc as unknown as Inside;
   const ends: unknown[] = [];
@@ -52,5 +52,29 @@ test("a turn's end read after the exit starts no turn with what waited for it", 
   await new Promise((r) => setTimeout(r, 100));
   assert.notEqual(proc.state, "working", "no turn started after the exit");
   assert.equal(inside.pending.size, 0, "no turn/start waits for an answer");
-  assert.equal(ends.length, 1, "only the turn's end itself, no failed turn/start after it");
+  assert.equal(ends.length, 0, "no turn ends after the process did (queue LH: its drained lines are read before the exit)");
+  assert.equal(proc.state, "exited");
+});
+
+test("a turn's end still draining from stdout as the exit event comes is read before the exit, which stays the end (queue LH, finding 10)", async () => {
+  // Node may emit a child's `exit` before its stdout has drained: the turn/completed the process wrote before it ended
+  // is then read after the exit. Without care it set the state back to idle over `exited`, and its turnEnd came after
+  // the exit (AgentHost then wrote the runtime record back to idle and recorded the turn after the process's end).
+  const proc = new CodexSession({ cwd, env: {}, sandbox: "read-only", approvalPolicy: "never", writableRoots: [] });
+  await new Promise<void>((r) => proc.on("facts", (f) => { if (f.nativeId) r(); }));
+  const inside = proc as unknown as Inside & { proc: import("node:child_process").ChildProcess };
+  const order: string[] = [];
+  try {
+  proc.on("turnEnd", () => order.push(`turnEnd:${proc.state}`));
+  proc.on("exit", () => order.push(`exit:${proc.state}`));
+  inside.read(JSON.stringify({ method: "turn/started", params: { turn: { id: "t1" } } }) + "\n");
+  // The exit event first, as Node may give it, then the line the process wrote before it ended.
+  inside.proc.emit("exit", 0, null);
+  inside.read(JSON.stringify({ method: "turn/completed", params: { turn: { id: "t1", status: "completed" } } }) + "\n");
+  await new Promise<void>((r) => { if (order.some((o) => o.startsWith("exit"))) r(); else proc.once("exit", () => r()); });
+  assert.deepEqual(order, ["turnEnd:idle", "exit:exited"], "the turn ended, then the process");
+  assert.equal(proc.state, "exited");
+  inside.read(JSON.stringify({ method: "turn/started", params: { turn: { id: "t2" } } }) + "\n");
+  assert.equal(proc.state, "exited", "a line after the exit's end changes nothing");
+  } finally { inside.proc.kill(); } // the exit event was the test's: the process itself still runs
 });

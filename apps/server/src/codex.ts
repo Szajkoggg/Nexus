@@ -69,6 +69,8 @@ type Json = Record<string, any>;
 const NO_ROLLOUT = /no rollout found for thread id/i;
 /** How a request fails that the process's exit leaves unanswered (CodexSession.request). */
 const EXITED = "codex exited";
+/** How long after its exit event a process's stdout may still drain before the exit is handled. */
+const EXIT_DRAIN_MS = 1000;
 
 /** CodexErrorInfo values worth trying again: overloaded, the server's own error, the network, a short rate limit. */
 const CODEX_PASSING = new Set([
@@ -123,8 +125,10 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   private buffer = "";
   private nextId = 0;
   private readonly pending = new Map<number, { resolve: (v: Json) => void; reject: (e: Error) => void; method: string }>();
-  /** The process has exited, for good: `state` may still be set by a line read after the exit (stdout drains after it). */
+  /** The process has exited, for good: no request is answered and no turn starts; its last lines may still be read. */
   private exited = false;
+  /** Its exit has been handled (`exit` emitted): a line read after it changes nothing. */
+  private gone = false;
   private threadId?: string;
   private turnId?: string;
   /** Messages waiting for the running turn to end (or for the thread to be ready). */
@@ -187,20 +191,32 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     this.proc.stderr.on("data", (d: string) => { this.lastStderr = (this.lastStderr + d).slice(-2000); });
     this.proc.on("error", (err) => this.emit("activity", { kind: "error", text: `could not start codex: ${err.message}` }));
     this.proc.on("exit", (code) => {
-      this.state = "exited";
+      // Requests fail at once from here on, and no turn starts (`exited`); but Node may emit the exit before stdout has
+      // drained: the lines the process wrote before it ended (a turn's end) are read first, up to EXIT_DRAIN_MS, so
+      // they come before the exit and never after it, over its state (queue LH).
       this.exited = true;
-      this.openCommands.clear();
-      this.openAgents.clear();
-      for (const p of this.pending.values()) p.reject(new Error(EXITED));
-      this.pending.clear();
-      if (code && this.lastStderr.trim()) this.emit("activity", { kind: "error", text: this.lastStderr.trim().slice(-500) });
-      this.emit("exit", code);
+      let done = false;
+      const finish = () => { if (done) return; done = true; clearTimeout(timer); this.ended(code); };
+      const timer = setTimeout(finish, EXIT_DRAIN_MS);
+      if (this.proc.stdout.readableEnded) finish(); else this.proc.stdout.once("end", finish);
     });
     void this.open();
   }
 
+  /** The process has ended and its output is read: everything after it is ignored. */
+  private ended(code: number | null): void {
+    this.gone = true;
+    this.state = "exited";
+    this.openCommands.clear();
+    this.openAgents.clear();
+    for (const p of this.pending.values()) p.reject(new Error(EXITED));
+    this.pending.clear();
+    if (code && this.lastStderr.trim()) this.emit("activity", { kind: "error", text: this.lastStderr.trim().slice(-500) });
+    this.emit("exit", code);
+  }
+
   send(text: string, priority?: Priority): void {
-    if (this.state === "exited") throw new Error("the session's process has exited");
+    if (this.exited) throw new Error("the session's process has exited");
     if (this.stopping) { this.afterStop.push(text); return; }
     if (!this.threadId) { this.queue.push(text); this.state = "working"; return; } // the thread is still starting
     if (this.state === "idle") { this.startTurn(this.withCarry(text)); return; }
@@ -228,7 +244,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
    * turn/started, a contextCompaction item, turn/completed. While the thread is still starting it waits for it.
    */
   compact(): boolean {
-    if (this.state === "exited") throw new Error("the session's process has exited");
+    if (this.exited) throw new Error("the session's process has exited");
     if (this.state === "working" && this.threadId) return false;
     this.state = "working";
     if (!this.threadId) { this.compactFirst = true; return true; }
@@ -382,6 +398,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   private notify(method: string, params: Json): void { this.proc.stdin.write(JSON.stringify({ method, params }) + "\n"); }
 
   private read(chunk: string): void {
+    if (this.gone) return;
     this.buffer += chunk;
     let i: number;
     while ((i = this.buffer.indexOf("\n")) >= 0) {
