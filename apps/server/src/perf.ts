@@ -34,7 +34,7 @@ export interface SpanStats { what: string; count: number; total_ms: number; mean
  * A measured section (`perf.section`): its runs, their time, and the synchronous git calls made within them by kind
  * (`git rev-parse`), counted once however deeply nested.
  */
-export interface SectionStats { what: string; count: number; total_ms: number; mean_ms: number; max_ms: number; git_calls: number; git_ms: number; git: { what: string; count: number; total_ms: number }[] }
+interface SectionStats { what: string; count: number; total_ms: number; mean_ms: number; max_ms: number; git_calls: number; git_ms: number; git: { what: string; count: number; total_ms: number }[] }
 export interface PerfView {
   since: string;
   block_ms: number;
