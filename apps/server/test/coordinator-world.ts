@@ -9,7 +9,7 @@ import {
   ProjectStore, approveQueue, loadProjectState, newId, routeAnswers, updateGlobalSettings, updateSettings,
   type Event, type StepDef,
 } from "@nexus/protocol";
-import { Engine, type Clock } from "../src/engine.ts";
+import { Engine, type Clock, type EngineOptions } from "../src/engine.ts";
 import { Coordinator } from "../src/coordinator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { WAIT_MS, until as waitUntil } from "./wait.ts";
@@ -35,7 +35,7 @@ export interface Received { text: string; session: string | null }
  * Projects sharing one coordinator, each with its engine, under one NEXUS_HOME whose global limit is `limit` (as the
  * server's coordinator, it reads it from the global settings).
  */
-export function world(opts: { limit?: number; clock?: Clock } = {}) {
+export function world(opts: { limit?: number; clock?: Clock; spawn?: EngineOptions["spawn"] } = {}) {
   const base = mkdtempSync(join(tmpdir(), "nexus-coord-"));
   process.env.NEXUS_HOME = join(base, "home");
   process.env.FAKE_LOG = join(base, "fake.log");
@@ -72,7 +72,7 @@ export function world(opts: { limit?: number; clock?: Clock } = {}) {
     let engine: Engine | undefined;
     // Stands in for the server's file watcher.
     const tick = () => { routeAnswers(store); acceptReviews(store); engine?.onChange(loadProjectState(store)); };
-    engine = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100, coordinator, clock: opts.clock });
+    engine = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100, coordinator, clock: opts.clock, spawn: opts.spawn });
     ticks.push(tick);
     engines.push(engine);
     const queue = (q: string) => loadProjectState(store).queues.find((x) => x.id === q)!;

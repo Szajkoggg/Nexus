@@ -440,7 +440,15 @@ export class Engine implements Member {
       // finished queue) refuses it now, not later in a deferred call that halts the run with it. The cleanup takes
       // longer since the worker's job runs below normal priority (queue SV3), which made the wait visible.
       if (run.state === "finished") throw new ActionError("the run is finished", 409);
-      if (run.state !== "running") assertCanResume(this.queue(loadProjectState(this.store), queueId), run);
+      if (run.state !== "running") {
+        const state = loadProjectState(this.store);
+        const q = this.queue(state, queueId);
+        assertCanResume(q, run);
+        // A checkout another queue holds refuses it now too (queue LH), as the call below would after the wait: a halted
+        // run holds no checkout.
+        const block = runHoldsCheckout(run) ? undefined : this.coordinator.checkoutBlock(state, q);
+        if (block) throw new ActionError(refusalText(queueId, "go on", block), 409);
+      }
       // Automatic resumes (a cancelled drain, an approval) wait too. A later pause or other run change cancels
       // this request; cleanup failure already halts the run through cleanWorker.
       const before = JSON.stringify(run);

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { DEFAULT_MAX_RUNNING, ensureGlobalSettings, loadProjectState, readGlobalSettings, updateGlobalSettings } from "@nexus/protocol";
 import { Coordinator } from "../src/coordinator.ts";
 import { doneByHand, going, world } from "./coordinator-world.ts";
+import { gatedCleanup } from "./gated-cleanup.ts";
 import { TestClock } from "./test-clock.ts";
 import { LONGER, holdWork } from "./wait.ts";
 
@@ -83,6 +84,31 @@ test("a direct start, a resume and a continue in a checkout another queue holds 
     p.engine.start("B");
     await w.until("B to finish", () => p.queue("B").run?.state === "finished", LONGER.run);
   } finally { w.stop(); work.done(); }
+});
+
+test("a resume while the worker's cleanup runs is refused at once when another queue holds the checkout, not halted later (queue LH, finding 6)", async () => {
+  const work = holdWork();
+  const cleanups = gatedCleanup();
+  const w = world({ spawn: cleanups.spawn });
+  const p = w.add("p", { A: ["slow"], H: ["slow"] });
+  try {
+    // H's run halts during its worker's turn (as when the checks Nexus runs fail meanwhile) and holds the checkout no
+    // more. The worker's cleanup after that turn is held, so a Resume now is deferred until it ends.
+    cleanups.hold();
+    p.engine.start("H");
+    await w.until("H at work", () => p.queue("H").steps[0]!.status === "running", LONGER.step);
+    p.engine["halt"]("H", "halted during the turn");
+    work.release("H1");
+    await w.until("H's worker's cleanup running", () => cleanups.held() > 0, LONGER.step);
+    assert.equal(p.queue("H").run?.state, "halted");
+    p.engine.start("A");
+    await w.until("A at work", () => p.queue("A").steps[0]!.status === "running", LONGER.step);
+    assert.throws(() => p.engine.resume("H"), /queue H cannot go on: its checkout is in use, queue A runs there/);
+    const reason = p.queue("H").run?.reason;
+    cleanups.release();
+    await sleep(500);
+    assert.deepEqual([p.queue("H").run?.state, p.queue("H").run?.reason], ["halted", reason], "the halt as it was, not one with the refusal");
+  } finally { cleanups.release(); w.stop(); work.done(); }
 });
 
 test("a third queue over the limit waits and starts when one ends, also across two projects; a direct one is refused", async () => {
