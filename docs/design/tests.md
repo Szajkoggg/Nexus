@@ -226,7 +226,10 @@ git dozens of times. In the full suite every core is busy, so each file takes ab
   start a turn of its own). The late-turn test (context-care.test.ts, queue LF, F3) starts that turn only once the
   engine shows it waits, so the turn begins as long after the result as the engine takes to look: 0.5 s alone, 1.0 to
   1.7 s under load, past the default (queue CI3). The test holds the moment open and its gate decides when the turn
-  starts; every other test keeps the default. The orchestrator's and the partners' processes take it from
+  starts; every other test keeps the default. The moment's end itself is decided after the loop turn's I/O
+  (`setImmediate` in its timer, queue LH): a server loop stalled past it ran the expired timer before the output that
+  came meanwhile, and a late turn started in time was taken for none (claude-settling.test.ts stalls the loop 600 ms
+  past a 100 ms moment). The orchestrator's and the partners' processes take it from
   `AgentHostOptions.lateTurnMs` (queue LH), for every Claude launch that sets none; with `FAKE_LATE_NEXT=inside` the
   fake reads the message inside its turn, so a test reaches the settling that ends with no late turn (`settled`).
 - **The workers' cleanup barrier has one stand-in** (gated-cleanup.ts, queue LH): `gatedCleanup()` makes the fakes'

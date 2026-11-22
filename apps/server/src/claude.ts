@@ -350,13 +350,16 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     clearTimeout(this.settle);
     const wait = this.nextInTurn ? this.lateTurnMs : 0;
     this.nextInTurn = 0;
-    this.settle = setTimeout(() => {
+    // Decided after this loop turn's I/O, as startSettling's end (queue LH): a stalled loop runs the timer first.
+    const settle = setTimeout(() => setImmediate(() => {
+      if (this.settle !== settle) return; // cleared, or another stop's since
       if (this.state !== "idle") return; // a turn of the CLI's own runs (it is being interrupted): its result settles
       this.stopping = false;
       const held = this.held;
       this.held = [];
       for (const t of held) this.send(t);
-    }, wait);
+    }), wait);
+    this.settle = settle;
   }
 
   private get lateTurnMs(): number { return this.options.lateTurnMs ?? LATE_TURN_MS; }
@@ -372,7 +375,16 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
    */
   private startSettling(): void {
     this.stopSettling();
-    this.late = setTimeout(() => { this.late = undefined; if (this.state === "idle") this.emit("settled"); }, this.lateTurnMs);
+    // The moment's end is decided after this loop turn's I/O (setImmediate runs after the poll phase): after a stall of
+    // the server's loop longer than the moment, the expired timer runs before the output that came meanwhile, and a late
+    // turn the CLI started in time would be taken for none (queue LH; a side finding of queue CI3A). Its start stops the
+    // settling (stopSettling clears `late`), so the deferred end finds it gone.
+    const late = setTimeout(() => setImmediate(() => {
+      if (this.late !== late) return;
+      this.late = undefined;
+      if (this.state === "idle") this.emit("settled");
+    }), this.lateTurnMs);
+    this.late = late;
   }
 
   private stopSettling(): void {
@@ -445,7 +457,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
           this.state = "working";
           this.stopSettling();
           // A turn the CLI starts by itself while a stop settles (unread messages of the stopped turn): stopped too.
-          if (this.stopping) { clearTimeout(this.settle); this.interrupt(); }
+          if (this.stopping) { clearTimeout(this.settle); this.settle = undefined; this.interrupt(); }
           this.emit("facts", { model: m.model });
           this.emit("activity", { kind: "turn_start", text: `turn started (${m.model})` });
         }
