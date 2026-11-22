@@ -1280,7 +1280,7 @@ export class Engine implements Member {
     const inbox = all.filter((m) => !m.read_at);
     // What a late turn Nexus ended had taken in (lateTurn, the run's `carry`): delivered to the old session, but never
     // worked on there. The caller's run write drops `carry`.
-    const late = all.filter((m) => run.carry?.includes(m.id) && !inbox.some((x) => x.id === m.id));
+    const late = all.filter((m) => m.read_at && run.carry?.includes(m.id));
     this.switchWaits.delete(old.id);
     const unread = [...inbox, ...late];
     this.ending.add(old.id);

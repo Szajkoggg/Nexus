@@ -5,7 +5,7 @@ import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync, stat
 import { dirname, resolve } from "node:path";
 import type { z } from "zod";
 import { clockMark, observe } from "./clock.ts";
-import { ProjectStore, countWork, nexusHome, onWrite, parseJsonlLines, type JsonlRead, type Reader } from "./store.ts";
+import { ProjectStore, countWork, namesFile, nexusHome, onWrite, parseJsonlLines, type JsonlRead, type Reader } from "./store.ts";
 import { deriveProjectState, type ProjectState } from "./state.ts";
 import { templatesStamp } from "./templates.ts";
 
@@ -19,10 +19,10 @@ function fileKey(p: string): string {
 interface ReadFault { file: string; code: string; left: number; failed: number }
 let readFault: ReadFault | undefined;
 
-/** openSync for reading, through the test's read fault (the file named by its path's end, forward slashes). */
+/** openSync for reading, through the test's read fault (store.ts, namesFile). */
 function openOnce(file: string): number {
   const f = readFault;
-  if (f && f.left > 0 && `/${file.replaceAll("\\", "/")}`.endsWith(`/${f.file}`)) {
+  if (f && f.left > 0 && namesFile(file, f.file)) {
     f.left--; f.failed++;
     throw Object.assign(new Error(`${f.code}: injected read fault, open '${file}'`), { code: f.code });
   }

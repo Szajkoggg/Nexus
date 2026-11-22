@@ -49,14 +49,16 @@ export function wrote(file: string): void { for (const fn of writeListeners) fn(
 interface WriteFault { file: string; left: number; error: string; writes: number; failed: number }
 let writeFault: WriteFault | undefined;
 
+/** A test fault's file, named by its path's end with forward slashes ("git.yaml", "queues/Q/run.yaml"), is `file`. */
+export const namesFile = (file: string, end: string): boolean => `/${file.replaceAll("\\", "/")}`.endsWith(`/${end}`);
+
 /**
- * Before a replacement or an append through this module's helpers: throws when the test's fault names this file and
- * its writes that go through are used up. The file is named by its path's end, with forward slashes ("git.yaml",
- * "queues/Q/run.yaml").
+ * Before a replacement or an append through this module's helpers: throws when the test's fault names this file
+ * (namesFile) and its writes that go through are used up.
  */
 function faultCheck(file: string): void {
   const f = writeFault;
-  if (!f || !`/${file.replaceAll("\\", "/")}`.endsWith(`/${f.file}`)) return;
+  if (!f || !namesFile(file, f.file)) return;
   f.writes++;
   if (f.left > 0) { f.left--; return; }
   f.failed++;
