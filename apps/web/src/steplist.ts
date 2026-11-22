@@ -41,13 +41,15 @@ export function foldSteps<T extends { id: string; status: string; continued?: un
   const end = Math.min(steps.length, c + 1 + following);
   const rest = steps.slice(end);
   const foldAfter = rest.length >= 2 && !open.after;
+  const run = steps.slice(0, k);
+  const count = (f: (s: T) => boolean) => run.filter(f).length;
   return {
     ...(foldBefore ? {
       before: {
         from: steps[0]!.id, to: steps[k - 1]!.id, count: k,
-        done: steps.slice(0, k).filter((s) => s.status === "done").length,
-        skipped: steps.slice(0, k).filter((s) => s.status === "skipped" && !s.continued).length,
-        continued: steps.slice(0, k).filter((s) => s.status === "skipped" && !!s.continued).length,
+        done: count((s) => s.status === "done"),
+        skipped: count((s) => s.status === "skipped" && !s.continued),
+        continued: count((s) => s.status === "skipped" && !!s.continued),
       },
     } : {}),
     shown: steps.slice(start, foldAfter ? end : steps.length),
