@@ -7,7 +7,7 @@ import { join } from "node:path";
 import {
   appendTurn, now, readUsage, stepDefs, stepTags, writeUsage, type ProjectStore, type RuntimeFile, type SessionFile, type TokenCounts, type TurnRecord,
 } from "@nexus/protocol";
-import type { ActivityItem, AgentEvents, AgentProcess, RefusalItem, StreamFacts, TurnTokens } from "./agent.ts";
+import { reachable, type ActivityItem, type AgentEvents, type AgentProcess, type RefusalItem, type StreamFacts, type TurnTokens } from "./agent.ts";
 import { ClaudeSession, type ClaudeOptions } from "./claude.ts";
 import { CodexSession, type CodexOptions } from "./codex.ts";
 
@@ -132,6 +132,15 @@ export class AgentHost<E extends object = object> {
     return l && l.proc.state !== "exited" ? l : undefined;
   }
 
+  /**
+   * The session's process if a message can reach it (agent.ts, reachable). A role that answers the user's messages
+   * starts a new one otherwise.
+   */
+  reachable(session: string): Hosted<E> | undefined {
+    const l = this.live.get(session);
+    return l && reachable(l.proc) ? l : undefined;
+  }
+
   /** The processes as last started, by session. */
   all(): Hosted<E>[] { return [...this.live.values()]; }
 
@@ -221,7 +230,10 @@ export class AgentHost<E extends object = object> {
     proc.on("exit", (code) => {
       // A turn its process did not finish (a kill, an update's drain, a crash): recorded as interrupted.
       if (open) { this.recordTurn(session, open, model, undefined); open = undefined; }
-      this.write(session.id, { state: "exited" });
+      // The session's record belongs to the process that runs it now: one started while this one's exit was still
+      // being read (AgentProcess.exiting), or after it was let go, has written its own (queue CXD).
+      const replaced = this.live.has(session.id) && this.live.get(session.id) !== l;
+      if (!replaced) this.write(session.id, { state: "exited" });
       this.forget(l);
       on.exit?.(code, this.ended.has(proc));
     });

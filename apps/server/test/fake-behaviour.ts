@@ -37,6 +37,8 @@
 //   shortchecks the same under a short name of its own (the last word: "npm test" as "test"), as workers once did
 //   ownedhold   hold an empty directory with a Windows helper until worker cleanup; work(), then done
 //   owneddeny   the same, but the helper denies PROCESS_TERMINATE on its own process DACL
+//   noopexit1   Codex's fake only: the first time (counted beside FAKE_LOG, any process of the step), end the turn
+//               without an outcome, then exit with its stdout held open (exitHeld below); after: done
 // The closing refactoring step's standard goal has no "FAKE:": it does FAKE_CLOSING's behaviour, by default done, with a
 // summary that finds nothing worth refactoring (the valid outcome of a small change).
 // The integration step's has none either: it does FAKE_INTEGRATE's behaviour, by default "merge": it runs the merge its
@@ -64,7 +66,8 @@
 // answered with `nexus review accept`. "FAKE-LONG" is answered with longReply("Reply"); a hand-over with
 // longReply("SUMMARY"). "FAKE-SLOW" in a chat message: the turn works for FAKE_CHAT_SLOW_MS (default 4000), then
 // replies "slow reply"; a stop (interrupt) ends it early. "FAKE-HOLD": waits for FAKE_RELEASE (as a slow worker does),
-// so a test can change usage during a chat turn. "FAKE-HISTORY": the reply lists every message the agent took in so
+// so a test can change usage during a chat turn. "FAKE-EXIT-HELD" (Codex's fake only): replies "exit reply", then
+// exits with its stdout held open (exitHeld below). "FAKE-HISTORY": the reply lists every message the agent took in so
 // far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer).
 // As a review helper (its packet: "[Nexus] Review step S of queue Q, round R"), the step's goal steers it with
 // "FAKE-HELPER: <verdict>": accept (nexus review accept), sendback (nexus review send-back, every round), sendback1
@@ -149,6 +152,16 @@ export interface Fake {
   answerWork?: boolean;
   /** Every message the agent took in, in order (FAKE-HISTORY shows them). */
   history?: string[];
+  /**
+   * After this turn the process exits with its stdout held open (FAKE: noopexit1, FAKE-EXIT-HELD; Codex's fake only):
+   * a descendant inherits stdout and outlives the process by FAKE_CODEX_HOLD_STDOUT_MS (default 3000), as a command the
+   * runtime started may hold the pipe on Windows. Node then emits the exit before stdout ends: the adapter's drain
+   * window (codex.ts, EXIT_DRAIN_MS). With FAKE_CODEX_EXIT_GATE set, the turn's last line (turn/completed) is written
+   * by that descendant, after the exit, once the file it names exists; the hold counts from then. So a test reads the
+   * turn's end inside the window whatever the machine's load: the order Node gives when the exit event comes before
+   * the drained line (queue CXD).
+   */
+  exitHeld?: boolean;
 }
 
 /**
@@ -426,6 +439,10 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       }
       else nexus("step", "done", step, "--summary", `fake finished ${step} after its question`);
     }
+    if (behaviour === "noopexit1") {
+      if (first("noopexit1")) fake.exitHeld = true;
+      else nexus("step", "done", step, "--summary", `fake finished ${step} after its process exited`);
+    }
     if (behaviour === "partial") {
       if (first("partial")) {
         nexus("step", "progress", step, "half way", "--pct", "50");
@@ -521,6 +538,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     tool("sleep (FAKE-SLOW)");
     return (await interruptible(Number(process.env.FAKE_CHAT_SLOW_MS ?? 4000))) ? { interrupted: true } : "slow reply";
   }
+  if (text.includes("FAKE-EXIT-HELD")) { fake.exitHeld = true; return "exit reply"; }
   if (text.includes("FAKE-HISTORY")) return `history: ${(fake.history ?? []).join(" | ")}`;
   const draft = /FAKE-DRAFT:\s*\n([\s\S]*)$/.exec(text);
   if (draft) return nexusOut(["queue", "draft", "-"], draft[1]);

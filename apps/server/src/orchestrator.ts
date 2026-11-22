@@ -8,7 +8,7 @@ import { join } from "node:path";
 import {
   ActionError, DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, Effort, acceptedByNexus, contextLimit, acceptedOn, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView,
 } from "@nexus/protocol";
-import type { AgentProcess } from "./agent.ts";
+import { reachable, type AgentProcess } from "./agent.ts";
 import type { CodexPermissions } from "./codex.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import type { Engine } from "./engine.ts";
@@ -462,7 +462,9 @@ ${n.text}` });
     // into that turn), resuming the conversation; an idle one ends now (retireStale).
     if (this.proc?.state === "working" && this.host.stale(s.id, this.launcher(s))) this.host.restartAfterTurn(s.id);
     else this.retireStale(s);
-    if (!this.proc || this.proc.state === "exited") this.spawn(s);
+    // Exited, its last output still being read (AgentProcess.exiting): nothing reaches it, so a fresh process resumes
+    // the conversation now, as after its exit (queue CXD).
+    if (!this.proc || !reachable(this.proc)) this.spawn(s);
     return s;
   }
 
