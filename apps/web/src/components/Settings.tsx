@@ -17,6 +17,7 @@ import { DangerZone } from "./DangerZone.tsx";
 import { PlannedDeployCard, type PlannedDeploy } from "./DeployPlan.tsx";
 import { FIX_LIMIT, SEND_BACKS, STOPS, conditionList, savedConditions, settingsProblem, type SettingsProblem } from "../settingsCheck.ts";
 import { usePage } from "../page.ts";
+import { RUNTIME_OPTIONS } from "../runtimes.ts";
 import { NotifySettingsRows } from "./NotifySettings.tsx";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -195,7 +196,7 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
       <Section title={t("settings.general")}>
         {p && <Row label={t("settings.name")}><input value={p.values.name} onChange={(e) => p.set("name", e.target.value)} className={field} /></Row>}
         <Setting form={f} keys={["runtimes.default"]} label={t("settings.defaultRuntime")} hint={t("settings.defaultRuntimeHint")}>
-          {(d) => <Select value={f.get("runtimes.default")} onChange={(v) => f.set("runtimes.default", v)} disabled={d} options={[["claude", "Claude Code"], ["codex", "Codex"]]} />}
+          {(d) => <Select value={f.get("runtimes.default")} onChange={(v) => f.set("runtimes.default", v)} disabled={d} options={RUNTIME_OPTIONS} />}
         </Setting>
       </Section>
 
@@ -265,7 +266,7 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
         {/* Its runtime (queue OC): another one starts a fresh orchestrator session; the model and effort go by it. */}
         <Setting form={f} keys={["orchestrator.runtime"]} label={t("settings.runtime")}
           hint={orchRuntime === "codex" ? <span className="text-warn">{t("settings.orchestratorCodexHint")}</span> : t("settings.orchestratorClaudeHint")}>
-          {(d) => <Select value={orchRuntime} disabled={d} onChange={(v) => { f.set("orchestrator.runtime", v); f.set("orchestrator.model", ""); f.set("orchestrator.effort", ""); }} options={[["claude", "Claude Code"], ["codex", "Codex"]]} />}
+          {(d) => <Select value={orchRuntime} disabled={d} onChange={(v) => { f.set("orchestrator.runtime", v); f.set("orchestrator.model", ""); f.set("orchestrator.effort", ""); }} options={RUNTIME_OPTIONS} />}
         </Setting>
         <Setting form={f} keys={["orchestrator.model"]} label={t("settings.model")} hint={t("settings.orchestratorModelHint")}>
           {(d) => <ModelSelect runtime={orchRuntime} value={f.get("orchestrator.model")} onChange={(v) => f.set("orchestrator.model", v)} disabled={d} defaultLabel={t("settings.runtimeDefault")} className="w-full" />}
@@ -291,7 +292,7 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
           </Row>
         )}
         <Setting form={f} keys={["conversations.runtime"]} label={t("settings.runtime")}>
-          {(d) => <Select value={ideasRuntime} disabled={d} onChange={(v) => { f.set("conversations.runtime", v); f.set("conversations.model", ""); f.set("conversations.effort", ""); }} options={[["claude", "Claude Code"], ["codex", "Codex"]]} />}
+          {(d) => <Select value={ideasRuntime} disabled={d} onChange={(v) => { f.set("conversations.runtime", v); f.set("conversations.model", ""); f.set("conversations.effort", ""); }} options={RUNTIME_OPTIONS} />}
         </Setting>
         <Setting form={f} keys={["conversations.model"]} label={t("settings.model")}>
           {(d) => <ModelSelect runtime={ideasRuntime} value={f.get("conversations.model")} onChange={(v) => f.set("conversations.model", v)} disabled={d} defaultLabel={t("settings.runtimeDefault")} className="w-full" />}
@@ -393,7 +394,7 @@ function ReviewHelperRows({ form: f }: { form: Form }) {
       <Setting form={f} keys={["runtime", "model", "effort"].map(key)} label={t("settings.reviewHelperRunsOn")} hint={t("settings.reviewHelperRunsOnHint")}>
         {(d) => (
           <span className="flex flex-wrap items-center gap-1.5">
-            <Select value={runtime} disabled={d} onChange={(v) => { f.set(key("runtime"), v); f.set(key("model"), ""); f.set(key("effort"), ""); }} options={[["claude", "Claude Code"], ["codex", "Codex"]]} />
+            <Select value={runtime} disabled={d} onChange={(v) => { f.set(key("runtime"), v); f.set(key("model"), ""); f.set(key("effort"), ""); }} options={RUNTIME_OPTIONS} />
             <ModelSelect runtime={runtime} value={model} onChange={(v) => f.set(key("model"), v)} disabled={d} defaultLabel={t("settings.kindModelDefault")} />
             <EffortSelect runtime={runtime} model={model} value={f.get(key("effort"))} onChange={(v) => f.set(key("effort"), v)} disabled={d} defaultLabel={t("settings.kindEffortDefault")} />
           </span>
@@ -419,7 +420,7 @@ function KindRow({ form: f, kind }: { form: Form; kind: string }) {
       {(d) => (
         <span className="block space-y-1.5" id={`kind-${kind}`}>
           <span className="flex flex-wrap items-center gap-1.5">
-            <Select value={runtime} disabled={d} onChange={(v) => { f.set(key("runtime"), v); f.set(key("model"), ""); f.set(key("effort"), ""); }} options={[["claude", "Claude Code"], ["codex", "Codex"]]} />
+            <Select value={runtime} disabled={d} onChange={(v) => { f.set(key("runtime"), v); f.set(key("model"), ""); f.set(key("effort"), ""); }} options={RUNTIME_OPTIONS} />
             <ModelSelect runtime={runtime} value={model} onChange={(v) => f.set(key("model"), v)} disabled={d} defaultLabel={t("settings.kindModelDefault")} />
             <EffortSelect runtime={runtime} model={model} value={f.get(key("effort"))} onChange={(v) => f.set(key("effort"), v)} disabled={d} defaultLabel={t("settings.kindEffortDefault")} />
           </span>
@@ -504,7 +505,7 @@ function OrchestratorFallback({ form: f }: { form: Form }) {
   </>}>
     {(d) => <span className="grid gap-2">
       <Select value={value?.runtime ?? ""} disabled={d} empty={t("settings.fallbackNone")}
-        options={[["claude", "Claude Code"], ["codex", "Codex"]]}
+        options={RUNTIME_OPTIONS}
         onChange={(runtime) => set(runtime ? { runtime: runtime as "claude" | "codex" } : null)} />
       {value && <>
         <label className="grid gap-1 text-xs text-fg-3">{t("settings.model")}

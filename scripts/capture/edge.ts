@@ -102,6 +102,9 @@ export class EdgeBrowser implements Browser {
     this.framed = width < NARROWEST;
     this.frame = { width, height };
     await this.cdp("Emulation.setDeviceMetricsOverride", { width: Math.max(width, NARROWEST), height, deviceScaleFactor: 1, mobile: false });
+    // The page as if its window had focus: a headless browser's first page otherwise gets no focus events (a chart
+    // mark's tooltip, shown on focus, stayed hidden in the first view only).
+    await this.cdp("Emulation.setFocusEmulationEnabled", { enabled: true });
     const target = this.framed ? `http://127.0.0.1:${this.parentPort}/?w=${width}&h=${height}&src=${encodeURIComponent(url)}` : url;
     // A new document each time, also when only the hash differs from the last view's.
     await this.cdp("Page.navigate", { url: "about:blank" });
@@ -118,8 +121,9 @@ export class EdgeBrowser implements Browser {
     const find = typeof target === "string"
       ? `[...document.querySelectorAll("button, a, [role=button], [role=tab], summary")].find((b) => b.innerText.trim() === ${JSON.stringify(target)}) ?? [...document.querySelectorAll("button, a, [role=button], [role=tab], summary")].find((b) => b.innerText.trim().startsWith(${JSON.stringify(target)}))`
       : `document.querySelector(${JSON.stringify(target.selector)})`;
-    // An SVG shape (a line of the plan) has no click(): it gets the event.
-    return this.js<boolean>(`(() => { const el = ${find}; if (!el) return false; el.scrollIntoView({ block: "nearest" }); if (typeof el.click === "function") el.click(); else el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })); return true; })()`);
+    // An SVG shape (a line of the plan) has no click(): it gets the event. Focused first, as a real click focuses what
+    // can take focus (a chart mark shows its tooltip on focus).
+    return this.js<boolean>(`(() => { const el = ${find}; if (!el) return false; el.scrollIntoView({ block: "nearest" }); if (el.tabIndex >= 0 && typeof el.focus === "function") el.focus(); if (typeof el.click === "function") el.click(); else el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window })); return true; })()`);
   }
 
   type(text: string, into?: string): Promise<boolean> {

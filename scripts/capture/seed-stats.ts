@@ -3,9 +3,9 @@
 // back once, failed, stopped), tags on every step, and a worker turn per round in turns.jsonl with its model, effort,
 // runtime, tokens and the usage windows before and after it (Claude Code's 5-hour and 7-day windows, Codex's weekly
 // one), so the estimates and the windows day by day have something to show. The models: opus, sonnet, fable and
-// haiku (a few-data group) on Claude Code, gpt-6 on Codex, some of its turns a Claude step's fallback. Seeded random,
-// so two runs of a day give the same picture. Run by scripts/capture.ts as `node <this> <data dir>` with NEXUS_HOME
-// set to the development instance's; it writes only there.
+// haiku (a few-data group, its turns without an effort: the runtime's default) on Claude Code, gpt-6 on Codex, some of
+// its turns a Claude step's fallback. Seeded random, so two runs of a day give the same picture. Run by
+// scripts/capture.ts as `node <this> <data dir>` with NEXUS_HOME set to the development instance's; it writes only there.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectStore, appendTurn, approveQueue, newId, writeRegistry, type Event, type StepDef, type TurnRecord } from "@nexus/protocol";
@@ -99,7 +99,7 @@ for (let back = 29; back >= 0; back--) {
       else win.codex.u = Math.min(1, win.codex.u + grow * 2);
       appendTurn({
         v: 1, at: iso(end), started_at: iso(t), duration_ms: Math.round(minutes * 60_000), project: p.id, session, role: "worker",
-        runtime: m.runtime, model: s.model, effort: s.effort, queue: qid, step: s.id, outcome: "ok",
+        runtime: m.runtime, model: s.model, ...(s.model === "haiku" ? {} : { effort: s.effort }), queue: qid, step: s.id, outcome: "ok",
         tokens: { input: Math.round(minutes * 4000), output: Math.round(minutes * 900), cache_read: Math.round(minutes * 30_000), cache_creation: 0 },
         ...(fallback ? { fallback: { from: "claude" as const, reason: "the 5-hour window is full" } } : {}),
         windows_start: before, windows_end: snapshot(m.runtime),

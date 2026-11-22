@@ -1,9 +1,9 @@
 // A seed for the capture tool: a test project "demo" (a git repository) with a finished worktree queue W whose merge
 // back waits: the main checkout has uncommitted changes (the instance's own Merger finds that and says why, in the
 // Waiting tab's "Merging back" item). W's steps, among them the long ids W.refactor and W.integrate, finished late
-// yesterday, so the morning digest lists them with a date before the time. Run by scripts/capture.ts as
-// `node <this> <data dir>` with NEXUS_HOME set to the development instance's; it writes only under the data directory
-// and that NEXUS_HOME. (scripts/capture/seed-merge.ts is the same project with a queue merged back as well.)
+// yesterday, so the morning digest lists them with a date before the time, beside a long project name. Run by
+// scripts/capture.ts as `node <this> <data dir>` with NEXUS_HOME set to the development instance's; it writes only
+// under the data directory and that NEXUS_HOME. (scripts/capture/seed-merge.ts is the same project with a queue merged back as well.)
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -26,7 +26,7 @@ git("checkout", "-q", "-b", "nexus/W"); writeFileSync(join(root, "stats.ts"), `e
 git("checkout", "-q", "main");
 const tip = git("rev-parse", "nexus/W");
 
-const st = ProjectStore.init(root, { id: "demo", name: "Demo app", root, orchestrator: { session: null } });
+const st = ProjectStore.init(root, { id: "demo", name: "Demo app, statistics backend", root, orchestrator: { session: null } });
 writeRegistry({ protocol: 1, projects: [{ id: "demo", root }] });
 st.markReviewLevels(yesterday(24 * 60));
 updateSettings(st, { defaults: { merge_back: true } });

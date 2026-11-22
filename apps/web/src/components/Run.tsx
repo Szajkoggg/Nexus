@@ -11,6 +11,7 @@ import { formatClock, formatDateTime, formatDuration, formatTime, formatNumber, 
 import { EffortSelect, ModelSelect } from "./Settings.tsx";
 import { openPlan } from "../queueStatus.ts";
 import { usePage } from "../page.ts";
+import { RUNTIME_OPTIONS, runtimeName } from "../runtimes.ts";
 
 // The run's state as a dot and a word: [dot, text].
 const RUN_TONE: Record<string, [string, string]> = {
@@ -41,7 +42,6 @@ export function RetryNote({ run, className = "mt-1 text-xs" }: { run: NonNullabl
   return <p className={`${className} text-warn`}>↻ {line[0]!.toUpperCase() + line.slice(1)}</p>;
 }
 
-const RUNTIME_NAME: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
 
 const SEEDED: Record<string, Key> = {
   written: "run.seeded.written",
@@ -64,7 +64,7 @@ function SessionSwitches({ run, sessions }: { run: NonNullable<QueueView["run"]>
             {rich("run.switch", {
               step: <span key="step" className="font-mono">{s.step}</span>, time: formatClock(s.at, new Date()),
               why: s.why === "runtime"
-                ? t("run.switch.runtime", { runtime: RUNTIME_NAME[sessions.find((x) => x.id === s.to)?.runtime ?? ""] ?? t("run.switch.anotherRuntime") })
+                ? t("run.switch.runtime", { runtime: runtimeName(sessions.find((x) => x.id === s.to)?.runtime ?? "") || t("run.switch.anotherRuntime") })
                 : s.why === "idle" ? t("run.switch.idle", { duration: formatDuration((s.idle_minutes ?? 60) * 60_000) })
                 : s.fill === undefined ? t("run.switch.full")
                   : s.tokens !== undefined ? t("run.switch.tokens", { tokens: tokenCount(s.tokens), pct: Math.round(s.fill * 100) })
@@ -99,7 +99,7 @@ function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boole
   if (!p) return null;
   // The queues it waits for in the plan (the plan view shows them in full).
   const ids = openPlan(queue)?.after.map((e) => e.queue) ?? [];
-  const options = [p.session ? t("run.plan.continues", { session: p.session.slice(-8) }) : p.runtime === "codex" ? "Codex" : p.runtime === "claude" ? "Claude Code" : undefined, p.model, p.effort && t("run.effort", { effort: p.effort })].filter(Boolean);
+  const options = [p.session ? t("run.plan.continues", { session: p.session.slice(-8) }) : p.runtime ? runtimeName(p.runtime) : undefined, p.model, p.effort && t("run.effort", { effort: p.effort })].filter(Boolean);
   const after = ids.length > 0 && <span key="queue" className="font-mono">{ids.join(", ")}</span>;
   const tone = p.failed ? "border-stop/30 bg-stop/10" : p.blocked ? "border-warn/30 bg-warn/10" : "border-info/30 bg-info/10";
   return (
@@ -113,7 +113,7 @@ function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boole
             : (p.failed
               ? <span className="text-stop">{t("run.plan.atFailed", { time: formatClock(p.at!, new Date()), reason: p.failed.reason })}</span>
               : <span className="text-fg">{rich(p.usage ? "run.plan.atUsage" : "run.plan.at", {
-                time: <span key="time" className="font-medium">{formatClock(p.at!, new Date())}</span>, runtime: p.usage === "codex" ? "Codex" : "Claude Code",
+                time: <span key="time" className="font-medium">{formatClock(p.at!, new Date())}</span>, runtime: runtimeName(p.usage === "codex" ? "codex" : "claude"),
               })}</span>)}
           <span className="mt-1 block text-xs text-fg-2">
             {p.failed ? <>{t("run.plan.startYourself")} · <TimeAgo at={p.failed.at} /></>
@@ -221,8 +221,7 @@ export function RunControls({ project, queue }: { project: ProjectState; queue: 
           <label className="text-xs text-fg-2">
             <span className="mb-1 block">{t("run.field.runtime")}</span>
             <select value={runtime} onChange={(e) => { setRuntime(e.target.value as "claude" | "codex"); setModel(""); setEffort(""); }} disabled={!!session} className="rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg disabled:opacity-50">
-              <option value="claude">Claude Code</option>
-              <option value="codex">Codex</option>
+              {RUNTIME_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </label>
           <label className="max-w-full text-xs text-fg-2">

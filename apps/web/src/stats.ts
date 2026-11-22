@@ -4,6 +4,7 @@
 // GET /api/usage/days (packages/protocol/src/stats.ts).
 import { byRuntime, dayKey, type StatFilter, type StatGroup, type StatsReport, type UsageDays } from "@nexus/protocol/stats";
 import { windowKind } from "@nexus/protocol/digest";
+import { t } from "./i18n.ts";
 
 export const RANGES = ["7d", "30d", "90d", "all"] as const;
 export type Range = (typeof RANGES)[number];
@@ -57,7 +58,7 @@ export function weeklyUse(g: Pick<StatGroup, "usage" | "usage_steps">): WeeklyUs
 /** One row of the comparison: a model's or an effort's figures, times in minutes, rates in per cent. */
 export interface CompareRow {
   key: string;
-  /** The name shown: a Claude model without its "claude-" prefix; "untagged" and "default" as they are (the view words them). */
+  /** The name shown (groupLabel): every place the row is named, its tooltips too, uses it. */
   label: string;
   steps: number;
   few: boolean;
@@ -74,11 +75,18 @@ export interface CompareRow {
   continued: number;
 }
 
+/**
+ * A group's shown name: a Claude model without its "claude-" prefix; the groups without a model or an effort in the
+ * catalogue's words ("untagged", "default"), not the report's keys.
+ */
+export const groupLabel = (key: string): string =>
+  key === "untagged" ? t("stats.untagged") : key === "default" ? t("stats.defaultEffort") : key.replace(/^claude-/, "");
+
 const minutes = (ms: number | undefined) => (ms === undefined ? undefined : ms / 60_000);
 
 function compareRow(g: StatGroup): CompareRow {
   return {
-    key: g.key, label: g.key.replace(/^claude-/, ""), steps: g.steps, few: g.few, runtimes: g.runtimes,
+    key: g.key, label: groupLabel(g.key), steps: g.steps, few: g.few, runtimes: g.runtimes,
     first: g.first_accepted, decided: g.decided,
     rate: g.first_rate === undefined ? undefined : g.first_rate * 100,
     rounds: g.avg_rounds,

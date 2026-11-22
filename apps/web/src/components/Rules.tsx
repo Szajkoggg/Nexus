@@ -7,10 +7,10 @@ import { actResult, projectUrl, useQuery, type ProjectState } from "../api.ts";
 import { usePage } from "../page.ts";
 import { Button } from "./ui.tsx";
 import { rich, t, type Key } from "../i18n.ts";
+import { runtimeName } from "../runtimes.ts";
 
 interface ProjectRules extends RulesCheck { version: string; root: string }
 
-const RUNTIME = { claude: "Claude Code", codex: "Codex" } as const;
 const WHY: Record<"only-agents" | "only-claude" | "unlinked", Key> = {
   "only-agents": "rules.why.onlyAgents",
   "only-claude": "rules.why.onlyClaude",
@@ -48,7 +48,7 @@ export function RulesWarning({ project }: { project: ProjectState }) {
   };
   return (
     <section className="mb-4 rounded-lg border border-warn/30 bg-warn/5 px-4 py-3 text-sm" aria-label={t("rules.label")}>
-      <div className="font-medium text-warn">{t("rules.unseen", { runtime: RUNTIME[rules.unseen_by] })}</div>
+      <div className="font-medium text-warn">{t("rules.unseen", { runtime: runtimeName(rules.unseen_by) })}</div>
       <p className="mt-1 text-xs text-fg-2">{rich(WHY[state], { agents: code("AGENTS.md"), claude: code("CLAUDE.md") })}</p>
       <p className="mt-1 text-xs text-fg-3">{rich("rules.convention", { link: code("@AGENTS.md") })}</p>
       {!open && (

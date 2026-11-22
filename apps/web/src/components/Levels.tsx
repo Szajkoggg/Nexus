@@ -6,6 +6,7 @@ import { act, actResult, enc, projectUrl, request, useAction, type AttentionItem
 import { Button, TEXTAREA } from "./ui.tsx";
 import { formatClock, t } from "../i18n.ts";
 import { usePage } from "../page.ts";
+import { runtimeName } from "../runtimes.ts";
 
 type Level = 1 | 2 | 3;
 const LEVELS: Level[] = [1, 2, 3];
@@ -94,7 +95,7 @@ export function acceptedWord(s: Pick<StepView, "status" | "accepted" | "helper">
   if (s.status === "review" && s.helper?.state === "running") return { parts: [t("accepted.helperReviews")] };
   const a = s.accepted;
   if (s.status !== "done" || !a) return undefined;
-  const on = [a.runtime === "codex" ? "Codex" : a.runtime === "claude" ? "Claude Code" : undefined, a.model, a.effort].filter((x): x is string => !!x);
+  const on = [a.runtime && runtimeName(a.runtime), a.model, a.effort].filter((x): x is string => !!x);
   const text = t(`accepted.by.${a.by}`);
   return { parts: a.by === "helper" || (a.by === "orchestrator" && a.model) ? [text, ...on] : [text], title: t("accepted.title", { at: new Date(a.at).toLocaleString() }) };
 }

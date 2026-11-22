@@ -27,6 +27,7 @@ import { fileHref } from "../hash.ts";
 import { clearChatTarget, useChatTarget } from "../chatTarget.ts";
 import { SearchField } from "./Search.tsx";
 import { IdeasMatching, IdeasOverview, IdeasSwitch, type IdeasPanelView } from "./Ideas.tsx";
+import { RUNTIME_OPTIONS } from "../runtimes.ts";
 
 // ---------------------------------------------------------------- the endpoints this file reads and writes
 
@@ -889,7 +890,7 @@ function NewConversation({ project, defaultRuntime, onBack, onCreated }: {
         <div className="flex flex-wrap gap-3">
           <label className="text-sm text-fg">{t("run.field.runtime")}
             <select value={runtime} onChange={(e) => { setRuntime(e.target.value as "claude" | "codex"); setModel(""); setEffort(""); }} className={`mt-1 ${field}`}>
-              <option value="claude">Claude Code</option><option value="codex">Codex</option>
+              {RUNTIME_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </label>
           <label className="text-sm text-fg">{t("run.field.model")}

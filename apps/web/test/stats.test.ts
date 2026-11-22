@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { StatGroup, StatsReport } from "@nexus/protocol/stats";
-import { compareRows, compareScales, dayOf, daysUrl, estimate, headline, niceMax, rangeSince, rangeSinceIso, statsUrl, weeklyUse, windowPanels } from "../src/stats.ts";
+import { compareRows, compareScales, dayOf, daysUrl, estimate, groupLabel, headline, niceMax, rangeSince, rangeSinceIso, statsUrl, weeklyUse, windowPanels } from "../src/stats.ts";
 
 const today = new Date(2026, 10, 15, 14, 30);
 
@@ -36,6 +36,14 @@ test("grouping: one row per group in the report's order, a Claude model without 
   assert.deepEqual(rows.map((r) => [r.key, r.label, r.steps, r.few, r.runtimes]), [["claude-opus-5-5", "opus-5-5", 12, false, ["claude"]], ["gpt-6", "gpt-6", 4, true, ["codex"]]]);
   assert.deepEqual([rows[0]!.rate, rows[0]!.rounds, rows[0]!.median, rows[0]!.p25, rows[0]!.p75], [75, 1.25, 30, 20, 45]);
   assert.deepEqual([rows[1]!.rate, rows[1]!.median], [undefined, undefined], "nothing decided, nothing accepted: no figure, not zero");
+});
+
+test("the groups without a model or an effort are named in the catalogue's words, in the rows and so in every tooltip", () => {
+  const rows = compareRows(report([group("untagged"), group("default")]));
+  assert.deepEqual(rows.map((r) => r.label), [groupLabel("untagged"), groupLabel("default")]);
+  assert.equal(groupLabel("untagged"), "untagged", "the catalogue's English word");
+  assert.equal(groupLabel("default"), "runtime default");
+  assert.equal(groupLabel("claude-haiku-5-5"), "haiku-5-5");
 });
 
 test("use per step: the weekly windows only, over the steps with an estimate, Claude Code's first; marked as an estimate", () => {

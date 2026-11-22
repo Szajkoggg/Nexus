@@ -8,6 +8,7 @@ import { act, enc, projectUrl, useLiveRead, type ProjectState } from "../api.ts"
 import { refusalsApplier } from "../liveViews.ts";
 import { Button, ReadError, Section, TimeAgo } from "./ui.tsx";
 import { rich, t, type Key } from "../i18n.ts";
+import { runtimeName } from "../runtimes.ts";
 
 const BY: Record<Refusal["by"], Key> = {
   permissions: "refusals.by.permissions",
@@ -68,7 +69,7 @@ export function ProjectRefusals({ project }: { project: ProjectState }) {
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
               <span className="font-medium text-fg">{g.label}</span>
               <span className="rounded-full bg-surface-3 px-1.5 text-xs text-fg" title={t("refusals.howMany")}>{g.count}×</span>
-              <span className="text-xs text-fg-3">{g.runtime === "claude" ? "Claude Code" : "Codex"}</span>
+              <span className="text-xs text-fg-3">{runtimeName(g.runtime)}</span>
               <span className="ml-auto text-xs text-fg-3">{rich("refusals.latest", { time: <TimeAgo key="time" at={g.latest.at} /> })}</span>
             </div>
             <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-fg-3">

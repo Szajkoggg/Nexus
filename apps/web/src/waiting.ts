@@ -46,3 +46,15 @@ export function moveOn<T extends Pick<WaitingItem, "project" | "queue" | "step" 
   const p = waitingPosition(items, at);
   return p.at === 0 ? p.next : undefined;
 }
+
+/**
+ * A "Merging back" item's text as its card shows it (queue UF): the card's first line names the queue already, so a
+ * leading "queue W: " goes, and a checkout's path in parentheses ("(C:/Code/demo)") moves out of the text into
+ * `path` (the card's tooltip): what keeps the merge back and what to do stay in the card's two lines.
+ */
+export function mergeWaitText(text: string, queue: string | undefined): { text: string; path?: string } {
+  const lead = queue ? `queue ${queue}: ` : undefined;
+  const rest = lead && text.startsWith(lead) ? text.slice(lead.length) : text;
+  const m = /\s\(((?:[A-Za-z]:)?[\\/][^()]*)\)/.exec(rest);
+  return m ? { text: rest.slice(0, m.index) + rest.slice(m.index + m[0].length), path: m[1] } : { text: rest };
+}

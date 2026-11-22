@@ -387,7 +387,9 @@ offered, `mergeBackInto` in `apps/web/src/details.ts`. One recommendation each:
   card; a refusal shows the server's words there (in red, as the stop's panel does), and a merge clears the item with
   the next state. The same row in the waiting list across projects (the phone's Waiting tab, the right rail) and in
   the project's waiting panel. One hook, as the stop has `useStopActions`, gives the button and its question to all
-  three places, so they cannot word it differently.
+  three places, so they cannot word it differently. Its text (UF3) is the server's reason without what the card's
+  first line says already: no leading "queue W: ", and the checkout's path in parentheses moves into the text's
+  tooltip (`mergeWaitText` in `apps/web/src/waiting.ts`), so the card's two lines hold why it waits and what to do.
 - **When the button cannot help** (the checkout of main has uncommitted changes, a step is at work there): the button
   stays, and the server refuses with the same reason. Not disabled: the merge back is looked at again only every 30
   seconds, so a disabled button would stay disabled for up to half a minute after the user committed.
