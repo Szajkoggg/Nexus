@@ -145,19 +145,29 @@ export function pullBase(store: ProjectStore, state: Pick<ProjectState, "project
     store.writeGit(q.id, { ...g, pulls: [...pulls, pull] });
     return pull;
   }
-  const changed = g.setup?.done_at ? setupInputsChanged(cwd, state.project.defaults.worktree_setup_inputs, m.from, m.to) : [];
-  const pull: BasePull = { at: now(), before, base: ctx.base, sha: m.sha, from: m.from, to: m.to, ...(changed.length ? { setup: true } : {}) };
-  const setup = changed.length && g.setup ? { ...g.setup, done_at: undefined, failed: undefined, reason: `${fileList(changed, 3)} changed (the merge of ${ctx.base})` } : g.setup;
-  store.writeGit(q.id, { ...g, pulls: [...pulls, pull], ...(setup ? { setup } : {}) });
+  return recordMerged(store, q.id, g, cwd, state.project.defaults.worktree_setup_inputs, { before, base: ctx.base, sha: m.sha, from: m.from, to: m.to });
+}
+
+/**
+ * Records a clean merge of the base at a step boundary in git.yaml (written over `g`, which has no `pulling`): the pull,
+ * and the setup marked to run again when the merge changed its inputs.
+ */
+function recordMerged(store: ProjectStore, queue: string, g: GitFile, cwd: string, inputs: readonly string[] | undefined, m: { before: string; base: string; sha: string; from: string; to: string }): BasePull {
+  const changed = g.setup?.done_at ? setupInputsChanged(cwd, inputs, m.from, m.to) : [];
+  const pull: BasePull = { at: now(), before: m.before, base: m.base, sha: m.sha, from: m.from, to: m.to, ...(changed.length ? { setup: true } : {}) };
+  const setup = changed.length && g.setup ? { ...g.setup, done_at: undefined, failed: undefined, reason: `${fileList(changed, 3)} changed (the merge of ${m.base})` } : g.setup;
+  store.writeGit(queue, { ...g, pulls: [...(g.pulls ?? []), pull], ...(setup ? { setup } : {}) });
   return pull;
 }
 
 /**
  * Before a step opens at a boundary (queue LF, F4), in a queue whose base is merged there: a merge of the base a server
  * left half done (`pulling` still recorded, MERGE_HEAD its commit, HEAD where it began) is aborted, as the integration
- * step's is when it runs again; the record goes. `git merge --abort` keeps what was not part of the merge (the user's
- * untracked files, and the merge began on a checkout without changes to tracked files). Returns why the step must not
- * open: a merge under way that Nexus did not start (left as it is), or one it could not abort.
+ * step's is when it runs again; the record goes, unless the abort failed (it is kept, so the merge stays Nexus's). A
+ * merge the server committed before it could record it (HEAD the merge of `sha` into `from`) is recorded as the pull it
+ * was. `git merge --abort` keeps what was not part of the merge (the user's untracked files, and the merge began on a
+ * checkout without changes to tracked files). Returns why the step must not open: a merge under way that Nexus did not
+ * start (left as it is), or one it could not abort.
  */
 export function recoverPull(store: ProjectStore, q: Pick<QueueView, "id" | "worktree" | "integration">): string | undefined {
   const cwd = ownWorktree(q);
@@ -167,8 +177,18 @@ export function recoverPull(store: ProjectStore, q: Pick<QueueView, "id" | "work
   const merging = () => revParse(cwd, "MERGE_HEAD", { verify: true });
   const ours = !!p && merging() === p.sha && revParse(cwd, "HEAD") === p.from;
   if (ours) git(cwd, ["merge", "--abort"]);
-  if (p) store.writeGit(q.id, { ...g!, pulling: undefined });
   const left = merging();
+  if (p && !(ours && left)) {
+    // The merge committed before the server ended, its record not written (queue LH): HEAD is the merge of the intent's
+    // base commit into where it began. The pull is recorded now, as pullBase would have, setup included; else the
+    // next pull finds the base contained and nothing says the step opens on a merge (or on stale dependencies).
+    const head = left ? undefined : git(cwd, ["rev-list", "--parents", "-n", "1", "HEAD"])?.split(" ");
+    const merged = head?.length === 3 && head[1] === p.from && head[2] === p.sha;
+    if (merged) recordMerged(store, q.id, { ...g!, pulling: undefined }, cwd, store.readProject().defaults.worktree_setup_inputs, { before: p.before, base: p.base, sha: p.sha, from: p.from, to: head[0]! });
+    else store.writeGit(q.id, { ...g!, pulling: undefined });
+  }
+  // A merge of Nexus's whose abort failed keeps its intent (queue LH): after Resume it is still named as Nexus's own,
+  // and aborted then, not taken for one "Nexus did not start".
   if (!left) return undefined;
   return ours
     ? `the merge of ${p!.base} (${p!.sha.slice(0, 12)}) a server left half done in ${cwd} could not be aborted: abort it (git merge --abort), then Resume`

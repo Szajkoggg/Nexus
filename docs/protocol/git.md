@@ -140,7 +140,11 @@ a server ended in the middle of that merge: when MERGE_HEAD is its `sha` and HEA
 (`git merge --abort`, as the integration step's half-done merge is; it keeps untracked files, and the merge began
 without changes to tracked files), the record goes, and the base is pulled again. A merge under way in the worktree
 that Nexus did not start (no such record) is left as it is, and the run halts ("a merge is under way in <path> that
-Nexus did not start …") rather than open the next step on it; so does a merge of its own that would not abort.
+Nexus did not start …") rather than open the next step on it; so does a merge of its own that would not abort, whose
+`pulling` is kept, so after Resume it is still named as Nexus's own and aborted then (queue LH). A server that ended
+after the merge's commit but before git.yaml was written leaves `pulling` with HEAD the merge of `sha` into `from` (its
+parents): the pull is recorded then as it would have been, `to` that HEAD, and the setup marked to run again when the
+merge changed its inputs.
 
 With the pulls:
 
