@@ -1620,6 +1620,49 @@ export const TurnRecord = z.object({
 });
 export type TurnRecord = z.infer<typeof TurnRecord>;
 
+// ---------------------------------------------------------------- benchmarks/server-speed.jsonl (queue SB)
+
+const Ms = z.number().nonnegative();
+/** One configuration of a benchmark run: a synthetic tree at a scale, with or without a test suite running beside it. */
+export const ServerSpeedConfig = z.object({
+  /** The synthetic .nexus's scale (packages/protocol/test/synthetic.ts): 1 is Nexus's own size of 2026-11-20. */
+  scale: z.number().positive(),
+  /** Whether test files ran beside the server while it was measured (the machine as busy as under `npm test`). */
+  tests: z.boolean(),
+  /** From the server's start until it answered. */
+  startup_ms: Ms,
+  /** The dashboard's typical reads, each asked `count` times one after another. */
+  requests: z.array(z.object({ what: z.string(), count: z.number().int().nonnegative(), errors: z.number().int().nonnegative(), p50_ms: Ms, p95_ms: Ms, max_ms: Ms })),
+  /** The 95th percentile over all of `requests` together: the headline of the reads. */
+  reads_p95_ms: Ms,
+  /** A line appended to a session's log until the dashboards are told (the watch, the rebuild, the broadcast). */
+  change: z.object({ count: z.number().int().nonnegative(), p50_ms: Ms, p95_ms: Ms, max_ms: Ms }),
+  /** The event loop's delay since the server's start (GET /api/server/perf `loop`). */
+  loop: z.object({ p50_ms: Ms, p99_ms: Ms, max_ms: Ms }),
+  /** The loop's blocks over 200 ms while the measurement ran (not the start), and the longest. */
+  blocks: z.number().int().nonnegative(),
+  block_max_ms: Ms,
+  /** The server's measured operations (its spans) by total time, the most first: what took the time. */
+  spans: z.array(z.object({ what: z.string(), count: z.number().int().nonnegative(), mean_ms: Ms, max_ms: Ms })).optional(),
+});
+export type ServerSpeedConfig = z.infer<typeof ServerSpeedConfig>;
+/**
+ * <NEXUS_HOME>/benchmarks/server-speed.jsonl: one line per run of scripts/server-speed.ts (its one writer), read by the
+ * global Stats view as a trend.
+ */
+export const ServerSpeedRun = z.object({
+  v: z.literal(1),
+  /** When the run ended. */
+  at: Time,
+  /** The checkout's HEAD the server ran from (short), and whether it had changes not committed. */
+  commit: z.string().optional(),
+  dirty: z.boolean().optional(),
+  label: z.string().optional(),
+  machine: z.object({ cores: z.number().int().positive(), node: z.string() }).optional(),
+  configs: z.array(ServerSpeedConfig),
+});
+export type ServerSpeedRun = z.infer<typeof ServerSpeedRun>;
+
 // ---------------------------------------------------------------- tags.yaml (the project's tag lists)
 
 const TagEntry = z.object({ name: z.string().min(1), at: Time, reason: z.string().optional() });

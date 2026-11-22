@@ -8,10 +8,11 @@ import { useQuery, type ProjectSummary } from "../api.ts";
 import { usePage } from "../page.ts";
 import { formatDate, formatDay, formatWeekday, t, type Key } from "../i18n.ts";
 import {
-  RANGES, compareRows, compareScales, dayOf, daysUrl, estimate, headline, statsUrl, windowPanels,
+  RANGES, compareRows, compareScales, dayOf, daysUrl, estimate, headline, rangeSinceIso, statsUrl, windowPanels,
   type CompareRow, type Range, type WindowPanel,
 } from "../stats.ts";
 import { AxisCell, BarCell, ChartCard, DataTable, DotCell, Scatter, Segmented, TimeChart, type ScatterPoint } from "./charts.tsx";
+import { ServerSpeed } from "./ServerSpeed.tsx";
 
 const RANGE_LABEL: Record<Range, Key> = { "7d": "stats.range.7d", "30d": "stats.range.30d", "90d": "stats.range.90d", all: "stats.range.all" };
 const FACET_LABEL: Record<(typeof STAT_FILTERS)[number], Key> = { kind: "stats.facet.kind", activity: "stats.facet.activity", area: "stats.facet.area", size: "stats.facet.size", origin: "stats.facet.origin" };
@@ -90,6 +91,10 @@ export function StatsView({ projects, phone }: { projects: ProjectSummary[]; pho
           : <p className="rounded-xl border border-line bg-surface px-4 py-6 text-center text-sm text-fg-3">{t("stats.noSteps")}</p>}
         <p className="mt-2 text-xs text-fg-3">{t("stats.footnote")}</p>
       </div>}
+
+      <div className="mt-5" />
+      <Heading title={t("speed.title")} note={t("speed.titleNote")} phone={phone} />
+      <ServerSpeed since={rangeSinceIso(range)} version={version} phone={phone} />
     </div>
   );
 }

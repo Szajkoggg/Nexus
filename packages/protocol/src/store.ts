@@ -10,7 +10,7 @@ import YAML from "yaml";
 import type { z } from "zod";
 import type { ProjectState } from "./state.ts";
 import {
-  Activity, Applied, AwayFile, CapacityFile, ChecksFile, IdeaMatchesFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StaticAnalysisNote, PlanFile, StoredProject, TagsFile, TurnRecord, UsageFile,
+  Activity, Applied, AwayFile, CapacityFile, ChecksFile, IdeaMatchesFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StaticAnalysisNote, PlanFile, StoredProject, TagsFile, TurnRecord, ServerSpeedRun, UsageFile,
   type Note,
   IdeaStatusesFile, IdeaHandoffsFile,
 } from "./schemas.ts";
@@ -601,6 +601,19 @@ const turnsFile = () => join(nexusHome(), "turns.jsonl");
 /** One line per agent turn of every project (TurnRecord). Written only by the server (AgentHost). */
 export function appendTurn(r: TurnRecord): void { mkdirSync(nexusHome(), { recursive: true }); appendJsonl(turnsFile(), TurnRecord.parse(r)); }
 export function readTurns(): JsonlRead<TurnRecord> { return home.jsonl(turnsFile(), TurnRecord, false); }
+
+// ---------------------------------------------------------------- the server's speed (queue SB)
+
+/** <NEXUS_HOME>/benchmarks/server-speed.jsonl: the runs of scripts/server-speed.ts, its one writer. */
+export const serverSpeedFile = () => join(nexusHome(), "benchmarks", "server-speed.jsonl");
+/** Appends a run (to `file`, default serverSpeedFile()); written only by scripts/server-speed.ts. */
+export function appendServerSpeed(run: ServerSpeedRun, file = serverSpeedFile()): void { appendJsonl(file, ServerSpeedRun.parse(run)); }
+/**
+ * The runs, oldest first as appended; a line that does not parse is skipped and said in `errors`. Read from the disk
+ * each time, not through NEXUS_HOME's model: the file is small, read only when asked, and outside what the server
+ * watches (its watcher sees NEXUS_HOME's own files, not its subfolders).
+ */
+export function readServerSpeed(file = serverSpeedFile()): JsonlRead<ServerSpeedRun> { return readJsonl(file, ServerSpeedRun); }
 
 // ---------------------------------------------------------------- global settings
 

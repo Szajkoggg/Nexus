@@ -9,7 +9,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, addNote, closingToSkip, closingToSkipAtApproval, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
-  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readRegistry, readCapacity, readUsage, readTurns, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
+  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readRegistry, readCapacity, readUsage, readTurns, readServerSpeed, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, reviewStats, type ReviewStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
   SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, queueWorkedOn, stepsWorkedOn, ProjectModel, FileCache, useHomeReader, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
@@ -940,6 +940,9 @@ app.get("/api/server", async (c) => c.json({ ...(await version()), local: isLoca
 // The server's measurements of itself (src/perf.ts): its event loop's delay, the requests by route, the blocks over
 // 200 ms and what ran in them. Read-only, also while standing by.
 app.get("/api/server/perf", (c) => c.json(perf.view()));
+// The server's speed benchmarks (scripts/server-speed.ts; <NEXUS_HOME>/benchmarks/server-speed.jsonl), the latest 200
+// runs oldest first, for the global Stats view's trend. Read-only.
+app.get("/api/benchmarks/server-speed", (c) => c.json({ runs: readServerSpeed().entries.slice(-200) }));
 
 // ---------------------------------------------------------------- away mode (docs/protocol/review.md, "Away mode")
 

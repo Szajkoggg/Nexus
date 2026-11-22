@@ -427,3 +427,45 @@ What is left of a boundary is its `status` and `rev-list` (about 50 ms each) and
 the requests make around it (`state big`, 50 to 300 ms): the blocks that still name the boundary are those, together
 with the requests answered in the same turn of the loop. Beside the full test suite a git process took about 350 ms
 (SV3), so each `rev-parse` the files now answer saved that much there.
+
+## The speed benchmark (queue SB)
+
+The measurements above were each taken by hand, once, under a load made for the question. The speed benchmark
+(`scripts/server-speed.ts`) is the same kind of measurement made repeatable, so that a slowdown shows as a step in a
+trend rather than as a complaint: the user asked for the server's speed in the statistics, measured on fixed data,
+with and without a test suite beside it.
+
+- **Fixed data.** The synthetic .nexus of queue SM (`packages/protocol/test/synthetic.ts`, the same tree for the same
+  seed), at 1x (Nexus's own size of 2026-11-20) and 4x (where it will be). Never a copy of a real .nexus. The times
+  still vary with the machine; the data does not, so two runs differ by the code and the load only.
+- **Four configurations**: each scale on a quiet machine and with the protocol package's test files running beside
+  the server, again and again, in parallel as `npm test` runs them. Each configuration starts a development instance
+  of its own (its own NEXUS_HOME and tree), so the start is measured each time and nothing carries over.
+- **What is measured**: the start until the server answers with the project's state; the dashboard's typical reads
+  (state, conversations, the orchestrator, estimates, metrics, digest, stats, usage days, a queue's git, a step's
+  activity, the project list and the server), each asked ten times after a first round that is not counted (a first
+  answer is made from cold); a change, an event appended to a session's log until the dashboards are told over the
+  socket (the watch, the rebuild, the decisions, the broadcast: the background work a running queue causes all the
+  time); and what the server measured of itself (`GET /api/server/perf`): the loop's delay since its start, its blocks
+  while measured, its longest operations, kept so that a slowdown can be traced to the operation that grew.
+- **The headline figures** the Stats view draws are the reads' 95th percentile over all reads, the change's 95th
+  percentile, the start and the loop's 99th percentile. The 95th percentile and not the mean: a slow answer among
+  fast ones is what the user notices. The loop's figure is since the start, which includes the start's own blocks:
+  the benchmark cannot reset the server's histogram, and a new endpoint only for it was not worth a write path; its
+  blocks are counted only while measured.
+- **One file, one writer.** Each run is one line of `<NEXUS_HOME>/benchmarks/server-speed.jsonl`, appended by the
+  script; the server only reads it (`GET /api/benchmarks/server-speed`), from the disk on each request, as the file
+  lies outside NEXUS_HOME's watched files and is read only when the Stats view asks.
+- **In the Stats view** each configuration is a small line chart of its own, a dot per run (each run is a
+  measurement of its own, as a metric's values over steps), on its own scale from zero: the job is each one's trend,
+  and the 4x project beside tests takes many times the 1x project's time, which a shared scale would flatten to a
+  line. Beside them, the live server's own figures since its start as numbers (no history is kept of them: the
+  server's log has its summaries every 10 minutes).
+- **Run regularly** by the `nexus-server-speed` maintenance instance (a survey: it records the run and reports a
+  measure more than 25 % slower than the earlier runs' median, with the spans that grew); how often it recurs is the
+  user's choice, proposed by the orchestrator.
+
+The first runs (2026-11-22, on the user's machine, 3 rounds): 1x quiet, the reads' p95 305 ms, the slowest read a
+queue's git (252 ms at the median, its git processes), a change told after 237 ms at the median; 4x with tests beside
+it, the start 26 s, the reads' p95 790 ms (a queue's git again), a change told after about a second, the loop's p99
+818 ms.

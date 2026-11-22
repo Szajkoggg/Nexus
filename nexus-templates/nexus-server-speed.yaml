@@ -1,0 +1,58 @@
+# Nexus's server speed benchmark as a maintenance survey (queue SB): runs scripts/server-speed.ts, which records the run
+# in <NEXUS_HOME>/benchmarks/server-speed.jsonl for the global Stats view's trend, and reports where the server got
+# slower than in the earlier runs. Meant to recur (the orchestrator proposes a schedule to the user); it fixes nothing.
+template:
+  id: nexus-server-speed
+  title: Server speed benchmark
+  description: Measure the Nexus server's speed on the synthetic project (1x and 4x, with and without tests beside it),
+    record the run for the Stats view's trend and report where it got slower; it never fixes anything itself.
+maintenance: survey
+# A worktree of its own: the benchmark runs the server of the checkout it is in, so the run measures main's code
+# without holding the main checkout; a survey has nothing to merge back.
+worktree: auto
+params:
+  - name: scales
+    description: the synthetic project's scales to measure, comma-separated (1 is Nexus's own size of 2026-11-20)
+    default: "1,4"
+  - name: worse_by
+    description: how much slower than the median of the earlier runs counts as a finding
+    default: 25 %
+title: "Maintenance: server speed benchmark"
+description: |
+  The server's speed benchmark (node scripts/server-speed.ts --scales {{scales}}) on a development instance of its
+  own, recorded for the Stats view's "Server speed" trend, and compared with the earlier runs: a measure more than
+  {{worse_by}} slower than their median is a finding. Fixing is for a queue the user approves. Nothing in the
+  repository is changed or committed, in any mode.
+coding: false
+origin: maintenance
+stop_conditions:
+  - Measuring would change the project (an install, a fix, a commit); report it as a finding instead.
+  - The benchmark cannot start its development instance (the port is taken, the server does not answer); report it with the output instead.
+  - A decision that belongs to the user comes up; ask with nexus ask, with a recommendation.
+steps:
+  - id: "{{id}}1"
+    title: Measure the server's speed
+    goal: |
+      Run `node scripts/server-speed.ts --scales {{scales}}` once, in the foreground (a few minutes: each configuration
+      starts its own development instance on port 4319 or the one given with --port; never port 4317). It appends the
+      run to <NEXUS_HOME>/benchmarks/server-speed.jsonl, which the global Stats view draws as a trend; it is the
+      file's one writer, and nothing else may write it. A full test run of another checkout beside it makes the
+      quiet configurations as busy as the ones with tests: if one ran meanwhile, say so and give the run a --label
+      that says it. Then read the file's earlier runs and compare each configuration's measures (reads_p95_ms,
+      change.p95_ms, startup_ms, loop.p99_ms; the requests one by one) with the median of the earlier runs of the
+      same configuration: a measure more than {{worse_by}} slower is a finding, with its size, the commits between,
+      and the server's spans (`spans`) that grew most as the likely cause. A first run, with nothing to compare, is
+      a first measurement, not a finding. Change nothing in the repository, commit nothing.
+      The report ends with "Recommended additions" (not counted among the findings): a read or a background operation
+      the benchmark does not measure yet and should, each with its reason.
+    acceptance:
+      - The run is recorded in the benchmark file (its line quoted in short) and each configuration's measures are reported beside the earlier runs' median.
+      - Each slowdown beyond {{worse_by}} with its size, the commits between and the likely cause; or that nothing got slower.
+      - The report ends with "Recommended additions", each with its reason (or says there are none).
+      - The working tree as it was (no commit, no leftover files).
+    review:
+      level: 2
+    kind: research
+    activities:
+      - cleanup
+    size: S
