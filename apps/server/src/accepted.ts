@@ -74,16 +74,13 @@ export class AcceptedPusher {
     const fresh = q.steps.filter((s) => s.status === "review" && s.finished_at && this.store.readPush(q.id)?.review[s.id]?.finished_at !== s.finished_at);
     if (!fresh.length) return;
     // Part of the step boundary: a measured section (queue GB).
-    perf.section("step boundary: review", () => this.recordReview(q, fresh));
-  }
-
-  private recordReview(q: QueueView, fresh: QueueView["steps"]): void {
-    const dir = checkoutOf(this.store, q);
-    let sha: string | null = null;
-    if (dir) sha = revParse(dir, "HEAD") ?? null;
-    const push = this.store.readPush(q.id) ?? { protocol: 1 as const, review: {}, steps: {} };
-    for (const s of fresh) push.review[s.id] = { sha, finished_at: s.finished_at!, at: now() };
-    this.store.writePush(q.id, push);
+    perf.section("step boundary: review", () => {
+      const dir = checkoutOf(this.store, q);
+      const sha = dir ? revParse(dir, "HEAD") ?? null : null;
+      const push = this.store.readPush(q.id) ?? { protocol: 1 as const, review: {}, steps: {} };
+      for (const s of fresh) push.review[s.id] = { sha, finished_at: s.finished_at!, at: now() };
+      this.store.writePush(q.id, push);
+    });
   }
 
   private start(q: QueueView, step: string, acceptance: string): void {
