@@ -11,6 +11,7 @@
 // steps"). Rounds recorded before keep the time windows.
 import { execFile, execFileSync } from "node:child_process";
 import { normPath, now, type BranchView, type CommitView, type GitFile, type LeftBehind, type ProjectStore, type QueueView, type RoundView, type StepCommitsView } from "@nexus/protocol";
+import { refFromFiles } from "./gitfiles.ts";
 import { gitLabel, perf } from "./perf.ts";
 
 /** The limits of every local git read here, waited for (git) or not (gitAsync). */
@@ -55,7 +56,18 @@ function inMainCheckout(store: ProjectStore, q: Pick<QueueView, "worktree">): bo
   return !q.worktree || normPath(q.worktree).toLowerCase() === normPath(store.readProject().root).toLowerCase();
 }
 
-const head = (dir: string | undefined) => (dir ? git(dir, ["rev-parse", "HEAD"]) ?? null : null);
+/**
+ * `git rev-parse [-q --verify] <name>` for a full ref name (HEAD, MERGE_HEAD, refs/heads/main): read from the .git files
+ * where they answer as git would, without a git process (queue GB, src/gitfiles.ts); else git's own answer. Undefined
+ * when there is no such ref (or no commit on the branch yet).
+ */
+export function revParse(cwd: string, name: string, o: { verify?: boolean } = {}): string | undefined {
+  const r = refFromFiles(cwd, name);
+  if (r) return r.sha ?? undefined;
+  return git(cwd, o.verify ? ["rev-parse", "-q", "--verify", name] : ["rev-parse", name]);
+}
+
+const head = (dir: string | undefined) => (dir ? revParse(dir, "HEAD") ?? null : null);
 const empty = (): GitFile => ({ protocol: 1, steps: {} });
 
 /**

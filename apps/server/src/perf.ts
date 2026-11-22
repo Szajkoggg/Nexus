@@ -30,6 +30,11 @@ export interface Block { at: string; ms: number; during: Span[] }
 interface LoopDelay { mean_ms: number; p50_ms: number; p99_ms: number; max_ms: number }
 export interface RouteStats { route: string; count: number; total_ms: number; mean_ms: number; max_ms: number; sync_max_ms: number; slow: number; statuses: Record<string, number> }
 export interface SpanStats { what: string; count: number; total_ms: number; mean_ms: number; max_ms: number }
+/**
+ * A measured section (`perf.section`): its runs, their time, and the synchronous git calls made within them by kind
+ * (`git rev-parse`), counted once however deeply nested.
+ */
+export interface SectionStats { what: string; count: number; total_ms: number; mean_ms: number; max_ms: number; git_calls: number; git_ms: number; git: { what: string; count: number; total_ms: number }[] }
 export interface PerfView {
   since: string;
   block_ms: number;
@@ -41,6 +46,8 @@ export interface PerfView {
   spans: SpanStats[];
   /** The latest blocks, newest first. */
   blocks: Block[];
+  /** The measured sections (the step boundary: queue GB), by name. */
+  sections: SectionStats[];
 }
 
 const round = (ms: number) => Math.round(ms * 10) / 10;
@@ -66,6 +73,7 @@ export class Perf {
   private readonly blocks: Block[] = [];
   private readonly routes = new Map<string, Omit<RouteStats, "route" | "mean_ms">>();
   private readonly spans = new Map<string, Omit<SpanStats, "what" | "mean_ms">>();
+  private readonly sections = new Map<string, { count: number; total_ms: number; max_ms: number; git: Map<string, { count: number; total_ms: number }> }>();
 
   constructor(o: { blockMs?: number; tickMs?: number; log?: (line: string) => void } = {}) {
     this.blockMs = o.blockMs ?? BLOCK_MS;
@@ -113,10 +121,36 @@ export class Perf {
     finally { this.end(performance.now() - t0); }
   }
 
+  /**
+   * Runs fn (synchronous) as a measured section: a span like any other, and besides its own statistics with the
+   * synchronous git calls made within it (queue GB: the step boundary). A section entered again within itself (the
+   * engine looking at a queue again from within) counts once, with its git calls.
+   */
+  section<T>(what: string, fn: () => T): T {
+    if (this.stack.includes(what)) return this.measure(what, fn);
+    let s = this.sections.get(what);
+    if (!s) this.sections.set(what, s = { count: 0, total_ms: 0, max_ms: 0, git: new Map() });
+    const t0 = performance.now();
+    try { return this.measure(what, fn); }
+    finally { const ms = performance.now() - t0; s.count++; s.total_ms += ms; s.max_ms = Math.max(s.max_ms, ms); }
+  }
+
+  /** A git call ended: it counts in every section open around it. */
+  private countGit(what: string, ms: number): void {
+    for (const name of new Set(this.stack)) {
+      const git = this.sections.get(name)?.git;
+      if (!git) continue;
+      const g = git.get(what) ?? { count: 0, total_ms: 0 };
+      g.count++; g.total_ms += ms;
+      git.set(what, g);
+    }
+  }
+
   /** A span counts under its path ("GET /api/projects/:id/state > state nexus"): what it ran for, not only what it was. */
   private end(ms: number): void {
     const path = this.stack.join(" > ");
-    this.stack.pop();
+    const own = this.stack.pop()!;
+    if (own.startsWith("git ") && this.sections.size) this.countGit(own, ms);
     this.count(path, ms);
     if (!this.running || ms < 1) return;
     this.ended.push({ what: path, ms: round(ms) });
@@ -211,6 +245,11 @@ export class Perf {
       spans: [...this.spans].map(([what, s]) => ({ what, ...s, total_ms: Math.round(s.total_ms), mean_ms: round(s.total_ms / s.count), max_ms: round(s.max_ms) }))
         .sort((a, b) => b.total_ms - a.total_ms).slice(0, 40),
       blocks: [...this.blocks].reverse(),
+      sections: [...this.sections].map(([what, s]) => {
+        const git = [...s.git].map(([g, x]) => ({ what: g, count: x.count, total_ms: Math.round(x.total_ms) })).sort((a, b) => b.total_ms - a.total_ms);
+        return { what, count: s.count, total_ms: Math.round(s.total_ms), mean_ms: s.count ? round(s.total_ms / s.count) : 0, max_ms: round(s.max_ms),
+          git_calls: git.reduce((n, g) => n + g.count, 0), git_ms: git.reduce((n, g) => n + g.total_ms, 0), git };
+      }),
     };
   }
 }

@@ -67,3 +67,20 @@ test("a git call is labelled by its subcommand", () => {
   assert.equal(gitLabel(["--no-optional-locks", "status", "--porcelain=v1"]), "git status");
   assert.equal(gitLabel(["rev-list", "--count", "a..b"]), "git rev-list");
 });
+
+test("a measured section counts its runs and the git calls within it, once however nested", () => {
+  const perf = new Perf({ log: () => {} });
+  perf.measure("engine (p)", () => perf.section("step boundary: open", () => {
+    perf.measure("git rev-parse", () => busy(5));
+    perf.section("step boundary: open", () => perf.measure("git status", () => busy(5)));
+    perf.measure("other", () => perf.measure("git rev-parse", () => busy(5)));
+  }));
+  perf.measure("git rev-parse", () => busy(5)); // outside every section
+  const s = perf.view().sections.find((x) => x.what === "step boundary: open");
+  assert.equal(s?.count, 1);
+  assert.equal(s.git_calls, 3);
+  assert.deepEqual(Object.fromEntries(s.git.map((g) => [g.what, g.count])), { "git rev-parse": 2, "git status": 1 });
+  assert.ok(s.total_ms >= 12, `${s.total_ms} ms`); // three calls of at least 4 ms each (Date.now's granularity)
+  // Spans keep their paths as before.
+  assert.equal(perf.view().spans.find((x) => x.what === "engine (p) > step boundary: open > git rev-parse")?.count, 1);
+});

@@ -254,6 +254,12 @@ async function main(): Promise<void> {
     for (const c of client) console.log(`  ${c.endpoint.padEnd(14)} ${String(c.count).padStart(5)}  ${c.mean_ms} / ${c.p50_ms} / ${c.p95_ms} / ${c.max_ms} ms${c.errors ? `  (${c.errors} failed)` : ""}`);
     console.log("server: measured operations by total time (count, mean, max):");
     for (const s of perf.spans.slice(0, 14)) console.log(`  ${s.what}  ${s.count}x  ${s.mean_ms} / ${s.max_ms} ms`);
+    // The step boundary (queue GB): its sections, and the synchronous git processes run within them.
+    type Section = { what: string; count: number; total_ms: number; mean_ms: number; max_ms: number; git_calls: number; git_ms: number; git: { what: string; count: number; total_ms: number }[] };
+    console.log("server: measured sections (count, mean / max, total; synchronous git calls within them):");
+    for (const s of (perf.sections ?? []) as Section[]) console.log(`  ${s.what}  ${s.count}x  ${s.mean_ms} / ${s.max_ms} ms, ${s.total_ms} ms; git ${s.git_calls}x ${s.git_ms} ms${s.git.length ? ` (${s.git.map((g) => `${g.what} ${g.count}`).join(", ")})` : ""}`);
+    const gitSpans = (perf.spans as { what: string; count: number; total_ms: number }[]).filter((s) => s.what.split(" > ").at(-1)!.startsWith("git "));
+    console.log(`server: synchronous git among the 40 longest spans: ${gitSpans.reduce((n, s) => n + s.count, 0)} calls, ${gitSpans.reduce((n, s) => n + s.total_ms, 0)} ms`);
     console.log("server: the longest blocks:");
     for (const b of [...perf.blocks].sort((a: { ms: number }, b: { ms: number }) => b.ms - a.ms).slice(0, 8)) console.log(`  ${b.ms} ms: ${b.during.map((s: { what: string; ms: number }) => `${s.what} ${Math.round(s.ms)}`).join("; ") || "nothing measured"}`);
     if (page && (page as { errors?: string[] }).errors?.length) console.log(`the page's errors: ${(page as { errors?: string[] }).errors!.join(" | ")}`);

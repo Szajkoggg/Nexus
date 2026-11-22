@@ -570,7 +570,7 @@ function printUpdate(u: Record<string, any>): void {
 
 interface PerfDelay { mean_ms: number; p50_ms: number; p99_ms: number; max_ms: number }
 /** `nexus server perf`: GET /api/server/perf (docs/protocol/api.md, "Server API"), the longest first. */
-type PerfReport = { since: string; block_ms: number; loop: PerfDelay; loop_window: PerfDelay & { since: string }; routes: { route: string; count: number; total_ms: number; mean_ms: number; max_ms: number; sync_max_ms: number; slow: number }[]; spans: { what: string; count: number; total_ms: number; mean_ms: number; max_ms: number }[]; blocks: { at: string; ms: number; during: { what: string; ms: number }[] }[] };
+type PerfReport = { since: string; block_ms: number; loop: PerfDelay; loop_window: PerfDelay & { since: string }; routes: { route: string; count: number; total_ms: number; mean_ms: number; max_ms: number; sync_max_ms: number; slow: number }[]; spans: { what: string; count: number; total_ms: number; mean_ms: number; max_ms: number }[]; blocks: { at: string; ms: number; during: { what: string; ms: number }[] }[]; sections?: { what: string; count: number; mean_ms: number; max_ms: number; git_calls: number; git_ms: number; git: { what: string; count: number }[] }[] };
 function printPerf(p: PerfReport): void {
   // A server from before queue SV answers this path with its dashboard page, not with measurements.
   if (!p?.loop) throw new UsageError("this Nexus server does not measure itself yet (it predates nexus server perf); it does after an update");
@@ -581,6 +581,9 @@ function printPerf(p: PerfReport): void {
   for (const r of p.routes.slice(0, 15)) console.log(`  ${r.route}  ${r.count}x  mean ${r.mean_ms} ms  max ${r.max_ms} ms  sync ${r.sync_max_ms} ms  slow ${r.slow}`);
   console.log("measured operations by total time (count, mean, max):");
   for (const s of p.spans.slice(0, 15)) console.log(`  ${s.what}  ${s.count}x  mean ${s.mean_ms} ms  max ${s.max_ms} ms`);
+  // A server from before queue GB has no sections.
+  if (p.sections?.length) console.log("measured sections (count, mean, max, synchronous git calls within them):");
+  for (const s of p.sections ?? []) console.log(`  ${s.what}  ${s.count}x  mean ${s.mean_ms} ms  max ${s.max_ms} ms  git ${s.git_calls}x ${s.git_ms} ms${s.git.length ? ` (${s.git.map((g) => `${g.what} ${g.count}`).join(", ")})` : ""}`);
   console.log(`blocks over ${p.block_ms} ms: ${p.blocks.length ? "" : "none"}`);
   for (const b of p.blocks.slice(0, 10)) console.log(`  ${b.at}  ${b.ms} ms: ${b.during.map((s) => `${s.what} ${Math.round(s.ms)} ms`).join("; ") || "nothing measured"}`);
 }

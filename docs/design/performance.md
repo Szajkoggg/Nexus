@@ -369,3 +369,61 @@ derivation from memory on the live project passes about 150 ms on average (`nexu
   load would hurt most (2 to 3 s a boundary).
 - **The worker thread again** when a derivation from memory on the live project passes about 150 ms on average, with
   this section's costs measured again at that size.
+
+## The step boundary's reads from the .git files (queue GB)
+
+SW1 found most blocks at a step's boundary: six to eight git processes of about 50 ms each, kept synchronous by the
+user's decision (SV2B). GB keeps them synchronous and in the same order, and reads from the files of the checkout's
+`.git` what git would only read there.
+
+**The measured section.** `perf.section(what, fn)` (`perf.ts`) is a measured span with statistics of its own: its
+runs and time, and the synchronous git calls made within it by kind, counted once however nested
+(`GET /api/server/perf`'s `sections`, `nexus server perf`, and `scripts/perf-load.ts`'s report). The step boundary is
+three sections:
+
+- `step boundary: end`: the turn in which a step got its outcome, after its settle time (`recordStepEnd`, the
+  engine's next look);
+- `step boundary: review`: the step's HEAD recorded as it enters review (`accepted.ts` `recordReviews`);
+- `step boundary: open`: the engine going on once the step has ended (`engine.ts` `goOn`): the planned deploy's
+  look, the base merged in (`recoverPull`, `pullBase`), the setup, and the next step's opening (`openStep`).
+
+**The reader** (`gitfiles.ts`): `refFromFiles(cwd, name)` gives what `git rev-parse <name>` gives for a full ref name
+(HEAD, MERGE_HEAD, `refs/heads/<branch>`), `branchFromFiles(cwd)` what `git branch --show-current` gives. The
+checkout's `.git` is a folder, or a file `gitdir: <path>` (a worktree; absolute or relative) whose folder names the
+shared one in `commondir`. A ref is a loose file (a sha, or `ref: <other>` followed to git's depth of five), else a
+line of `packed-refs`; HEAD, the pseudo-refs (MERGE_HEAD) and `refs/worktree/`, `refs/bisect/`, `refs/rewritten/`
+are the worktree's own, the rest are shared. `gitinfo.ts` `revParse` asks the files first and git when they cannot
+tell; `worktree.ts` `gitBranch` likewise. It serves the round records (`recordStepStart`, `recordStepEnd`,
+`recordTurn`, `headOnce`), the review's HEAD, the base branch's commit (`baseBranch`), the half-done merge's test
+(`recoverPull`), the HEAD after Nexus's merge (`mergeBase`), the survey step's left work and the integration fix round's HEAD.
+
+The files are not asked, and git is, where they might not say what git says: a checkout without a `.git` of its own
+(git would look in the folders above), `GIT_DIR` or another variable that moves the repository, the reftable ref
+storage, a ref name that is not a full one, and a file that cannot be read or holds something unexpected (a write in
+progress on Windows, a hand-made ref). Git refusing a repository of another owner (`safe.directory`) is the one case
+the files answer where git would not; Nexus's own processes and its workers run as one user, so it does not arise.
+
+**What stays git**, and why: `git status` (whether the tracked files changed needs the index compared with the files),
+`git rev-list --count` (whether HEAD contains the base needs the commit graph), `git merge-tree` and the merge itself.
+A commit's existence (`^{commit}`, `--verify` of a sha) needs the object database: loose objects, packs and their
+indexes, alternates; `recordBase` (once per queue) keeps it. Reads off the boundary (a hand-over's log, the setup's
+HEAD, the dashboard's asynchronous reads) are unchanged.
+
+**Before and after**, `node scripts/perf-load.ts --minutes 3` (the same load as SV1's quiet run: two queues in
+worktrees of their own, each step a boundary with a base pull), on the user's machine:
+
+| | Before (`57cd2b8` with the sections) | After |
+|---|---|---|
+| A step boundary (the three sections together, mean) | 529 ms | 265 ms |
+| … `end` / `review` / `open` (mean) | 105 / 54 / 370 ms | 50 / 3 / 213 ms |
+| Synchronous git processes per boundary | 7 (5 `rev-parse`, `status`, `rev-list`) | 2 (`status`, `rev-list`) |
+| … their time per boundary | 376 ms | 107 ms |
+| Blocks of 200 ms or more (count, time together) | 41, 15.7 s | 24, 8.2 s |
+| … naming the step boundary (count, range) | 21, 208 to 699 ms | 15, 229 to 484 ms |
+| Event loop delay p50 / p99 / max | 15 / 133 / 749 ms | 15 / 127 / 596 ms |
+| Steps accepted; notifications | 14; 1,170 | 14; 1,240 |
+
+What is left of a boundary is its `status` and `rev-list` (about 50 ms each) and the state derivations the engine and
+the requests make around it (`state big`, 50 to 300 ms): the blocks that still name the boundary are those, together
+with the requests answered in the same turn of the loop. Beside the full test suite a git process took about 350 ms
+(SV3), so each `rev-parse` the files now answer saved that much there.

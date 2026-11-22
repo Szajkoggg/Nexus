@@ -8,7 +8,7 @@
 // tested first without touching the worktree (git merge-tree), and made only when clean.
 import { execFileSync } from "node:child_process";
 import { fileList, normPath, now, type BasePull, type GitFile, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
-import { checkoutStatus, git, ownWorktree } from "./gitinfo.ts";
+import { checkoutStatus, git, ownWorktree, revParse } from "./gitinfo.ts";
 import { gitBranch, setupInputsChanged } from "./worktree.ts";
 import { gitLabel, perf } from "./perf.ts";
 
@@ -37,7 +37,7 @@ function baseBranch(store: ProjectStore, state: Pick<ProjectState, "project">, q
   const root = normPath(state.project.root);
   const recorded = store.readGit(q.id)?.base;
   const base = recorded?.branch ? recorded.ref : gitBranch(root) ?? undefined;
-  const sha = base ? git(root, ["rev-parse", `refs/heads/${base}`]) : undefined;
+  const sha = base ? revParse(root, `refs/heads/${base}`) : undefined;
   return { base: sha ? base : undefined, sha };
 }
 
@@ -106,7 +106,7 @@ export function mergeBase(cwd: string, base: string, known: { from: string | und
     git(cwd, ["merge", "--abort"]);
     return { result: "conflict", from, sha, conflicts: files.length ? files : ["(the merge failed)"] };
   }
-  const to = git(cwd, ["rev-parse", "HEAD"]) ?? from;
+  const to = revParse(cwd, "HEAD") ?? from;
   const shortstat = git(cwd, ["diff", "--shortstat", from, to]) ?? "";
   return { result: "merged", from, sha, to, commits, shortstat };
 }
@@ -164,8 +164,8 @@ export function recoverPull(store: ProjectStore, q: Pick<QueueView, "id" | "work
   if (!q.integration || !cwd) return undefined;
   const g = store.readGit(q.id);
   const p = g?.pulling;
-  const merging = () => git(cwd, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]);
-  const ours = !!p && merging() === p.sha && git(cwd, ["rev-parse", "HEAD"]) === p.from;
+  const merging = () => revParse(cwd, "MERGE_HEAD", { verify: true });
+  const ours = !!p && merging() === p.sha && revParse(cwd, "HEAD") === p.from;
   if (ours) git(cwd, ["merge", "--abort"]);
   if (p) store.writeGit(q.id, { ...g!, pulling: undefined });
   const left = merging();

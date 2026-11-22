@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { ActionError, fileList, normPath, now, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
 import { changedFiles, ownWorktree, patchGit, recordBase } from "./gitinfo.ts";
+import { branchFromFiles } from "./gitfiles.ts";
 import { gitLabel, perf } from "./perf.ts";
 
 /** Two paths name the same folder (Windows: case does not matter, nor the kind of slash). */
@@ -53,6 +54,9 @@ export function worktreeFor(store: ProjectStore, state: ProjectState, q: QueueVi
 
 /** The branch checked out in `cwd`; null when there is none (detached, not a repository). */
 export function gitBranch(cwd: string): string | null {
+  // From the .git files where they tell, without a git process (queue GB).
+  const known = branchFromFiles(cwd);
+  if (known) return known.branch;
   try { return perf.measure("git branch", () => execFileSync("git", ["branch", "--show-current"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })).trim() || null; }
   catch { return null; }
 }

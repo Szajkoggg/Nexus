@@ -2,7 +2,7 @@
 // messages and answers to live sessions, and records what the agent does. See docs/design/overview.md, "Nexus drives the
 // queue, step by step". All of its state is in files (run.yaml, runtime.json, delivered.jsonl, activity.jsonl);
 // the processes are the only thing a restart loses, and a restart pauses the runs that had one.
-import { changedFiles, checkoutOf, checkoutStatus, git as gitRead, headOnce, ownWorktree, recordStepEnd, recordStepStart, recordTurn } from "./gitinfo.ts";
+import { changedFiles, checkoutOf, checkoutStatus, git as gitRead, headOnce, ownWorktree, recordStepEnd, recordStepStart, recordTurn, revParse } from "./gitinfo.ts";
 import { AcceptedPusher } from "./accepted.ts";
 import type { GitRunner } from "./deploy.ts";
 import type { ChildProcess } from "node:child_process";
@@ -31,6 +31,7 @@ import { Recurrer, type RecurringSet } from "./recurring.ts";
 import { StaticReminder } from "./static-reminder.ts";
 import { gitBranch, recordSetup, runSetup, setupPending, worktreeFor } from "./worktree.ts";
 import { closingContext } from "./closing.ts";
+import { perf } from "./perf.ts";
 import { integrationContext, mergeBase, mergeConflicts, mergedText, pullBase, pullBefore, recoverPull, type IntegrationContext } from "./integration.ts";
 import { Coordinator, bringsBack, refusalText, waitingText, type Member } from "./coordinator.ts";
 import type { Capacity } from "./capacity.ts";
@@ -893,6 +894,15 @@ export class Engine implements Member {
         default:
           break; // ended: go on
       }
+      // The step boundary from here to the next step's opening is a measured section (queue GB).
+      return perf.section("step boundary: open", () => this.goOn(queueId, run, state, q, current, live));
+    }
+    this.goOn(queueId, run, state, q, current, live);
+  }
+
+  /** The run goes on after its step `current` ended (or before its first step): the next step opens, or the run ends. */
+  private goOn(queueId: string, run: RunFile, state: ProjectState, q: QueueView, current: StepView | undefined, live: Live): void {
+    if (current) {
       // A deploy planned after this step (or queue) starts now: its drain holds the run here, so nothing of the next
       // step slips in. Looked at again: held, the run waits for the restart; paused by the user, the pause is reached.
       const stop = this.boundary?.(queueId, current.id, state);
@@ -1406,7 +1416,7 @@ export class Engine implements Member {
     const q = state.queues.find((x) => x.id === queueId);
     if (!q?.steps.find((s) => s.id === step)?.model_free) return undefined;
     const cwd = checkoutOf(this.store, q);
-    return modelFreeFixPreface(q, step, integrationContext(this.store, state, q), cwd ? gitRead(cwd, ["rev-parse", "HEAD"]) : undefined);
+    return modelFreeFixPreface(q, step, integrationContext(this.store, state, q), cwd ? revParse(cwd, "HEAD") : undefined);
   }
 
   /** The integration step's context, with the files Nexus finds in conflict when the step opens anew (queue MI). */
@@ -1513,7 +1523,7 @@ export class Engine implements Member {
     if (this.surveyChecked.has(key)) return false;
     this.surveyChecked.add(key);
     const cwd = checkoutOf(this.store, q);
-    const head = cwd ? gitRead(cwd, ["rev-parse", "HEAD"]) : undefined;
+    const head = cwd ? revParse(cwd, "HEAD") : undefined;
     if (!cwd || head === undefined) return false; // not a git repository: nothing to check
     const start = this.store.readGit(queueId)?.steps[step.id]?.at(-1)?.start;
     const commits = start && start !== head ? Number(gitRead(cwd, ["rev-list", "--count", `${start}..HEAD`]) ?? 1) : 0;
@@ -1764,8 +1774,9 @@ export class Engine implements Member {
           for (const q of state.queues) {
             if (q.run?.session !== session.id) continue;
             const st = q.steps.find((s) => s.id === q.run!.step);
-            if (st && OUTCOME.has(st.status)) recordStepEnd(this.store, q.id, st.id);
-            this.advance(q.id);
+            // The step boundary begins: a measured section (queue GB).
+            if (st && OUTCOME.has(st.status)) perf.section("step boundary: end", () => { recordStepEnd(this.store, q.id, st.id); this.advance(q.id); });
+            else this.advance(q.id);
           }
           this.changed();
         }, this.turnSettleMs);

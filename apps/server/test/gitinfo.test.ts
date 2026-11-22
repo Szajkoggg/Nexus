@@ -13,6 +13,7 @@ import { ProjectStore, approveQueue, loadProjectState, newId, routeAnswers, type
 import type { AgentEvents, AgentProcess } from "../src/agent.ts";
 import { Engine } from "../src/engine.ts";
 import { branchState, checkoutStatus, headOnce, recordBase, recordStepEnd, recordStepStart, recordTurn, stepCommits } from "../src/gitinfo.ts";
+import { perf } from "../src/perf.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { until, LONGER } from "./wait.ts";
 
@@ -65,6 +66,11 @@ test("the engine records HEAD when a step opens and when its outcome's turn ends
     assert.deepEqual(c1.rounds[0]!.commits.map((c) => [c.subject, c.files, c.insertions, c.deletions, c.foreign]), [["Q1 work", 1, 1, 0, false]]);
     assert.equal(c1.rounds[0]!.open, false);
     assert.deepEqual((await stepCommits(store, queue(), "Q2"))!.rounds[0]!.commits.map((c) => c.subject), ["Q2 work"]);
+    // The step boundary read its HEADs from the .git files (queue GB): no git process for them.
+    const sections = perf.view().sections.filter((x) => x.what.startsWith("step boundary"));
+    // (Its review is accepted at once here: the review's record may not see the step in review.)
+    for (const what of ["step boundary: end", "step boundary: open"]) assert.ok(sections.some((x) => x.what === what && x.count > 0), what);
+    for (const x of sections) assert.deepEqual(x.git.filter((g) => g.what === "git rev-parse" || g.what === "git branch"), [], `${x.what}: ${JSON.stringify(x.git)}`);
   } finally { engine.shutdown(); }
 });
 
