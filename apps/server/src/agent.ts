@@ -153,6 +153,11 @@ export const COMPACTS: Readonly<Record<"claude" | "codex", boolean>> = { claude:
 export interface AgentOptions {
   /** Only AgentHost sets this, for worker sessions. */
   ownProcesses?: boolean;
+  /**
+   * Only AgentHost sets this: the session's role. Its process then runs in a job of its own on Windows, so the server
+   * can tell its connections from the user's (worker-process.ts agentOwning; docs/design/security.md).
+   */
+  agentRole?: string;
   cwd: string;
   model?: string;
   /** low, medium, high, xhigh (and max for Claude Code). */

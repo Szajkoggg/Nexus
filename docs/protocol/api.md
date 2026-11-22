@@ -29,6 +29,17 @@ writes files. The only exceptions are `POST /api/server/update`, `POST /api/serv
 `POST /api/server/cancel-plan` and `POST /api/server/away`, which `nexus server` sends (see the CLI; it refuses `away`
 from every agent session, and the others from every session but an orchestrator's).
 
+A browser's headers can be sent by any program, so on Windows the server also asks who opened the connection (queue
+HG, [Security on this machine](../design/security.md#the-local-http-gap-queue-hg)): every agent process runs in a job
+of its own (["Windows worker process host"](runtimes.md#windows-worker-process-host-pt)), and every write and
+`GET /api/remote` (which hands out the access token) from a process in an agent's job, or from a command running as an
+account of Codex's elevated sandbox, is refused (403, `an agent's process (<role>) does not do the user's actions;
+agents use the nexus CLI`), whatever its headers, cookie or proxy headers say. The orchestrator's job alone may send
+`update`, `cancel`, `plan` and `cancel-plan`; no agent may send `away`. The user's browser, a phone through Tailscale
+and the user's own `nexus` are in no agent's job and are not affected. A job host that does not answer in three
+seconds counts as no agent (logged), so a failed lookup never locks the user out. Elsewhere than Windows the checks
+above are the only guard.
+
 | Request | Body | Effect |
 |---|---|---|
 | `POST /api/projects/:id/queues/:q/steps/:s/notes` | `text` | A note from the user for the step |

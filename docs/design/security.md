@@ -82,3 +82,43 @@ beyond the agents Nexus runs.
 
 The user chose A (2026-11-22, answering HG1's question): "A: a szerver felismeri az agentjei folyamatait (job
 object)" (A: the server recognises its agents' processes, by job object). HG2 builds it; B and C are not built.
+
+### Built in HG2
+
+- **Every agent runs in a job.** `AgentHost` gives each session's role to its launch (`agentRole`), and on Windows the
+  runtime starts through the job host of `apps/server/src/worker-job.cs` for every role, not only workers. The
+  orchestrator's, thinking partners' and review helpers' jobs only mark their processes; below-normal priority and the
+  boundary cleanup stay the workers'. What such an agent started now ends when its runtime exits.
+- **The guard asks the jobs.** For every write under `/api/` and for `GET /api/remote`, the server sends each live
+  agent job host the connection's two ports (`T <id> <client port> <server port>`). The host reads the TCP table
+  (`GetExtendedTcpTable`, IPv4 and IPv6, loopback rows only), finds the process that owns the client end and answers
+  whether it is a member of its job. A process in an agent's job is refused (403) whatever its headers, its cookie or
+  its proxy headers; only the orchestrator's job may send `update`, `cancel`, `plan` and `cancel-plan`, and no agent
+  `away`. The host answers off its control reader; a host that does not answer in three seconds counts as no agent and
+  is logged, so the user is never locked out. With no agent running nothing is asked. Off Windows the guard is today's.
+- **Codex's elevated sandbox.** That sandbox runs commands as the accounts of the local group `CodexSandboxUsers`
+  (`CodexSandboxOffline`, `CodexSandboxOnline`), possibly started outside the job of the Codex that asked for them. So
+  the host also reads the owner's account from the session list (`WTSEnumerateProcessesEx`, which names other
+  accounts' processes without opening them) and answers "sandbox" for a member of that group: refused like an agent,
+  with no role's rights. One effect beyond Nexus: while a Nexus agent runs, the sandboxed commands of the user's own
+  Codex app cannot write to Nexus either.
+- **Tests** (`apps/server/test/agent-guard.test.ts`, Windows): a job host names the role owning a grandchild's
+  connection and none for the test process's own; a real server with the fake runtimes, whose orchestrator and thinking
+  partner run a script in their job (`FAKE-SCRIPT`): the forged browser request, the sandbox setting, the phone's
+  cookie with a proxy header, the token read, the rotation and `away` are refused to both; `cancel` passes for the
+  orchestrator only; reads pass. The user's dashboard request and the phone's (cookie and proxy header) still write, a
+  remote request without the cookie still gets 401, and the user's `nexus server cancel` still reaches the server.
+
+Probed in HG2 (2026-11-22, Codex CLI 0.169.0, `codex sandbox`, no model):
+
+| Sandbox | WMI `Win32_Process.Create` | `schtasks /create` | `Start-Process` | In the caller's job |
+|---|---|---|---|---|
+| `unelevated` (restricted token, the user's account) | access denied | failed | works, stays in the job | yes: a command's connection was named as the job's |
+| `elevated` (the user's setting) | not run | not run | not run | not run: `codex sandbox` failed in this worker session with `CryptUnprotectData failed: 2148073483`, so the account rule above covers it unverified end to end |
+
+The account lookup was checked by hand: the host's own process maps to the user's SID, and `CodexSandboxOnline` is
+found in the group while the user is not.
+
+What stays open: a worker with a free shell running as the user can still leave its job (WMI and the task scheduler
+work outside the sandbox) and can write the project's files anyway; the guard makes the HTTP route deliberate, not
+impossible, for it. The orchestrator on Codex, the case the switch waited for, cannot.

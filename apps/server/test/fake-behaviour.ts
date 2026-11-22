@@ -58,8 +58,9 @@
 // start of any line.
 // An answer ("[Nexus] Answer …") makes it report the current step done (also in a new process of the session: the
 // step is kept in a file beside FAKE_LOG). As an orchestrator: "FAKE-DRAFT:" followed by
-// YAML drafts that queue; "FAKE-NEXUS: [args]" runs `nexus` with those arguments; a "[Nexus] A worker asked … (qid X;"
-// notice is answered with "fake answer"; with FAKE_REVIEW_ACCEPT set, a notice of a step waiting for its review is
+// YAML drafts that queue; "FAKE-NEXUS: [args]" runs `nexus` with those arguments; "FAKE-SCRIPT: <file>" runs that
+// file with Node inside the agent's process tree (its job on Windows) and replies with its output; a "[Nexus] A worker
+// asked … (qid X;" notice is answered with "fake answer"; with FAKE_REVIEW_ACCEPT set, a notice of a step waiting for its review is
 // answered with `nexus review accept`. "FAKE-LONG" is answered with longReply("Reply"); a hand-over with
 // longReply("SUMMARY"). "FAKE-SLOW" in a chat message: the turn works for FAKE_CHAT_SLOW_MS (default 4000), then
 // replies "slow reply"; a stop (interrupt) ends it early. "FAKE-HOLD": waits for FAKE_RELEASE (as a slow worker does),
@@ -525,6 +526,11 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
   if (draft) return nexusOut(["queue", "draft", "-"], draft[1]);
   const run = /FAKE-NEXUS: (\[.*\])/.exec(text);
   if (run) return nexusOut(JSON.parse(run[1]!) as string[]);
+  const script = /FAKE-SCRIPT: (.+)/.exec(text);
+  if (script) {
+    try { return execFileSync(process.execPath, [script[1]!.trim()], { env: process.env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(); }
+    catch (e) { return `script failed: ${(e as { stderr?: string }).stderr ?? (e as Error).message}`; }
+  }
   const asked = /A worker asked[\s\S]*?\(qid (\S+);/.exec(text);
   if (asked) return nexusOut(["answer", asked[1]!, "fake answer", "--continue"]);
   // With FAKE_REVIEW_ACCEPT set, a step waiting for its review is accepted (tests about something other than review).

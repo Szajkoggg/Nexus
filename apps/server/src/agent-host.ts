@@ -160,7 +160,7 @@ export class AgentHost<E extends object = object> {
     const how = launch(resume);
     // `launched` keeps the launch without the briefing's file: it is no setting (stale).
     const late = how.runtime === "claude" && how.options.lateTurnMs === undefined && this.lateTurnMs !== undefined ? { lateTurnMs: this.lateTurnMs } : {};
-    const owned = { ...how, options: { ...how.options, ...late, ownProcesses: session.role === "worker" ? true : undefined } } as Launch;
+    const owned = { ...how, options: { ...how.options, ...late, ownProcesses: session.role === "worker" ? true : undefined, agentRole: session.role } } as Launch;
     const proc = this.spawn(this.withBriefingFile(session.id, owned));
     // Whatever the agent is given to act on comes with the server's clock mark in .nexus/clock.json, so its `nexus`
     // calls stamp their records after everything the server had seen (docs/design/state.md, "Clock steps").

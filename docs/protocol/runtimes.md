@@ -263,8 +263,11 @@ DESIGN.md, ["Background work"](../design/engine.md#background-work)), nudge once
 
 ### Windows worker process host (PT)
 
-Only worker launches use `apps/server/src/worker-process.ts` and the private `worker-job.ps1` / `worker-job.cs`
-host. Other roles keep direct process spawning. No new durable file or event is introduced. The runtime record's
+Every agent launch on Windows uses `apps/server/src/worker-process.ts` and the private `worker-job.ps1` /
+`worker-job.cs` host, and so do the checks Nexus runs: workers (whose descendants are ended at a step's boundary),
+and since queue HG the orchestrator, thinking partners and review helpers too, whose job only marks their processes
+as an agent's for the server's write guard (see [the server API](api.md#server-api) and docs/design/security.md). Only workers and
+checks get the below-normal priority. No new durable file or event is introduced. The runtime record's
 `pid` is the actual runtime PID, supplied once the helper reports it, never the helper's PID. The existing
 `stop_at_once` action now waits for that worker's whole job to end. Windows recovery never kills a worker by a
 persisted PID; its old host owns the job and closes it when its server pipe closes.
@@ -285,9 +288,11 @@ process's nice value instead. An engine in a test process leaves it off. Subsequ
 | Server to helper | `E` | Close runtime stdin; after five seconds the server requests `K` if still alive |
 | Server to helper | `C <id>` | End descendants, preserve helper and runtime, wait for their exit |
 | Server to helper | `K` | End all job members except the helper; runtime exit ends the helper |
+| Server to helper | `T <id> <client port> <server port>` | Who owns the client end of the loopback TCP connection between the two ports (queue HG); answered off the control reader |
 | Helper to server | `R <pid>` | Runtime launched inside the job |
 | Helper to server | `O <base64>` / `E <base64>` | Runtime stdout / stderr line, including its newline |
 | Helper to server | `C <id>` | Descendant cleanup completed; the engine may cross the boundary |
+| Helper to server | `T <id> <0\|1\|2>` | The connection's owner: 1 a process of this job, 2 a process running as an account of the local group `CodexSandboxUsers` (Codex's elevated sandbox), 0 neither or not found. The server waits three seconds for it, then takes 0 and logs it |
 | Helper to server | `X <code>` | Runtime exited and descendants were cleaned |
 | Helper to server | `F <base64>` | Cleanup/exit failure text; pending cleanup rejects and the worker is ended |
 
@@ -306,7 +311,9 @@ outcome and the turn's end, before the next step or while waiting for review, an
 or a turn without an outcome keeps the existing background-work policy. Failures halt rather than advancing with
 uncertain cleanup. Resume while cleanup is pending is deferred until its acknowledgement, including automatic
 resumes after a cancelled drain; a subsequent run change cancels that request. Resume while an immediate stop is
-still exiting remains 409. Orchestrator and thinking-partner process ownership is unchanged. The implementation is Windows
+still exiting remains 409. Orchestrators, thinking partners and review helpers run in a job of their own since queue HG. Nothing ends their
+descendants at a boundary, but what they started ends when their runtime exits (the job is cleaned then), where before
+it could outlive the process. The implementation is Windows
 only; its scope and the console-lifetime finding are documented in DESIGN.md, ["Worker process ownership on Windows"](../design/engine.md#worker-process-ownership-on-windows-queue-pt).
 
 ### Full-test lock and lifetime channel (PT2)
