@@ -399,6 +399,99 @@ export function estimateWords(e: { steps: number; ms?: number } | undefined): Wo
   return { key: "plan.estimate.hours", params: { hours: hours < 9.75 ? Math.max(1, Math.round(hours * 2) / 2) : Math.round(hours) } };
 }
 
+// ---------------------------------------------------------------- where the plan will wait for the user's review
+
+/** Who reviews: whether the project's orchestrator takes reviews (it exists, its notices on), and away mode now. */
+export interface ReviewWho { orchestrating: boolean; away: boolean }
+
+/** A queue's steps as the review points read them (a QueueView fits). */
+export interface ReviewQueue { id: string; steps: readonly { id: string; title?: string; status: string; level?: number; review_with?: string }[] }
+
+/**
+ * The step will surely wait for the user's review (docs/protocol/review.md, "Review"): level 1; any level when no
+ * orchestrator takes reviews (they go to the user). A level-2 step goes to the orchestrator, which may or may not hand
+ * it on; in away mode it runs as level 3 and goes on: neither is a sure wait.
+ */
+export function userReviews(level: number | undefined, who: ReviewWho): boolean {
+  if (!who.orchestrating) return true;
+  return level === 1;
+}
+
+/** The steps of a queue still to come that wait for the user's review, and how many steps are left up to the next. */
+export interface UserReviews {
+  count: number;
+  next: { id: string; title?: string };
+  /** The next already waits for the user's review. */
+  waiting: boolean;
+  /** The steps left up to and with the next (its own work included), of `left`. */
+  upTo: number;
+  left: number;
+}
+
+const CLOSED_STEP = new Set(["done", "skipped", "rejected"]);
+
+/**
+ * The steps left in a queue (not done, skipped or rejected) that wait for the user's review: one in review for the
+ * user counts, one in review for the orchestrator does not (it is the orchestrator's now); the others by their level
+ * (the step's own, its queue's, the project's: the state derives it), as `userReviews` says.
+ */
+export function userReviewsOf(q: ReviewQueue, who: ReviewWho): UserReviews | undefined {
+  const left = q.steps.filter((s) => !CLOSED_STEP.has(s.status));
+  const mine = left.filter((s) => (s.status === "review" ? s.review_with !== "orchestrator" : userReviews(s.level, who)));
+  const next = mine[0];
+  if (!next) return undefined;
+  return {
+    count: mine.length, next: { id: next.id, ...(next.title ? { title: next.title } : {}) }, waiting: next.status === "review",
+    upTo: left.indexOf(next) + 1, left: left.length,
+  };
+}
+
+/** The first point where the plan will wait for the user's review, and when, by the estimates (ms from now). */
+export interface FirstWait { queue: string; step: string; title?: string; now: boolean; ms?: number }
+
+/**
+ * The first point where the plan will wait for the user's review: of each queue's next such step, the earliest by the
+ * estimates when every one has a time (the plan's order among equal ones), else the first in the plan's order
+ * (planList). One waiting now has the time 0. A step's time from now, as far as the estimates go: its queue starts when
+ * the latest of its predecessors shown ends (the first column now), then its steps up to that one (the queue's
+ * estimate shared evenly over its steps left); none when an estimate on the way is missing.
+ */
+export function firstUserWait(l: PlanLayout, queues: readonly ReviewQueue[], who: ReviewWho, estimates?: Readonly<Record<string, { steps: number; ms?: number }>>): FirstWait | undefined {
+  const byId = new Map(queues.map((q) => [q.id, q]));
+  const nodes = new Map(planList(l).map((n) => [n.id, n]));
+  const starts = new Map<string, number | undefined>();
+  const startOf = (id: string, path: Set<string>): number | undefined => {
+    if (starts.has(id)) return starts.get(id);
+    const n = nodes.get(id);
+    let at: number | undefined = 0;
+    if (n && n.column > 0 && !path.has(id)) {
+      path.add(id);
+      for (const b of n.before) {
+        if (b.done || !nodes.has(b.queue)) continue;
+        const s = startOf(b.queue, path), e = estimates?.[b.queue];
+        const end = s === undefined ? undefined : !e?.steps ? s : e.ms === undefined ? undefined : s + e.ms;
+        at = at === undefined || end === undefined ? undefined : Math.max(at, end);
+      }
+      path.delete(id);
+    }
+    starts.set(id, at);
+    return at;
+  };
+  const points: FirstWait[] = [];
+  for (const n of planList(l)) {
+    const q = byId.get(n.id);
+    const r = q && userReviewsOf(q, who);
+    if (!r) continue;
+    const base = { queue: n.id, step: r.next.id, ...(r.next.title ? { title: r.next.title } : {}) };
+    if (r.waiting) { points.push({ ...base, now: true, ms: 0 }); continue; }
+    const start = startOf(n.id, new Set()), e = estimates?.[n.id];
+    const ms = start === undefined || e?.ms === undefined || !e.steps ? undefined : Math.round(start + (e.ms * r.upTo) / Math.max(1, e.steps));
+    points.push({ ...base, now: false, ...(ms !== undefined ? { ms } : {}) });
+  }
+  if (!points.every((p) => p.ms !== undefined)) return points[0];
+  return points.reduce<FirstWait | undefined>((a, p) => (!a || p.ms! < a.ms! ? p : a), undefined);
+}
+
 const nodeOf = (l: PlanLayout, id: string): PlanNode | undefined => l.columns.flat().find((n) => n.id === id);
 const names = (ids: readonly string[]) => ids.join(", ");
 

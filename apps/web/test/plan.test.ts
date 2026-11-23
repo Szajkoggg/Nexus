@@ -2,7 +2,7 @@
 // queue waits, the queues shown because a planned one waits for them, and the approved ones outside the plan.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { estimateWords, isActive, isNow, isPlanned, moveTargets, planLayout, planList, whyOf, type PlanQueue } from "../src/plan.ts";
+import { estimateWords, firstUserWait, isActive, isNow, isPlanned, userReviews, userReviewsOf, moveTargets, planLayout, planList, whyOf, type PlanQueue } from "../src/plan.ts";
 import { t } from "../src/i18n.ts";
 
 const q = (id: string, over: Partial<PlanQueue> = {}): PlanQueue => ({ id, title: `Queue ${id}`, status: "approved", steps: [], questions: [], approved: true, revision: 1, ...over });
@@ -131,4 +131,48 @@ test("a queue in progress waiting for its turn to integrate (the merge train) sa
   assert.deepEqual(now.find((n) => n.id === "B")!.why.map((w) => t(w.key, w.params)), ["waits to integrate after A"]);
   assert.deepEqual(now.find((n) => n.id === "C")!.why, [], "the next to integrate waits for nobody");
   assert.deepEqual(now.find((n) => n.id === "A")!.why, []);
+});
+
+// Where the plan will wait for the user's review (step PVAR, the user's request of 2026-11-18).
+const who = { orchestrating: true, away: false };
+const step = (id: string, status: string, level: number, review_with?: "user" | "orchestrator") => ({ id, title: `Step ${id}`, status, level, ...(review_with ? { review_with } : {}) });
+
+test("the steps left for the user's review: level 1, one in review for the user too; done, skipped or rejected ones not", () => {
+  const r = userReviewsOf({ id: "A", steps: [step("A1", "done", 1), step("A2", "skipped", 1), step("A3", "pending", 2), step("A4", "pending", 1), step("A5", "rejected", 1), step("A6", "pending", 1)] }, who)!;
+  assert.deepEqual(r, { count: 2, next: { id: "A4", title: "Step A4" }, waiting: false, upTo: 2, left: 3 });
+  const inReview = userReviewsOf({ id: "B", steps: [step("B1", "review", 1, "user"), step("B2", "pending", 1)] }, who)!;
+  assert.deepEqual([inReview.count, inReview.next.id, inReview.waiting], [2, "B1", true]);
+  assert.equal(userReviewsOf({ id: "C", steps: [step("C1", "review", 2, "orchestrator"), step("C2", "pending", 3)] }, who), undefined, "the orchestrator's");
+  assert.equal(userReviewsOf({ id: "D", steps: [step("D1", "done", 1)] }, who), undefined);
+});
+
+test("which levels wait for the user: level 1; every level without an orchestrator; level 2 not, in away mode neither", () => {
+  assert.deepEqual([1, 2, 3].map((l) => userReviews(l, who)), [true, false, false]);
+  assert.deepEqual([1, 2, 3].map((l) => userReviews(l, { orchestrating: true, away: true })), [true, false, false]);
+  assert.deepEqual([1, 2, 3].map((l) => userReviews(l, { orchestrating: false, away: false })), [true, true, true]);
+});
+
+test("the first wait for the user's review: the earliest by the estimates, else the first in the plan's order; one waiting now first", () => {
+  const all = [
+    q("RN", { status: "running", run: { state: "running", step: "RN1" }, steps: [step("RN1", "running", 2), step("RN2", "pending", 2)] }),
+    q("CL", { plan: after(["RN", "user"]), steps: [step("CL1", "pending", 2), step("CL2", "pending", 1), step("CL3", "pending", 1)] }),
+    q("DP", { plan: after(["CL", "user"]), steps: [step("DP1", "pending", 1)] }),
+  ];
+  const l = planLayout(all);
+  const h = 3_600_000;
+  assert.deepEqual(firstUserWait(l, all, who, { RN: { steps: 2, ms: 2 * h }, CL: { steps: 3, ms: 3 * h } }),
+    { queue: "CL", step: "CL2", title: "Step CL2", now: false, ms: 4 * h }, "RN's 2 h, then CL1 and CL2");
+  assert.deepEqual(firstUserWait(l, all, who, { RN: { steps: 2 }, CL: { steps: 3, ms: 3 * h } }),
+    { queue: "CL", step: "CL2", title: "Step CL2", now: false }, "RN has no estimate: no time");
+  const two = [...all, q("MP", { plan: after(["RN", "user"]), steps: [step("MP1", "pending", 1)] })];
+  const l2 = planLayout(two);
+  assert.deepEqual(planList(l2).map((n) => n.id), ["RN", "CL", "MP", "DP"]);
+  assert.equal(firstUserWait(l2, two, who, { RN: { steps: 2, ms: 2 * h }, CL: { steps: 3, ms: 3 * h }, MP: { steps: 1, ms: h }, DP: { steps: 1, ms: h } })?.step, "MP1",
+    "every point has a time: the earliest (MP1 at 3 h, CL2 at 4 h)");
+  assert.equal(firstUserWait(l2, two, who, { RN: { steps: 2, ms: 2 * h }, CL: { steps: 3, ms: 3 * h }, MP: { steps: 1 } })?.step, "CL2",
+    "one without a time: the plan's order");
+  const waiting = [...all, q("RV", { status: "waiting", steps: [step("RV1", "review", 1, "user")] })];
+  assert.deepEqual(firstUserWait(planLayout(waiting), waiting, who), { queue: "RV", step: "RV1", title: "Step RV1", now: true, ms: 0 }, "one waiting now comes first");
+  assert.equal(firstUserWait(l, all, { orchestrating: true, away: true }, {})?.step, "CL2", "away mode does not touch level 1");
+  assert.equal(firstUserWait(l, all, { orchestrating: false, away: false })?.step, "RN1", "without an orchestrator RN's own steps go to the user");
 });

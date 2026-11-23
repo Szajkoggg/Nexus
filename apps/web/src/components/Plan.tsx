@@ -15,8 +15,8 @@ import { act, actResult, enc, projectUrl, useAction, useQuery, type AttentionIte
 import type { EstimatesResponse } from "@nexus/protocol";
 import { t } from "../i18n.ts";
 import {
-  UNDO_SHOWN_MS, changeWords, drawPlan, dropChoices, estimateWords, lineDetails, moveTargets, planLayout, planList, roundedPath,
-  type PlanLayout, type PlanNode, type Why, type Words,
+  UNDO_SHOWN_MS, changeWords, drawPlan, dropChoices, estimateWords, firstUserWait, lineDetails, moveTargets, planLayout, planList, roundedPath,
+  userReviewsOf, type FirstWait, type ReviewWho, type UserReviews, type PlanLayout, type PlanNode, type Why, type Words,
 } from "../plan.ts";
 import { Button } from "./ui.tsx";
 import { TONE } from "./QueueRow.tsx";
@@ -69,18 +69,27 @@ type Actions = ReturnType<typeof usePlanActions> & {
   targets: (queue: string) => { id: string; title: string }[];
   /** The queues' expected times (estimates), once loaded. */
   estimates?: EstimatesResponse;
+  /** The steps left for the user's review, by queue (those with any). */
+  reviews: ReadonlyMap<string, UserReviews>;
+  /** The first point where the plan will wait for the user's review. */
+  first?: FirstWait;
 };
 
-export function PlanView({ project, queues, onOpen }: {
+export function PlanView({ project, queues, who, onOpen }: {
   project: string; queues: readonly QueueView[]; onOpen: (queue: string) => void;
+  /** Who reviews (the project's orchestrator, away mode): which steps will wait for the user's review. */
+  who: ReviewWho;
   /** Changes when the project's files do: the estimates are fetched again. */
 }) {
   const { reload: onChanged } = usePage();
   const layout = useMemo(() => planLayout(queues), [queues]);
   const base = usePlanActions(project, onChanged);
   const estimates = useQuery<EstimatesResponse>(projectUrl(project, "/estimates"), usePage().queues).data;
+  const { orchestrating, away } = who;
+  const reviews = useMemo(() => new Map(queues.flatMap((q) => { const r = userReviewsOf(q, { orchestrating, away }); return r ? [[q.id, r] as const] : []; })), [queues, orchestrating, away]);
+  const first = useMemo(() => firstUserWait(layout, queues, { orchestrating, away }, estimates?.queues), [layout, queues, orchestrating, away, estimates]);
   const actions: Actions = {
-    ...base, targets: (q) => moveTargets(layout, queues, q), estimates,
+    ...base, targets: (q) => moveTargets(layout, queues, q), estimates, reviews, ...(first ? { first } : {}),
     move: (q, after) => base.moveReplacing(q, after, planList(layout).find((n) => n.id === q)?.before.map((b) => b.queue) ?? []),
   };
   // Nothing planned: the view says nothing (the queue lists below say what there is).
@@ -96,6 +105,7 @@ export function PlanView({ project, queues, onOpen }: {
           <span className="flex items-center gap-1.5"><svg width="22" height="6" aria-hidden><line x1="0" y1="3" x2="22" y2="3" className="stroke-fg-3" strokeWidth="1.5" strokeDasharray="4 3" /></svg>{t("plan.legend.orchestrator")}</span>
         </span>
       </div>
+      {first && <FirstWaitLine first={first} />}
       {actions.error && <p className="mb-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger" role="alert">{actions.error}</p>}
       <div className="hidden @3xl:block"><Lanes layout={layout} onOpen={onOpen} actions={actions} /></div>
       <PhoneList layout={layout} onOpen={onOpen} actions={actions} />
@@ -116,6 +126,18 @@ export function PlanView({ project, queues, onOpen }: {
         </div>
       )}
     </section>
+  );
+}
+
+/** The first point where the plan will wait for the user's review: the step, and when (now, by the estimates, or unknown). */
+function FirstWaitLine({ first }: { first: FirstWait }) {
+  const time = first.ms !== undefined ? estimateWords({ steps: 1, ms: first.ms }) : undefined;
+  const when = first.now ? t("plan.firstWait.now") : time ? t("plan.firstWait.in", { time: say(time) }) : t("plan.firstWait.unknown");
+  return (
+    <p className="mb-3 flex items-baseline gap-1.5 text-xs text-review" data-plan-first-wait={`${first.queue}:${first.step}`}>
+      <span className="h-1.5 w-1.5 shrink-0 -translate-y-px rounded-full bg-review" aria-hidden />
+      <span className="min-w-0 [overflow-wrap:anywhere]">{t("plan.firstWait", { queue: first.queue, step: first.step, title: first.title ?? "", when })}</span>
+    </p>
   );
 }
 
@@ -388,6 +410,7 @@ function Card({ node: n, onOpen, actions, cardRef, drag, highlight, moving, styl
           <span className={`min-w-0 [overflow-wrap:anywhere] ${TONE[n.resting.tone][1]}`}>{n.resting.label}</span>
         </span>
       )}
+      <Reviews queue={n.id} actions={actions} />
       {(n.now || n.planned) && n.why.map((w) => (
         <span key={w.key} className={`mt-1 block text-xs ${WHY[w.tone]}`}>{say(w)}</span>
       ))}
@@ -417,6 +440,19 @@ function Card({ node: n, onOpen, actions, cardRef, drag, highlight, moving, styl
 }
 
 /** What the queue's steps left are expected to take, marked as an estimate (or that there is none yet). */
+/** The steps left for the user's review on a card: how many, the next by its name; "first wait for you" on the first. */
+function Reviews({ queue, actions }: { queue: string; actions: Actions }) {
+  const r = actions.reviews.get(queue);
+  if (!r) return null;
+  const first = actions.first?.queue === queue;
+  return (
+    <span className="mt-1 block text-xs text-review [overflow-wrap:anywhere]" data-plan-reviews={queue}>
+      {first && <span className="mr-1 rounded bg-review/15 px-1 py-px font-medium">{t("plan.firstWait.mark")}</span>}
+      {t("plan.reviews", { count: r.count, step: r.next.id, title: r.next.title ?? "" })}
+    </span>
+  );
+}
+
 function Estimate({ queue, estimates }: { queue: string; estimates?: EstimatesResponse }) {
   const words = estimateWords(estimates?.queues[queue]);
   if (!words || !estimates) return null;

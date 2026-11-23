@@ -71,6 +71,12 @@ The Queues view shows the plan above the queue lists (`apps/web/src/plan.ts`, `c
   restart or stopped, though planned after others, all stood first, so the first column no longer said what runs.
 - A queue that a planned queue waits for is shown even when it is not in the plan itself ("not in the plan"): it is
   what holds the plan. Approved queues outside the plan are one line under it, since they wait for someone to plan them.
+- Where the plan will wait for the user (the user's request, 2026-11-18, queue PVA): a card names its steps left that
+  surely wait for the user's review (level 1; every level when no orchestrator takes reviews; a level-2 step may be
+  handed to the user but is no sure wait, and in away mode it runs as 3) and the next of them; a line above the plan
+  names the first such point and its time from the estimates (a queue's estimate shared evenly over its steps left,
+  after its predecessors' ends). Of the queues' next points the earliest by time wins when every one has a time,
+  else the first in the plan's order, so a missing estimate does not reorder by guesswork (`firstUserWait`).
 - A line goes from a queue to the one that waits for it, solid in the accent colour where the user set the
   dependency, dashed where the orchestrator did; the card says "after A · set by you" too, so the phone's list (no
   lines) keeps who set what.

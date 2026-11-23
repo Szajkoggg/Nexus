@@ -421,7 +421,11 @@ form (or the orchestrator's `nexus run B start --after A [--after C]`, `--at "20
 This is the plan, shown at the top of a project's queues: what runs now, then what follows, with a line from each queue
 to those that wait for it (on the phone an ordered list), and on each queue its whole title, what it waits for and how long its steps
 left are expected to take ("about 2 h (estimate)", from finished steps on the same model and effort; "no estimate"
-until five steps are finished). The lines run at right angles around the queues, each on its own track, and a line
+until five steps are finished). A queue with steps left for your own review (level 1, or any level when the project
+has no orchestrator taking reviews) says how many and which is next ("2 steps for your review · next CL2 …"), and a
+line above the plan says where it will first wait for you and when, as far as the estimates go ("First wait for your
+review: MP1 Tiles · in about 3 h (estimate)"); that queue's card is marked "first wait for you". The first column holds
+what works or waits for you; a paused or stopped queue that waits for others stands after them. The lines run at right angles around the queues, each on its own track, and a line
 that skips a column passes through a gap kept free for it, so none runs behind a queue. Nexus starts by itself
 only the queues in it, each once the queues it waits for are done and it is
 approved; an approved queue outside the plan waits. A schedule missed while Nexus was not running does not start late;
