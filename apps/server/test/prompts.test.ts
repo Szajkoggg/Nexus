@@ -472,15 +472,100 @@ test("the review helper's texts: its briefing, its packet, the notices after a p
   event("h-3", { type: "review.passed_on", queue: "QH", step: "H2", round: 1, reasons: ["criterion", "deviation"], text: "H2 is done: checked in the diff. The calm look cannot be judged from the packet; the summary leaves out the dark theme." });
   change();
 
-  tr.section("H3 (level 3) passed on by Nexus without a helper: its runtime is beyond the usage threshold");
+  tr.section("H3: its packet at review level 3 (the helper never accepts)");
   event(orch, { type: "review.accepted", queue: "QH", step: "H2" });
   event("w-h", { type: "step.started", queue: "QH", step: "H3" });
   event("w-h", { type: "step.done", queue: "QH", step: "H3", summary: "H3 done.", commit: "ccc1111" });
+  tr.add(helperPacket(loadProjectState(store).queues.find((q) => q.id === "QH")!, step("H3"), {
+    stat: " src/b.ts | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)", diff: join(root, "sessions", "h-4", "diff.patch"),
+    range: { from: "bbb1111", to: "ccc1111" }, queueDir: join(root, ".nexus", "queues", "QH"),
+  }));
+
+  tr.section("H3 (level 3) passed on by Nexus without a helper: its runtime is beyond the usage threshold");
   ensureNexusSession(store);
   event("nexus", { type: "review.passed_on", queue: "QH", step: "H3", round: 1, reasons: ["unavailable"], text: "The review helper's runtime is beyond the usage threshold: five_hour at 95 %." });
   change();
 
   golden("helper", tr.text([[orch, "<orchestrator session>"], [root.replaceAll("\\", "/"), "<root>"], [root, "<root>"]]));
+});
+
+test("every notice of prompts.ts, rendered from fixtures, matches the golden file", async (t) => {
+  // The orchestrator's notices one by one, each in its variants, without driving the orchestrator (queue ACF): many of
+  // them follow a state the other tests do not reach, and their commands are checked against the CLI from this file
+  // (packages/cli/test/instruction-commands.test.ts). A new notice function fails here until it is rendered too.
+  const prompts = await import("../src/prompts.ts");
+  const { root, store, event, queue } = setup(t, "notices");
+  const tr = new Transcript("orchestrator");
+  queue({ id: "QN", title: "Queue QN", steps: [{ id: "N1", title: "Step N1", goal: "Goal of N1.", acceptance: ["N1 is done"] }] });
+  approveQueue(store, "QN");
+  store.writeSession({ protocol: 1, id: "w-n", project: "p", role: "worker", runtime: "claude", native_id: null, title: "w-n", cwd: root, launched_by: "nexus", created_at: now(), queue: "QN" });
+  event("w-n", { type: "step.started", queue: "QN", step: "N1" });
+  event("w-n", { type: "step.done", queue: "QN", step: "N1", summary: "N1 done.", commit: "aaa1111" });
+  const q = loadProjectState(store).queues.find((x) => x.id === "QN")!;
+  const st = q.steps[0]!;
+  const rendered = new Set<string>();
+  const show = (name: keyof typeof prompts & `${string}Notice`, label: string, n: string | { fact: string; todo: string }) => {
+    rendered.add(name);
+    tr.section(`${name}: ${label}`);
+    tr.add(typeof n === "string" ? n : prompts.noticeText(n));
+  };
+  const at = now();
+  const set = (dispute: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    done: "e-1", round: 1, fix: 0, requested_at: at, state: "accepted",
+    checks: [{ name: "npm test", ok: false, runs: [{ duration: 95, log: "checks/N1-1/npm-test.log", failed_tests: ["a.test.ts > empty list"], tail: "not ok 1 - empty list" }] }],
+    dispute: { event: "e-2", name: "npm test", evidence: "It fails on main too.", at, ...dispute }, ...extra,
+  }) as never;
+
+  show("restartedNotice", "nothing asked", prompts.restartedNotice([]));
+  show("restartedNotice", "two messages asked", prompts.restartedNotice(["Plan the layout.", "And the colours."]));
+  show("stepNoteNotice", "a note", prompts.stepNoteNotice({ queue: "QN", step: "N1", text: "The list looks crowded." }));
+  show("discardNotice", "two commits", prompts.discardNotice({ queue: "QN", step: "N1" }, ["ccc3333", "ddd4444"]));
+  show("rejectionNotice", "with a reason", prompts.rejectionNotice({ queue: "QN", step: "N1", text: "The colours are wrong." }));
+  show("rejectionNotice", "without", prompts.rejectionNotice({ queue: "QN", step: "N1", text: "" }));
+  show("fixAskedNotice", "the queue went on", prompts.fixAskedNotice({ queue: "QN", step: "N1", text: "Make the list calmer.", done: false }));
+  show("fixAskedNotice", "the queue is finished", prompts.fixAskedNotice({ queue: "QN", step: "N1", text: "Make the list calmer.", done: true }));
+  show("acceptedNoteNotice", "the last step", prompts.acceptedNoteNotice({ queue: "QN", step: "N1", text: "Smaller steps next time.", last: true }));
+  show("questionNotice", "with options", prompts.questionNotice({ qid: "q-1", queue: "QN", step: "N1", text: "Which layout?", options: ["grid", "list"], recommended: "grid", can_continue: true } as never));
+  show("approvalNotice", "no run", prompts.approvalNotice(q, { revision: 1 }));
+  show("liftNotice", "with the stop's reason", prompts.liftNotice(q, { reason: "condition: the disk is full" }));
+  show("levelToUserNotice", "", prompts.levelToUserNotice(q, st));
+  show("withdrawalNotice", "with a reason", prompts.withdrawalNotice(q, { revision: 1, reason: "Not yet." }));
+  show("reviewNotice", "level 2", prompts.reviewNotice(q, st));
+  show("awayOnNotice", "", prompts.awayOnNotice({ until: "2026-01-01T17:00:00.000Z" }));
+  show("awayEndNotice", "at its time", prompts.awayEndNotice({ why: "expired" }));
+  show("awayEndNotice", "turned off", prompts.awayEndNotice({ why: "off" }));
+  show("awayStuckNotice", "a next queue and a paused one", prompts.awayStuckNotice(q, st, "a level-1 review", [{ id: "QB", title: "Queue QB", waiting: "its checkout is busy" }], [{ id: "QC", title: "Queue QC" }]));
+  show("awayStuckNotice", "nothing in the plan", prompts.awayStuckNotice(q, st, "a question", []));
+  show("planHeldNotice", "the user's dependency", prompts.planHeldNotice(q, { queue: "QB", by: "user", waiting: "QB is stopped" }));
+  show("planHeldNotice", "the orchestrator's dependency", prompts.planHeldNotice(q, { queue: "QB", by: "orchestrator", waiting: "QB is cancelled" }));
+  for (const d of [
+    { at, kind: "accepted", after: ["QB"] }, { at, kind: "declined", after: [] }, { at, kind: "handed_back", queues: ["QB"] },
+    { at, kind: "removed", queues: ["QB"], set_by: "user", change: "c-1" }, { at, kind: "undone", change: "c-1" },
+  ] as const) show("planDecisionNotice", d.kind, prompts.planDecisionNotice(q, d as never, [{ at, kind: "removed", queues: ["QB"], change: "c-1" } as never]));
+  show("tagDecisionNotice", "an area accepted", prompts.tagDecisionNotice({ accepted: true, proposal: { kind: "area", name: "engine" } }));
+  show("tagDecisionNotice", "a rename accepted", prompts.tagDecisionNotice({ accepted: true, proposal: { kind: "rename", name: "core", from: "engine" } }));
+  show("tagDecisionNotice", "declined", prompts.tagDecisionNotice({ accepted: false, proposal: { kind: "activity", name: "p:terrain" } }));
+  show("metricNotice", "above its threshold", prompts.metricNotice(q, st, { name: "bundle-kb", value: 612, unit: "KB", at, event: "e-3", session: "w-n", commit: "abcdef1234", warn: { side: "above", limit: 500 } }));
+  show("fallbackNotice", "onto its fallback", prompts.fallbackNotice(q, { step: "N1", runtime: "codex", model: "gpt-6-luna", effort: "high", from: { runtime: "claude" }, reason: "Claude's five-hour usage is at 96 %" }));
+  show("fallbackNotice", "back", prompts.fallbackNotice(q, { step: "N1", runtime: "claude", from: { runtime: "codex" }, reason: "Claude's usage window reset", back: true }));
+  show("missedStartNotice", "", prompts.missedStartNotice(q, { at: "09:00" }));
+  show("mergeWaitNotice", "a run released", prompts.mergeWaitNotice(q, "C:/p has uncommitted changes", ["QM"]));
+  show("checkAcceptedNotice", "failing on the base, a fix queue proposed", prompts.checkAcceptedNotice(q, st, set({ base: { state: "failed", commit: "base123" } }, { fix_queue: { id: "fix-npm-test", created: true } })));
+  show("checkAcceptedNotice", "accepted by the orchestrator, no fix queue", prompts.checkAcceptedNotice(q, st, set({ decided: { verdict: "accept", reason: "Flaky.", at, event: "e-4" } })));
+  show("checkNotCommandNotice", "", prompts.checkNotCommandNotice(q, st, "the list looks calm"));
+  show("checkDecisionNotice", "not runnable on the base", prompts.checkDecisionNotice(q, st, set({ base: { state: "unrunnable", reason: "the base has no node_modules" } })));
+  show("cleanupWaitNotice", "", prompts.cleanupWaitNotice(q, "a file is locked"));
+  show("mergedNotice", "", prompts.mergedNotice(q, { into: "main", sha: "0123456789abcdef" }));
+  show("pausedNotice", "", prompts.pausedNotice(q, { step: "N1" }));
+  show("runEndNotice", "halted", prompts.runEndNotice(q, { state: "halted", step: "N1", reason: "step N1 failed: no disk" }));
+  show("runEndNotice", "finished", prompts.runEndNotice(q, { state: "finished" }));
+  show("maintenanceFindingsNotice", "", prompts.maintenanceFindingsNotice({ ...q, maintenance: "fix_small", report: { path: "<root>/.nexus/queues/QN/report.md", summary: "Two outdated packages.", findings: 2 } } as never));
+  show("staticAnalysisNotice", "", prompts.staticAnalysisNotice());
+  show("serverCrashNotice", "", prompts.serverCrashNotice({ at: "2026-01-01 09:00", error: "TypeError: x is undefined" }));
+
+  const notices = Object.keys(prompts).filter((k) => k.endsWith("Notice")).sort();
+  assert.deepEqual([...rendered].sort(), notices, "every notice function of prompts.ts is rendered here");
+  golden("notices", tr.text([[root.replaceAll("\\", "/"), "<root>"], [root, "<root>"]]));
 });
 
 test("the orchestrator's context care: the summary request, the fresh session's first message and summary.md match the golden file", (t) => {

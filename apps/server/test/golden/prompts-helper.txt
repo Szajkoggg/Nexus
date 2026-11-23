@@ -74,6 +74,30 @@ Since your last notice (for your overview; nothing to do):
 - step H1 of queue QH: accepted by the review helper (Claude Code, claude-sonnet-5-5, medium)
 
 Audit: review again step H1 of queue QH, which the review helper accepted (its packet: <root>/.nexus/sessions/h-2/packet.md; the step's work is in its queue's checkout). Judge it as you would review it, then answer: nexus review audit QH H1 agree|disagree --reason "why". A disagreement does not reopen the step: if the work needs a fix, draft it as a revision.
+== H3: its packet at review level 3 (the helper never accepts)
+[Nexus] Review step H3 of queue QH, round 1: "Step H3".
+
+Goal:
+Goal of H3.
+
+Acceptance:
+- H3 is done
+
+Checks reported this round (final: run nothing yourself):
+- none
+
+Review material:
+- none
+
+The worker's summary:
+H3 done.
+
+The step's change, bbb1111..ccc1111:
+ src/b.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+The whole diff: <root>/sessions/h-4/diff.patch (read the parts you need).
+
+Review level 3: the judgement is the orchestrator's, and you never accept. When a criterion you can check fails: nexus review send-back QH H3 "what to fix". Otherwise pass it on, with level among the reasons: nexus review pass-on QH H3 --why <reasons, level among them> --findings "what you checked and what you could not". The reasons: criterion, deviation, question, limit, doubt, level.
 == H3 (level 3) passed on by Nexus without a helper: its runtime is beyond the usage threshold
 -- to orchestrator 1
 [Nexus] Step H3 of queue QH is done and waits for your review: H3 done. 
