@@ -3,6 +3,7 @@
 // that wait for it, routed at right angles around the cards, solid where the user set the dependency and dashed where
 // the orchestrator did; on the phone, the same queues as one ordered list. Every card has the queue's whole title and
 // says what it waits for and which of its dependencies are the user's ("set by you").
+// "View" shows the same columns in a band per area tag instead (Lanes by area: ../plan.ts areaLanes), the cards compact.
 //
 // The user reorders it as a list (the rule is the server's, plan.ts reorderedFollowers): "After…" on a queue, or
 // dragging it onto another (onto "Next": to the front), whose halves offer "after it instead" and "also after it" (one
@@ -15,10 +16,10 @@ import { act, actResult, enc, projectUrl, useAction, useQuery, type AttentionIte
 import type { EstimatesResponse } from "@nexus/protocol";
 import { t } from "../i18n.ts";
 import {
-  UNDO_SHOWN_MS, changeWords, criticalPath, drawPlan, dropChoices, estimateWords, firstUserWait, lineDetails, markLook, markStoreKey, moveTargets,
-  planLayout, planList, roundedPath, shownMark, userReviewsOf, whatBlocks,
-  type Blocks, type CriticalPath, type FirstWait, type MarkLook, type PlanMark, type ReviewWho, type UserReviews, type PlanLayout,
-  type PlanNode, type Why, type Words,
+  UNDO_SHOWN_MS, areaLanes, changeWords, criticalPath, drawPlan, dropChoices, estimateWords, firstUserWait, lineDetails, markLook, markStoreKey, moveTargets,
+  planLayout, planList, roundedPath, shownMark, shownView, userReviewsOf, viewStoreKey, whatBlocks,
+  type AreaLanes, type Blocks, type CriticalPath, type FirstWait, type Lane, type LaneTags, type MarkLook, type PlanMark, type PlanViewKind, type ReviewWho,
+  type UserReviews, type PlanLayout, type PlanNode, type Why, type Words,
 } from "../plan.ts";
 import { Button } from "./ui.tsx";
 import { TONE } from "./QueueRow.tsx";
@@ -88,20 +89,21 @@ type Actions = ReturnType<typeof usePlanActions> & {
  * The project's mark, kept in the browser's storage (docs/ux/plan-view-modes.md): a way of looking, not project state,
  * so nothing is written to the plan or the project's files when it changes.
  */
-function useMark(project: string): [string | null, (m: PlanMark | null) => void] {
-  const key = markStoreKey(project);
+function useStored<T extends string>(key: string): [string | null, (m: T | null) => void] {
   const read = useCallback(() => { try { return localStorage.getItem(key); } catch { return null; } }, [key]);
-  const [mark, setMark] = useState<string | null>(read);
-  useEffect(() => setMark(read()), [read]);
-  const set = useCallback((m: PlanMark | null) => {
-    setMark(m);
-    try { if (m) localStorage.setItem(key, m); else localStorage.removeItem(key); } catch { /* storage off: the mark lasts the page */ }
+  const [value, setValue] = useState<string | null>(read);
+  useEffect(() => setValue(read()), [read]);
+  const set = useCallback((m: T | null) => {
+    setValue(m);
+    try { if (m) localStorage.setItem(key, m); else localStorage.removeItem(key); } catch { /* storage off: the choice lasts the page */ }
   }, [key]);
-  return [mark, set];
+  return [value, set];
 }
 
-export function PlanView({ project, queues, who, onOpen }: {
+export function PlanView({ project, queues, tags, who, onOpen }: {
   project: string; queues: readonly QueueView[];
+  /** The project's areas in the user's order and its renames: the lanes by area. */
+  tags: LaneTags;
   /** Opens a queue, or a step or question of it (what blocks' buttons). */
   onOpen: (queue: string, step?: string, qid?: string) => void;
   /** Who reviews (the project's orchestrator, away mode): which steps will wait for the user's review. */
@@ -110,6 +112,9 @@ export function PlanView({ project, queues, who, onOpen }: {
 }) {
   const { reload: onChanged } = usePage();
   const layout = useMemo(() => planLayout(queues), [queues]);
+  const [chosenView, chooseView] = useStored<PlanViewKind>(viewStoreKey(project));
+  const view = shownView(chosenView);
+  const areas = useMemo(() => (view === "lanes" ? areaLanes(layout, queues, tags) : undefined), [view, layout, queues, tags]);
   const base = usePlanActions(project, onChanged);
   const estimates = useQuery<EstimatesResponse>(projectUrl(project, "/estimates"), usePage().queues).data;
   const { orchestrating, away } = who;
@@ -118,7 +123,7 @@ export function PlanView({ project, queues, who, onOpen }: {
   const known = !!estimates && estimates.samples >= estimates.min;
   const cp = useMemo(() => (known && estimates ? criticalPath(layout, estimates.queues) : undefined), [known, layout, estimates]);
   const blocks = useMemo(() => whatBlocks(layout, queues), [layout, queues]);
-  const [chosen, choose] = useMark(project);
+  const [chosen, choose] = useStored<PlanMark>(markStoreKey(project));
   const mark = shownMark(chosen, { critical: !!cp, blocked: blocks.roots.length > 0 });
   const look = useMemo(() => (mark ? markLook(mark, cp, blocks) : undefined), [mark, cp, blocks]);
   // Under What blocks a root's title opens exactly what it waits for (its review, its question), else its queue. The
@@ -147,7 +152,7 @@ export function PlanView({ project, queues, who, onOpen }: {
         <h2 className="text-sm font-semibold uppercase tracking-wider text-fg-2">{t("plan.title")}</h2>
         <span className="text-xs text-fg-3" data-plan-hint>
           {mark === "critical" && cp ? criticalHint(cp) : mark === "blocked" ? blocksHint(blocks)
-            : <>{t("plan.hint")}<span className="hidden @3xl:inline"> {t("plan.hintLines")}</span></>}
+            : <>{t(areas ? "plan.lanes.hint" : "plan.hint")}<span className="hidden @3xl:inline"> {t("plan.hintLines")}</span></>}
         </span>
         <span className="flex-1" />
         <span className="hidden items-center gap-3 text-xs text-fg-3 @3xl:flex">
@@ -155,11 +160,14 @@ export function PlanView({ project, queues, who, onOpen }: {
           <span className="flex items-center gap-1.5"><svg width="22" height="6" aria-hidden><line x1="0" y1="3" x2="22" y2="3" className="stroke-fg-3" strokeWidth="1.5" strokeDasharray="4 3" /></svg>{t("plan.legend.orchestrator")}</span>
         </span>
       </div>
-      <Marks mark={mark} choose={choose} cp={cp} blocks={blocks} min={estimates?.min} />
+      <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+        <Views view={view} choose={chooseView} />
+        <Marks mark={mark} choose={choose} cp={cp} blocks={blocks} min={estimates?.min} />
+      </div>
       {first && <FirstWaitLine first={first} />}
       {actions.error && <p className="mb-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger" role="alert">{actions.error}</p>}
-      <div className="hidden @3xl:block"><Lanes layout={layout} onOpen={openCard} actions={actions} /></div>
-      <PhoneList layout={layout} onOpen={openCard} actions={actions} />
+      <div className="hidden @3xl:block"><Columns key={view} layout={layout} areas={areas} onOpen={openCard} actions={actions} /></div>
+      <PhoneList layout={layout} areas={areas} onOpen={openCard} actions={actions} />
       {actions.last && <UndoBar key={actions.last.change} change={actions.last} actions={actions} />}
       {layout.outside.length > 0 && (
         <div className="mt-4">
@@ -200,7 +208,7 @@ function blocksHint(b: Blocks): string {
 /**
  * The marks over the plan: Critical path and What blocks, none or one at a time (a second click or × clears it, and
  * Escape). Each can be chosen only while it can work: the path needs the estimates; what blocks, something waiting for
- * the user. Choosing writes nothing (the browser keeps it). The views (lanes, the time axis) join this row when built.
+ * the user. Choosing writes nothing (the browser keeps it).
  */
 function Marks({ mark, choose, cp, blocks, min }: { mark?: PlanMark; choose: (m: PlanMark | null) => void; cp?: CriticalPath; blocks: Blocks; min?: number }) {
   const chip = (m: PlanMark, label: string, can: boolean, title?: string) => {
@@ -213,10 +221,31 @@ function Marks({ mark, choose, cp, blocks, min }: { mark?: PlanMark; choose: (m:
     );
   };
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-1.5" data-box="marks">
+    <div className="flex flex-wrap items-center gap-1.5" data-box="marks">
       <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-fg-3">{t("plan.mark.label")}</span>
       {cp ? chip("critical", t("plan.mark.critical"), true) : chip("critical", t("plan.mark.noEstimates"), false, t("plan.mark.noEstimatesTitle", { min: min ?? 5 }))}
       {chip("blocked", t("plan.mark.blocked", { count: blocks.roots.length }), blocks.roots.length > 0, blocks.roots.length ? undefined : t("plan.mark.nothingBlocks"))}
+    </div>
+  );
+}
+
+/**
+ * The views of the plan, one at a time: Columns (the base view) and Lanes by area; the time axis joins with PVA4.
+ * Choosing writes nothing (the browser keeps it), and the mark stays.
+ */
+function Views({ view, choose }: { view: PlanViewKind; choose: (v: PlanViewKind | null) => void }) {
+  const item = (v: PlanViewKind) => (
+    <button key={v} onClick={() => choose(v === "columns" ? null : v)} aria-pressed={view === v} data-plan-view={v}
+      className={`whitespace-nowrap rounded-md px-2.5 py-0.5 text-xs max-lg:min-h-8 ${view === v ? "bg-surface-3 font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>
+      {t(`plan.view.${v}`)}
+    </button>
+  );
+  return (
+    <div className="flex items-center gap-1.5" data-box="views">
+      <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-fg-3">{t("plan.view.label")}</span>
+      <span role="group" aria-label={t("plan.view.label")} className="flex items-center gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5">
+        {item("columns")}{item("lanes")}
+      </span>
     </div>
   );
 }
@@ -235,13 +264,21 @@ function FirstWaitLine({ first }: { first: FirstWait }) {
 
 /** Two measures of the cards' heights are the same. */
 const sameHeights = (a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>) => a.size === b.size && [...a].every(([k, v]) => b.get(k) === v);
+/** Above and below a lane's name, inside its band. */
+const LANE_NAME_PAD = 8;
+
+/** A lane's name: its area (or "No area") and how many queues it has. */
+const laneName = (lane: Lane) => t("plan.lanes.name", { area: lane.area ?? t("plan.lanes.noArea"), count: lane.ids.length });
+/** The key a lane's name is measured by, beside the cards. */
+const laneKey = (i: number) => `lane:${i}`;
 
 /**
- * The lanes (layout A, ../plan.ts drawPlan): a column per step of the plan, the cards stacked in each at the column's
- * width, and the lines routed around them. The cards are measured where they are drawn, then placed; until then the
- * plan is not shown.
+ * The columns (layout A, ../plan.ts drawPlan): a column per step of the plan, the cards stacked in each at the column's
+ * width, and the lines routed around them. With `areas` (Lanes by area), the same columns in a band per lane, its name
+ * written upwards at its left, the cards compact (the lines say what their chips did). The cards and the lanes' names
+ * are measured where they are drawn, then placed; until then the plan is not shown.
  */
-function Lanes({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (queue: string) => void; actions: Actions }) {
+function Columns({ layout, areas, onOpen, actions }: { layout: PlanLayout; areas?: AreaLanes; onOpen: (queue: string) => void; actions: Actions }) {
   const box = useRef<HTMLDivElement>(null);
   const cards = useRef(new Map<string, HTMLElement>());
   const [width, setWidth] = useState(0);
@@ -252,8 +289,11 @@ function Lanes({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (queue
   /** The line clicked ("<from>><to>"), its details open under the queue it comes from. */
   const [sel, setSel] = useState<string>();
   const [panelHeight, setPanelHeight] = useState(0);
-  const drawing = useMemo(() => drawPlan(layout, heights, width), [layout, heights, width]);
-  const ready = width > 0 && layout.columns.every((c) => c.every((n) => heights.has(n.id)));
+  const bands = useMemo(() => (areas
+    ? { lanes: areas.lanes.map((x) => x.ids), min: areas.lanes.map((_, i) => (heights.get(laneKey(i)) ?? 0) + 2 * LANE_NAME_PAD) }
+    : undefined), [areas, heights]);
+  const drawing = useMemo(() => drawPlan(layout, heights, width, undefined, bands), [layout, heights, width, bands]);
+  const ready = width > 0 && layout.columns.every((c) => c.every((n) => heights.has(n.id))) && (areas?.lanes ?? []).every((_, i) => heights.has(laneKey(i)));
   const route = sel ? drawing.routes.find((r) => r.key === sel) : undefined;
   const source = route && drawing.boxes.get(route.from);
   const panelTop = source ? source.top + source.height + 10 : 0;
@@ -285,7 +325,7 @@ function Lanes({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (queue
     watch.observe(el);
     for (const c of cards.current.values()) watch.observe(c);
     return () => watch.disconnect();
-  }, [layout, drawing.column]);
+  }, [layout, areas, drawing.column]);
 
   /**
    * Where a dragged queue may be dropped: onto another queue, which splits in two ("after it instead", "also after
@@ -311,6 +351,19 @@ function Lanes({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (queue
   return (
     <div ref={box} className="scroll-thin overflow-x-auto pb-1">
       <div className={`relative ${ready ? "" : "invisible"}`} style={{ width: drawing.width, height }}>
+        {areas?.lanes.map((lane, i) => {
+          const b = drawing.bands[i];
+          return (
+            <div key={lane.area ?? ""} data-plan-lane={lane.area ?? ""} style={{ top: b?.top ?? 0, height: b ? b.bottom - b.top : 0, width: drawing.width }}
+              className="absolute left-0 rounded-[10px] border border-line bg-surface-2/55">
+              {/* The name, written upwards in the gutter left of the first column, where no line runs. */}
+              <span className="absolute inset-y-0 left-1 flex w-[18px] items-center justify-center">
+                <span ref={(el) => { if (el) cards.current.set(laneKey(i), el); else cards.current.delete(laneKey(i)); }} data-box={`lane ${lane.area ?? ""}`}
+                  className="inline-block rotate-180 whitespace-nowrap text-[11px] font-semibold tracking-wide text-fg-3 [writing-mode:vertical-rl]">{laneName(lane)}</span>
+              </span>
+            </div>
+          );
+        })}
         {layout.columns.map((col, c) => (
           <h3 key={c} {...(c === 1 ? dropTarget(null) : {})} data-plan-drop={c === 1 ? "first" : undefined} data-box={`column ${c}`}
             style={{ left: drawing.x[c], maxWidth: drawing.column }}
@@ -324,6 +377,7 @@ function Lanes({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (queue
           const choices = dragged && over === n.id ? dropChoices(layout, dragged, n.id) : undefined;
           return (
             <Card key={n.id} node={n} onOpen={onOpen} actions={actions} highlight={over === n.id} moving={dragged === n.id}
+              {...(areas ? { compact: true, also: areas.also.get(n.id) } : {})}
               style={{ position: "absolute", left: b?.left ?? 0, top: b?.top ?? 0, width: drawing.column }}
               chip={(from) => toggle(`${from}>${n.id}`)} chosen={route?.to === n.id ? route.from : undefined}
               drag={{
@@ -448,24 +502,32 @@ function UndoBar({ change, actions }: { change: Change; actions: Actions }) {
   );
 }
 
-/** The phone's list: the columns one after another under their titles. */
-function PhoneList({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (queue: string) => void; actions: Actions }) {
+/**
+ * The phone's list: the columns one after another under their titles. With `areas` (Lanes by area), a group per lane
+ * under its name instead, the cards in the plan's order, each naming its column; the chips stay (there are no lines).
+ */
+function PhoneList({ layout, areas, onOpen, actions }: { layout: PlanLayout; areas?: AreaLanes; onOpen: (queue: string) => void; actions: Actions }) {
   const list = planList(layout);
+  const byId = new Map(list.map((n) => [n.id, n]));
   /** The "after" chip tapped: the line's details under its card (`to`). Dragging is the desktop's. */
   const [open, setOpen] = useState<{ from: string; to: string }>();
+  const item = (n: PlanNode, head?: string, first?: boolean) => {
+    const from = open?.to === n.id ? open.from : undefined;
+    return (
+      <li key={n.id}>
+        {head && <h3 className={`mb-1.5 text-xs font-medium text-fg-3 ${first ? "" : "mt-4"}`} {...(areas ? { "data-box": `lane ${head}` } : {})}>{head}</h3>}
+        <Card node={n} onOpen={onOpen} actions={actions} chosen={from} chipsDone
+          {...(areas ? { column: columnTitle(n.column), also: areas.also.get(n.id) } : {})}
+          chip={(f) => setOpen(from === f ? undefined : { from: f, to: n.id })} />
+        {from && <LinePanel layout={layout} from={from} to={n.id} actions={actions} onClose={() => setOpen(undefined)} />}
+      </li>
+    );
+  };
   return (
     <ol className="space-y-2 @3xl:hidden">
-      {list.map((n, i) => {
-        const from = open?.to === n.id ? open.from : undefined;
-        return (
-          <li key={n.id}>
-            {(i === 0 || list[i - 1]!.column !== n.column) && <h3 className={`mb-1.5 text-xs font-medium text-fg-3 ${i ? "mt-4" : ""}`}>{columnTitle(n.column)}</h3>}
-            <Card node={n} onOpen={onOpen} actions={actions} chosen={from} chipsDone
-              chip={(f) => setOpen(from === f ? undefined : { from: f, to: n.id })} />
-            {from && <LinePanel layout={layout} from={from} to={n.id} actions={actions} onClose={() => setOpen(undefined)} />}
-          </li>
-        );
-      })}
+      {areas
+        ? areas.lanes.flatMap((lane, li) => lane.ids.flatMap((id, i) => { const n = byId.get(id); return n ? [item(n, i === 0 ? laneName(lane) : undefined, li === 0 && i === 0)] : []; }))
+        : list.map((n, i) => item(n, i === 0 || list[i - 1]!.column !== n.column ? columnTitle(n.column) : undefined, i === 0))}
     </ol>
   );
 }
@@ -474,12 +536,15 @@ function PhoneList({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (q
  * A queue in the plan: its status now, or what it waits for and the queues before it ("set by you", with ↩ to hand it
  * back); the orchestrator's proposal with Accept and Decline; "After…" to move it. With `chip`, an "after" chip opens
  * its line's details (`chosen`: the one open); `chipsDone`: a done predecessor's too (the phone's: it has no line).
- * `moving`: it is being dragged; `children`: what lies over it (the halves of a drop target).
+ * `moving`: it is being dragged; `children`: what lies over it (the halves of a drop target). Lanes by area: `compact`
+ * (the desktop's) leaves the chips out, the lines say the same and open the same details; `column` names its column
+ * (the phone's groups); `also` names its steps left in other areas.
  */
-function Card({ node: n, onOpen, actions, cardRef, drag, highlight, moving, style, chip, chosen, chipsDone, children }: {
+function Card({ node: n, onOpen, actions, cardRef, drag, highlight, moving, style, chip, chosen, chipsDone, compact, column, also, children }: {
   node: PlanNode; onOpen: (queue: string) => void; actions: Actions; cardRef?: (el: HTMLElement | null) => void;
   drag?: React.HTMLAttributes<HTMLDivElement> & { draggable?: boolean }; highlight?: boolean; moving?: boolean; style?: React.CSSProperties;
-  chip?: (from: string) => void; chosen?: string; chipsDone?: boolean; children?: React.ReactNode;
+  chip?: (from: string) => void; chosen?: string; chipsDone?: boolean; compact?: boolean; column?: string;
+  also?: readonly { area: string; steps: readonly string[] }[]; children?: React.ReactNode;
 }) {
   const [dot, word] = TONE[n.status.tone];
   // A mark changes the frame and the dimming, and adds a word on the top line: the boxes keep their places.
@@ -495,6 +560,7 @@ function Card({ node: n, onOpen, actions, cardRef, drag, highlight, moving, styl
       {children}
       <div className="flex min-h-5 flex-wrap items-center gap-x-2">
         <span className="font-mono text-xs text-fg-3">{n.id}</span>
+        {column && <span className="text-[11px] text-fg-3" data-plan-column={n.id}>{column}</span>}
         {heldBy && <span className="shrink-0 whitespace-nowrap text-[11px] text-fg-2" title={heldBy.join(", ")} data-plan-held={n.id}>{heldBy.length > 1 ? t("plan.blocks.heldByMore", { queues: heldBy[0]!, more: heldBy.length - 1 }) : t("plan.blocks.heldBy", { queues: heldBy[0]! })}</span>}
         <span className="flex-1" />
         {n.movable && <AfterMenu queue={n.id} actions={actions} />}
@@ -516,7 +582,10 @@ function Card({ node: n, onOpen, actions, cardRef, drag, highlight, moving, styl
       {(n.now || n.planned) && n.why.map((w) => (
         <span key={w.key} className={`mt-1 block text-xs ${WHY[w.tone]}`}>{say(w)}</span>
       ))}
-      {n.before.length > 0 && (
+      {also?.map((a) => (
+        <span key={a.area} className="mt-1 block text-xs text-fg-2 [overflow-wrap:anywhere]" data-plan-also={`${n.id}:${a.area}`}>{t("plan.lanes.also", { area: a.area, steps: a.steps.join(", ") })}</span>
+      ))}
+      {!compact && n.before.length > 0 && (
         <span className="mt-1.5 flex flex-wrap gap-1">
           {n.before.map((b) => {
             const words = `${t("plan.after", { queue: b.queue })}${b.by === "user" ? ` · ${t("plan.setByYou")}` : ""}${b.done ? ` · ${t("plan.done")}` : ""}`;

@@ -442,6 +442,11 @@ approval, a failed start, a stop or a pause, a predecessor cancelled or gone) in
 lit ("held · ST2"); the rest is dimmed, and what waits by itself (the usage window, a time, a checkout) is named apart.
 The list of what waits is "Waiting for you" beside the plan; on the plan, a waiting queue's title opens exactly that
 review or question.
+"View" switches the layout the same way, writing nothing: **Columns** (the plan as above) or **Lanes by area**, the same
+columns in a band per area tag: a queue's own area, else the one most of its steps left carry, else "No area" (last);
+the bands follow the project's area list (Settings, tags). Each queue is in one band; a step in another area is named
+on its card ("also engine: ST31"). On a desktop the cards are compact (the lines say what the "after" chips did; click
+one for its details); on the phone each band is a group, its cards naming their column and keeping their chips.
 To change the order, use "After…" on a queue in the plan (or drag it onto another; onto "Next" to put it first): the
 queue then waits for the one you chose, and the queues that waited for it wait for what it waited for before, as when
 you move an item in a list. Dragging a queue onto another splits the target in two: "After B instead of A" (the move,

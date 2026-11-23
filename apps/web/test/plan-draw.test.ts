@@ -148,3 +148,94 @@ test("the path: corners rounded, less on a short stretch; nothing for no points"
   assert.equal(roundedPath([[0, 0], [4, 0], [4, 30]]), "M0,0 L2,0 Q4,0 4,2 L4,30");
   assert.equal(roundedPath([]), "");
 });
+
+// ---------------------------------------------------------------- lanes by area (PVA3)
+
+/** Nexus's plan in its lanes, as docs/ux/mockups/26-plan-modes.html?m=lanes draws them. */
+const NEXUS_LANES = [["PL", "ST2", "IO", "ST3", "LG", "DG"], ["MX", "RX", "TS"], ["CH", "RA"], ["NB"]];
+
+/** What lanes add to the faults: a box outside its lane, lanes overlapping, a line in the gutter (the lanes' names), a line not drawn. */
+function laneFaults(l: PlanLayout, d: PlanDrawing, lanes: readonly (readonly string[])[], gutter = 30): string[] {
+  const out = faults(d);
+  lanes.forEach((ids, i) => {
+    const b = d.bands[i]!;
+    for (const id of ids) {
+      const x = d.boxes.get(id)!;
+      if (x.top < b.top || x.top + x.height > b.bottom) out.push(`${id} outside lane ${i}`);
+    }
+    for (const [key, g] of d.gaps) if (lanes[i]!.includes(key.split(">")[1]!.split("@")[0]!) && (g.top < b.top || g.top + g.height > b.bottom)) out.push(`gap ${key} outside lane ${i}`);
+    if (i && d.bands[i - 1]!.bottom > b.top) out.push(`lane ${i - 1} overlaps lane ${i}`);
+  });
+  for (const r of d.routes) if (r.points.some(([x]) => x < gutter)) out.push(`${r.key} runs in the gutter`);
+  const drawn = new Set(d.routes.map((r) => r.key));
+  for (const e of l.edges) if (!drawn.has(`${e.from}>${e.to}`)) out.push(`${e.from}>${e.to} not drawn`);
+  return out;
+}
+
+test("lanes: Nexus's plan in a band per lane, the columns kept, at several widths and with long titles: no fault", () => {
+  const l = planLayout(NEXUS);
+  const nodes = l.columns.flat();
+  for (const width of [640, 788, 1160]) {
+    for (let k = 0; k < 6; k++) {
+      // k = 5: long titles, boxes three times as high.
+      const heights = new Map(nodes.map((n, i) => [n.id, (k === 5 ? 3 : 1) * (56 + ((i * 37 + k * 53) % 90))]));
+      const d = drawPlan(l, heights, width, undefined, { lanes: NEXUS_LANES, min: [60, 60, 120, 80] });
+      assert.deepEqual(laneFaults(l, d, NEXUS_LANES), [], `width ${width}, heights ${k}`);
+      l.columns.forEach((c, i) => c.forEach((n) => assert.equal(d.boxes.get(n.id)!.left, d.x[i], `${n.id} stays in its column`)));
+      assert.equal(d.x[0], 30, "the gutter for the lanes' names");
+      assert.ok(d.bands[2]!.bottom - d.bands[2]!.top >= 120, "a lane is as high as its name needs");
+      // Within a lane and column, the plan's order.
+      for (const lane of NEXUS_LANES) for (const c of l.columns) {
+        const here = c.map((n) => n.id).filter((id) => lane.includes(id));
+        assert.deepEqual([...here].sort((a, b) => d.boxes.get(a)!.top - d.boxes.get(b)!.top), here);
+      }
+    }
+  }
+});
+
+test("lanes: a line that skips a column passes it in its target's lane; one between lanes changes height between the columns", () => {
+  const l = planLayout(NEXUS);
+  const d = drawPlan(l, new Map(l.columns.flat().map((n) => [n.id, 100])), 788, undefined, { lanes: NEXUS_LANES });
+  // MX (engine) > RA (orchestrator) skips Next and Then: its gaps are in the orchestrator's lane.
+  for (const c of [1, 2]) {
+    const g = d.gaps.get(`MX>RA@${c}`)!;
+    assert.ok(g.top >= d.bands[2]!.top && g.top + g.height <= d.bands[2]!.bottom, `MX>RA's gap in column ${c}`);
+  }
+  // Every vertical stretch of a line between lanes is in a gap between two columns.
+  for (const r of d.routes) for (const s of segments(r.points)) {
+    if (s.a[0] !== s.b[0]) continue;
+    assert.ok(d.x.some((x) => s.a[0] > x + d.column && s.a[0] < x + d.column + 36), `${r.key}'s vertical run at ${s.a[0]} is between columns`);
+  }
+  assert.deepEqual(laneFaults(l, d, NEXUS_LANES), []);
+});
+
+test("lanes: random plans in random lanes have no fault and draw every line", () => {
+  let seed = 11;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+  for (let k = 0; k < 300; k++) {
+    const now = 1 + Math.floor(rnd() * 3), more = 2 + Math.floor(rnd() * 10);
+    const all: PlanQueue[] = [];
+    for (let i = 0; i < now; i++) all.push(q(`N${i}`, { status: "running", run: { state: "running" } }));
+    for (let i = 0; i < more; i++) {
+      const before = all.filter(() => rnd() < 0.3).slice(0, 3).map((p) => [p.id, rnd() < 0.5 ? "user" : "orchestrator"] as [string, "user" | "orchestrator"]);
+      all.push(q(`P${i}`, { plan: planned(500 - i, ...before) }));
+    }
+    const l = planLayout(all);
+    const count = 1 + Math.floor(rnd() * 4);
+    const lanes: string[][] = Array.from({ length: count }, () => []);
+    for (const n of l.columns.flat()) lanes[Math.floor(rnd() * count)]!.push(n.id);
+    const shown = lanes.filter((x) => x.length);
+    const d = drawPlan(l, new Map(l.columns.flat().map((n) => [n.id, 50 + Math.floor(rnd() * 120)])), 500 + Math.floor(rnd() * 900), undefined, { lanes: shown });
+    assert.deepEqual(laneFaults(l, d, shown), [], `plan ${k}`);
+    assert.equal(d.boxes.size, l.columns.flat().length, `plan ${k}: every queue once`);
+  }
+});
+
+test("lanes: a queue in no lane given still gets a box (a last lane); an empty plan draws nothing", () => {
+  const l = planLayout(NEXUS);
+  const d = drawPlan(l, new Map(l.columns.flat().map((n) => [n.id, 80])), 788, undefined, { lanes: [["MX", "PL"]] });
+  assert.equal(d.boxes.size, l.columns.flat().length);
+  assert.equal(d.bands.length, 2);
+  const empty = drawPlan(planLayout([]), new Map(), 788, undefined, { lanes: [] });
+  assert.deepEqual([empty.width, empty.boxes.size, empty.routes.length, empty.bands.length], [0, 0, 0, 0]);
+});

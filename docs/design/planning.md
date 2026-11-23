@@ -86,8 +86,17 @@ The Queues view shows the plan above the queue lists (`apps/web/src/plan.ts`, `c
   missing estimate is no time known, so a chain through it is not compared rather than counted as 0 h; a tie goes to
   the chain first in the plan's order; a loop is cut where it closes. What blocks (`whatBlocks`) takes as roots only
   what waits for the user now; what ends by itself (usage window, time, checkout, limit, merge train, the
-  orchestrator's review) is named apart, not a root. The View group (lanes, time axis) joins the row once a second
-  view is built: one choice is no choice.
+  orchestrator's review) is named apart, not a root.
+- Views (queue PVA, PVA3): Columns and Lanes by area, one at a time, kept like the mark (the device's, per project);
+  the time axis joins with PVA4. The View group came with the lanes: one choice is no choice. A lane is a band across
+  the same columns (`areaLanes`, `drawPlan` with bands): a queue's own area, else the area most of its steps left
+  carry (a tie: the first step's), else "No area"; renamed areas read as their new name. The bands follow the
+  project's area list, then other areas by name, "No area" last, so starting a queue never moves a band; an empty one
+  is not drawn. Each queue is in one band, its steps in other areas named on the card, not drawn twice. Within a band
+  a column keeps the plan's order; a line that skips a column passes it in a gap in its target's band, and a line
+  between bands changes height only between the columns, so no line crosses a card or a band's name (written upwards
+  in a gutter left of the first column). On a desktop the cards drop their chips (the lines and the line panel say
+  the same); on the phone, where there are no lines, each band is a group whose cards name their column and keep them.
 - A line goes from a queue to the one that waits for it, solid in the accent colour where the user set the
   dependency, dashed where the orchestrator did; the card says "after A · set by you" too, so the phone's list (no
   lines) keeps who set what.

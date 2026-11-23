@@ -209,6 +209,17 @@ Two points differ from the mockup, both to keep its own rules:
   title opens exactly its review or question; a held card says "held · ST2" on its top line, so no card grows and
   nothing moves.
 
+## As built in PVA3
+
+- The View group joins the row: Columns | Lanes by area (the time axis comes with PVA4). Like the mark, the choice is
+  the browser's per project (`nexus.plan.view.<project>`), and a mark works on either view.
+- The lanes as drawn above: bands across the same columns, the name upright in a 30 px gutter (no line runs there), a
+  band at least as high as its name. A line that skips a column has its gap in the target's band (MX > RA in the
+  orchestrator's); a line between bands changes height in the gaps between columns.
+- A compact card keeps the full title, the state, the review points, the estimate, After… and "also engine: ST31";
+  dragging, the line panel and Undo work as in Columns. The seed has no area list of its own, so its bands read by
+  name (dashboard, engine, orchestrator), as the mockup drew them.
+
 ## What each step builds
 
 | Step | Builds | Fills |

@@ -3,6 +3,8 @@
 // draws it (lanes on a desktop, an ordered list on the phone).
 import { runGoing } from "@nexus/protocol/status-rules";
 import { compareIds } from "@nexus/protocol/ids";
+import { renamedTag } from "@nexus/protocol/tags";
+import type { TagsFile } from "@nexus/protocol";
 import { formatClock, t, type Key, type Params } from "./i18n.ts";
 import { openPlan, queueStatus, type HonestStatus, type QueueLike } from "./queueStatus.ts";
 
@@ -233,6 +235,71 @@ export function moveTargets(l: PlanLayout, all: readonly PlanQueue[], queue: str
 /** The phone's list: the columns one after another, each in its order. */
 export const planList = (l: PlanLayout): PlanNode[] => l.columns.flat();
 
+/** What the lanes read of a queue (a QueueView fits): its own area, and its steps' (their own over the queue's, renamed). */
+export interface LaneQueue {
+  id: string;
+  area?: string;
+  steps: readonly { id: string; status: string; closing?: boolean; integration?: boolean; tags?: { area?: string } }[];
+}
+
+/** The project's tag lists as the lanes read them (.nexus/tags.yaml): its areas in the user's order, its renames. */
+export interface LaneTags { areas: readonly string[]; renames: TagsFile["renames"] }
+
+/** A lane: an area (none: "No area") and its queues in the plan's order. */
+export interface Lane { area?: string; ids: string[] }
+
+export interface AreaLanes {
+  lanes: Lane[];
+  /** A queue's steps left in other areas than its lane's, by area in the order its steps come. */
+  also: Map<string, { area: string; steps: string[] }[]>;
+}
+
+/** A queue's own steps (not Nexus's closing or integration step) that are left: the steps its lane is chosen by. */
+function stepsLeft(q: LaneQueue) {
+  const own = q.steps.filter((s) => !s.closing && !s.integration);
+  const left = own.filter((s) => !CLOSED_STEP.has(s.status));
+  return left.length ? left : own;
+}
+
+/**
+ * A queue's lane (docs/ux/plan-view-modes.md, "Lanes by area"): its own area tag; without one, the area most of its steps
+ * left carry (a tie: the first such step's); with none at all, none ("No area"). Renamed areas read as their new name.
+ */
+export function areaOf(q: LaneQueue, renames: TagsFile["renames"]): string | undefined {
+  if (q.area) return renamedTag(q.area, renames);
+  const count = new Map<string, number>();
+  for (const s of stepsLeft(q)) if (s.tags?.area) { const a = renamedTag(s.tags.area, renames); count.set(a, (count.get(a) ?? 0) + 1); }
+  let best: string | undefined, most = 0;
+  for (const [a, n] of count) if (n > most) { best = a; most = n; }
+  return best;
+}
+
+/**
+ * The plan in lanes by area: each shown queue in exactly one lane, in the plan's order (planList: the columns, each in
+ * its order); the lanes in the project's area list's order, then the areas not in it by name, "No area" last; an
+ * empty lane is not drawn. A queue's steps left in another area are named (`also`), not drawn twice.
+ */
+export function areaLanes(l: PlanLayout, queues: readonly LaneQueue[], tags: LaneTags): AreaLanes {
+  const byId = new Map(queues.map((q) => [q.id, q]));
+  const lanes = new Map<string | undefined, string[]>();
+  const also = new Map<string, { area: string; steps: string[] }[]>();
+  for (const n of planList(l)) {
+    const q = byId.get(n.id);
+    const area = q ? areaOf(q, tags.renames) : undefined;
+    lanes.set(area, [...(lanes.get(area) ?? []), n.id]);
+    const other = new Map<string, string[]>();
+    for (const s of q ? stepsLeft(q) : []) {
+      const a = s.tags?.area ? renamedTag(s.tags.area, tags.renames) : undefined;
+      if (a && a !== area) other.set(a, [...(other.get(a) ?? []), s.id]);
+    }
+    if (other.size) also.set(n.id, [...other].map(([a, steps]) => ({ area: a, steps })));
+  }
+  const listed = tags.areas.map((a) => renamedTag(a, tags.renames));
+  const place = (a: string | undefined) => (a === undefined ? 2e9 : listed.includes(a) ? listed.indexOf(a) : 1e9);
+  const order = [...lanes.keys()].sort((a, b) => place(a) - place(b) || (a ?? "").localeCompare(b ?? ""));
+  return { lanes: order.map((area) => ({ ...(area !== undefined ? { area } : {}), ids: lanes.get(area)! })), also };
+}
+
 /** The drawing's sizes in CSS pixels (docs/ux/plan-view-options.md, layout A). */
 const PLAN_SIZES = {
   /** Between two columns: the room for the lines' tracks. */
@@ -245,7 +312,16 @@ const PLAN_SIZES = {
   slot: 18,
   /** A column's least width; narrower plans scroll sideways. */
   minColumn: 160,
+  /** Lanes: the room left of the columns for each lane's name (written upwards). */
+  gutter: 30,
+  /** Lanes: inside a lane, above and below its boxes. */
+  pad: 10,
+  /** Lanes: between two lanes. */
+  laneGap: 8,
 };
+
+/** The lanes to draw the plan in (areaLanes): each lane's queues, and the least height each needs (its name's). */
+export interface PlanBands { lanes: readonly (readonly string[])[]; min?: readonly number[] }
 
 export interface PlanBox { left: number; top: number; width: number; height: number }
 
@@ -263,6 +339,8 @@ export interface PlanDrawing {
   /** The gaps kept free for the lines that skip a column, by "<from>><to>@<column>". */
   gaps: Map<string, PlanBox>;
   routes: PlanRoute[];
+  /** Lanes: each lane's top and bottom (none without lanes). */
+  bands: { top: number; bottom: number }[];
 }
 
 /** Two lines closer than this (px) would read as one: ports and tracks keep them apart. */
@@ -276,11 +354,17 @@ const APART = 3;
  * vertical track of its own, so no two lines share a stretch and none runs through a box. `heights` are the boxes'
  * heights at the column width the drawing gives (the caller measures them there). A line whose target is not to the
  * right of its source (a cycle) is not drawn: the card's chips still name it.
+ *
+ * With `bands` (lanes by area) the columns stay, but each lane is a band of its own across them, one under another, its
+ * name in the gutter left of the first column: a column's queues of a lane stack inside the lane, and a line that
+ * skips a column passes it in its target's lane. A line from one lane to another changes height in the gaps between
+ * the columns, so it never crosses a box or a lane's name.
  */
-export function drawPlan(l: PlanLayout, heights: ReadonlyMap<string, number>, width: number, s = PLAN_SIZES): PlanDrawing {
+export function drawPlan(l: PlanLayout, heights: ReadonlyMap<string, number>, width: number, s = PLAN_SIZES, bands?: PlanBands): PlanDrawing {
   const n = l.columns.length;
-  const column = Math.max(s.minColumn, (width - Math.max(0, n - 1) * s.gap) / Math.max(1, n));
-  const x = l.columns.map((_, c) => c * (column + s.gap));
+  const left = bands ? s.gutter : 0;
+  const column = Math.max(s.minColumn, (width - left - Math.max(0, n - 1) * s.gap) / Math.max(1, n));
+  const x = l.columns.map((_, c) => left + c * (column + s.gap));
   const col = new Map<string, number>();
   l.columns.forEach((nodes, c) => nodes.forEach((q) => col.set(q.id, c)));
   const h = (id: string) => Math.max(0, heights.get(id) ?? 0);
@@ -292,23 +376,44 @@ export function drawPlan(l: PlanLayout, heights: ReadonlyMap<string, number>, wi
   const mid = (id: string) => boxes.get(id)!.top + h(id) / 2;
   const gapKey = (key: string, c: number) => `${key}@${c}`;
   const gapMid = (key: string, c: number) => gaps.get(gapKey(key, c))!.top + s.slot / 2;
-  let height = s.head;
-  l.columns.forEach((nodes, c) => {
-    const passing = edges.filter((e) => e.c0 < c && c < e.c1)
-      .map((e) => ({ key: e.key, want: e.c0 === c - 1 ? mid(e.from) : gapMid(e.key, c - 1) }))
-      .sort((a, b) => a.want - b.want || compareIds(a.key, b.key));
-    let y = s.head, qi = 0, gi = 0;
-    while (qi < nodes.length || gi < passing.length) {
-      const q = nodes[qi], g = passing[gi];
-      if (g && (!q || g.want < y + h(q.id))) {
-        gaps.set(gapKey(g.key, c), { left: x[c]!, top: y, width: column, height: s.slot });
-        y += s.slot + s.vgap; gi++;
-      } else if (q) {
-        boxes.set(q.id, { left: x[c]!, top: y, width: column, height: h(q.id) });
-        y += h(q.id) + s.vgap; qi++;
+  // Without lanes, one band of every queue. A queue in no lane given goes in a last one (so every queue has a box).
+  const given = bands ? bands.lanes.map((ids) => ids.filter((id) => col.has(id))) : [[...col.keys()]];
+  const inLane = new Map<string, number>();
+  given.forEach((ids, b) => ids.forEach((id) => { if (!inLane.has(id)) inLane.set(id, b); }));
+  const rest = [...col.keys()].filter((id) => !inLane.has(id));
+  if (rest.length) { rest.forEach((id) => inLane.set(id, given.length)); given.push(rest); }
+  /** Where a gap wants to be when its line comes from a lane not placed yet (one below): after the lane's boxes. */
+  const BELOW = 1e9;
+  let height = s.head, top = s.head;
+  const laneBoxes: { top: number; bottom: number }[] = [];
+  given.forEach((_, b) => {
+    const y0 = top + (bands ? s.pad : 0);
+    let bottom = y0;
+    l.columns.forEach((all, c) => {
+      const nodes = all.filter((q) => inLane.get(q.id) === b);
+      const passing = edges.filter((e) => e.c0 < c && c < e.c1 && inLane.get(e.to) === b)
+        .map((e) => ({ key: e.key, want: e.c0 === c - 1 ? (boxes.has(e.from) ? mid(e.from) : BELOW) : gapMid(e.key, c - 1) }))
+        .sort((a, b) => a.want - b.want || compareIds(a.key, b.key));
+      let y = y0, qi = 0, gi = 0;
+      while (qi < nodes.length || gi < passing.length) {
+        const q = nodes[qi], g = passing[gi];
+        if (g && (!q || g.want < y + h(q.id))) {
+          gaps.set(gapKey(g.key, c), { left: x[c]!, top: y, width: column, height: s.slot });
+          y += s.slot + s.vgap; gi++;
+        } else if (q) {
+          boxes.set(q.id, { left: x[c]!, top: y, width: column, height: h(q.id) });
+          y += h(q.id) + s.vgap; qi++;
+        }
       }
+      if (y > y0) bottom = Math.max(bottom, y - s.vgap);
+      if (!bands) height = Math.max(height, y - s.vgap);
+    });
+    if (bands) {
+      const end = Math.max(bottom + s.pad, top + (bands.min?.[b] ?? 0));
+      laneBoxes.push({ top, bottom: end });
+      height = end;
+      top = end + s.laneGap;
     }
-    height = Math.max(height, y - s.vgap);
   });
 
   // The heights each line passes at: its port on the source, the gaps' middles, its port on the target.
@@ -369,7 +474,7 @@ export function drawPlan(l: PlanLayout, heights: ReadonlyMap<string, number>, wi
     }
     return { key: e.key, from: e.from, to: e.to, by: e.by, points };
   });
-  return { x, column, width: n ? x[n - 1]! + column : 0, height, boxes, gaps, routes };
+  return { x, column, width: n ? x[n - 1]! + column : 0, height, boxes, gaps, routes, bands: laneBoxes };
 }
 
 /** An SVG path through `points` at right angles, its corners rounded (at most `r`, less on a short stretch). */
@@ -647,6 +752,15 @@ export const markStoreKey = (project: string): string => `nexus.plan.mark.${proj
 export function shownMark(chosen: string | null | undefined, can: Readonly<Record<PlanMark, boolean>>): PlanMark | undefined {
   return (chosen === "critical" || chosen === "blocked") && can[chosen] ? chosen : undefined;
 }
+
+/** A view of the plan: its layout (a mark highlights on whichever is shown). The time axis joins with PVA4. */
+export type PlanViewKind = "columns" | "lanes";
+
+/** Where the browser keeps a project's view (docs/ux/plan-view-modes.md: the device's, not the project's files). */
+export const viewStoreKey = (project: string): string => `nexus.plan.view.${project}`;
+
+/** The view shown: the one chosen if there is such a view, else the base view (Columns). */
+export const shownView = (chosen: string | null | undefined): PlanViewKind => (chosen === "lanes" ? "lanes" : "columns");
 
 /** How a mark draws a queue: on the path, a root, held up, dimmed; and a line: lit (on the path, or held) or dimmed. */
 export interface MarkLook {

@@ -220,12 +220,14 @@ export function App() {
   </>;
 
   // Who reviews: the project's orchestrator takes reviews while it exists with its notices on (the state's rule).
+  // The project's areas in the user's order and its renames: the plan's lanes by area.
+  const planTags = useMemo(() => ({ areas: state?.tags.areas.map((x) => x.name) ?? [], renames: state?.tags.renames ?? [] }), [state?.tags]);
   const reviewWho = { orchestrating: !!state?.project.orchestrator && state.project.orchestrator.notify !== false, away: !!state?.away.on };
   // The project's queues (the desktop's page; the phone's Queues tab, where what waits has a tab of its own).
   const queuesPage = <>
     {state && <RulesWarning key={state.project.id} project={state} />}
     {state && <NewFromTemplate key={state.project.id} project={state.project.id} />}
-    {state && <PlanView project={state.project.id} queues={state.queues} who={reviewWho} onOpen={(id, step, qid) => projectId && nav.item(projectId, id, step, qid)} />}
+    {state && <PlanView project={state.project.id} queues={state.queues} tags={planTags} who={reviewWho} onOpen={(id, step, qid) => projectId && nav.item(projectId, id, step, qid)} />}
     {state && byGroup.map((g) => (
       <section key={g.title} className="mb-8">
         <div className="mb-3 flex items-baseline gap-3">
