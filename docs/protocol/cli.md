@@ -78,7 +78,7 @@ nexus project list                             # the registered projects
 nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring), registers the project, prints the rules files' check;
                                                # a kept .nexus/ (a project removed from Nexus) brings it back under its id
 nexus import <file.md> [--prefix X]            # one-time import of queues written as Markdown tables
-nexus note <queue> <step> <text> [--from user|orchestrator]   # until the dashboard can add notes
+nexus note <queue> <step> <text> [--from user|orchestrator]   # writes the same note the dashboard's "Add note" does; the way for an agent or a script
 nexus server status                            # the version, the steps running in each project, and an update in progress
 nexus server perf                              # the server's measurements since its start: event loop delay, requests by route, measured operations, the latest blocks over 200 ms
 nexus server away [on --until <8:00|ISO> | off]  # the user's away mode (refused from any agent session); no argument: its state

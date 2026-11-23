@@ -766,7 +766,7 @@ node scripts/capture.ts views.yaml --no-before                                  
 The view list names a seed script that writes the test projects (`scripts/capture/seed-demo.ts`, a demo project
 with a step waiting for review) and the views: a key such as `viewer-before-after@390` (the width comes from it),
 a route such as `#/demo/UI/UI1`, a label, and a few setup actions (click a button by its text or an element by a CSS
-selector (an SVG shape too), type, press a key, scroll a heading to the top by its text, drag one element over others
+selector (an SVG shape too; the click focuses the element first, and every page counts as focused, so a chart mark's tooltip, shown on focus, is captured by clicking the mark), type, press a key, scroll a heading to the top by its text, drag one element over others
 (HTML5 drag and drop, `drag: {from, to, drop?}`; without `drop` the picture shows the drag in progress), wait). A view's `script` (a `.js` file) runs in the page before the dashboard does, for
 that view only: `scripts/capture/fake-speech.js` stands in for the browser's speech recognition, so a picture can show
 the microphone listening without a microphone. The format is in `nexus help review` and `scripts/capture/views.ts`. The tool builds this checkout's dashboard,
@@ -934,6 +934,16 @@ itself, and at review level 2 or 3, with the checks green, accepts it itself too
 you). A worker is involved only for a conflict or a check-fix round. A conflict stops the queue for you,
 unless Settings → Merging back → "Conflicts" lets the worker resolve it (then the step's review judges the
 resolution); resolve it in the worktree, or with a new revision, and press Continue: the step runs again.
+The integration step's box has Merge into <base>… itself (the same question and action as the queue panel's Worktree
+section; the button is never disabled, Nexus judges and says why it refuses), so a finished queue is merged back where
+its last step is shown.
+
+**From a step to its queue, and work continued elsewhere.** The first line of a step's panel opens its queue's panel,
+from every step. A step skipped because its work went on elsewhere is marked *continued*: `nexus queue set <queue>
+--step <step> skipped --continued-in FL4,FL5 --reason "..."` (steps of the queue, or other queues; also on a step
+already skipped, even in a finished queue). It stays skipped, so nothing that closes a step or a queue changes, but the
+step lists show a ring and "→ FL4, FL5", the progress line a hatched segment, the step's panel a box with links to where
+it went on, and the statistics count the stops that continued.
 
 **Main brought in between the steps.** When Nexus opens a step of a queue with an integration step, it first merges
 the current main into the queue's branch if that is clean (a conflict is only recorded, and the next step's opening
@@ -971,7 +981,7 @@ not the process responsible; identifying a lock or permissions problem may still
 merge back and the cleanup itself, once every step is accepted and the integration step's checks pass. If the checkout
 of main has uncommitted changes, main is checked out nowhere, the checks failed, or main moved on again after two runs
 of the integration step, it waits and tells you: an item "Merging back" in Waiting for you, which opens the integration
-step with the reason. A step at work in the main checkout is held at its end for the moment of the fast-forward. The
+step with the reason; the card itself has Merge into <base>… to do the merge back right there. A step at work in the main checkout is held at its end for the moment of the fast-forward. The
 integration step's page says who merged it back ("Merged back by Nexus"). The cleanup waits until you have confirmed
 the queue's provisional acceptances. Turn it on where the project's checks are strong: everything then rests on them.
 "Worktree setup" (project only) is a command run once in each new worktree before its first step, for example `npm ci`;
