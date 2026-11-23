@@ -24,6 +24,8 @@ import {
 import { Button } from "./ui.tsx";
 import { TONE } from "./QueueRow.tsx";
 import { usePage } from "../page.ts";
+import { timeAxis } from "../planTime.ts";
+import { TimeLegend, TimeView } from "./PlanTime.tsx";
 
 /** A reason's colour: what the user can do in the approval and stop colours; what waits by itself muted. */
 const WHY: Record<Why["tone"], string> = {
@@ -116,7 +118,12 @@ export function PlanView({ project, queues, tags, who, onOpen }: {
   const view = shownView(chosenView);
   const areas = useMemo(() => (view === "lanes" ? areaLanes(layout, queues, tags) : undefined), [view, layout, queues, tags]);
   const base = usePlanActions(project, onChanged);
-  const estimates = useQuery<EstimatesResponse>(projectUrl(project, "/estimates"), usePage().queues).data;
+  // The estimates, fetched again whenever the project's files change (and on Retry). A failed fetch keeps no old
+  // answer: the plan then shows no estimates rather than stale ones, and says why.
+  const [retried, retry] = useState(0);
+  const asked = useQuery<EstimatesResponse>(projectUrl(project, "/estimates"), `${usePage().queues}:${retried}`);
+  const estimates = asked.error ? undefined : asked.data;
+  const now = useNow();
   const { orchestrating, away } = who;
   const reviews = useMemo(() => new Map(queues.flatMap((q) => { const r = userReviewsOf(q, { orchestrating, away }); return r ? [[q.id, r] as const] : []; })), [queues, orchestrating, away]);
   const first = useMemo(() => firstUserWait(layout, queues, { orchestrating, away }, estimates?.queues), [layout, queues, orchestrating, away, estimates]);
@@ -126,6 +133,8 @@ export function PlanView({ project, queues, tags, who, onOpen }: {
   const [chosen, choose] = useStored<PlanMark>(markStoreKey(project));
   const mark = shownMark(chosen, { critical: !!cp, blocked: blocks.roots.length > 0 });
   const look = useMemo(() => (mark ? markLook(mark, cp, blocks) : undefined), [mark, cp, blocks]);
+  const axis = useMemo(() => (view === "time" ? timeAxis(layout, queues, known ? estimates?.queues : undefined, { orchestrating, away }, now) : undefined),
+    [view, layout, queues, known, estimates, orchestrating, away, now]);
   // Under What blocks a root's title opens exactly what it waits for (its review, its question), else its queue. The
   // list of what waits is the rail's "Waiting for you": the plan does not repeat it (the user, PVA2 round 2).
   const openCard = (id: string) => {
@@ -152,10 +161,12 @@ export function PlanView({ project, queues, tags, who, onOpen }: {
         <h2 className="text-sm font-semibold uppercase tracking-wider text-fg-2">{t("plan.title")}</h2>
         <span className="text-xs text-fg-3" data-plan-hint>
           {mark === "critical" && cp ? criticalHint(cp) : mark === "blocked" ? blocksHint(blocks)
+            : axis ? <>{t(axis.known ? "plan.time.hint" : "plan.time.hintUnknown")}{axis.known && <span className="hidden @3xl:inline"> {t("plan.time.hintLimits")}</span>}</>
             : <>{t(areas ? "plan.lanes.hint" : "plan.hint")}<span className="hidden @3xl:inline"> {t("plan.hintLines")}</span></>}
         </span>
         <span className="flex-1" />
-        <span className="hidden items-center gap-3 text-xs text-fg-3 @3xl:flex">
+        {axis && <TimeLegend className="hidden @3xl:flex" />}
+        <span className={`hidden items-center gap-3 text-xs text-fg-3 ${axis ? "" : "@3xl:flex"}`}>
           <span className="flex items-center gap-1.5"><svg width="22" height="6" aria-hidden><line x1="0" y1="3" x2="22" y2="3" className="stroke-accent" strokeWidth="2" /></svg>{t("plan.legend.you")}</span>
           <span className="flex items-center gap-1.5"><svg width="22" height="6" aria-hidden><line x1="0" y1="3" x2="22" y2="3" className="stroke-fg-3" strokeWidth="1.5" strokeDasharray="4 3" /></svg>{t("plan.legend.orchestrator")}</span>
         </span>
@@ -165,9 +176,14 @@ export function PlanView({ project, queues, tags, who, onOpen }: {
         <Marks mark={mark} choose={choose} cp={cp} blocks={blocks} min={estimates?.min} />
       </div>
       {first && <FirstWaitLine first={first} />}
+      {axis && <TimeLegend className="mb-3 flex flex-wrap @3xl:hidden" />}
       {actions.error && <p className="mb-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger" role="alert">{actions.error}</p>}
-      <div className="hidden @3xl:block"><Columns key={view} layout={layout} areas={areas} onOpen={openCard} actions={actions} /></div>
-      <PhoneList layout={layout} areas={areas} onOpen={openCard} actions={actions} />
+      {axis
+        ? <TimeView axis={axis} now={now} onOpen={openCard} {...(look ? { look } : {})} notice={<EstimatesNotice asked={asked} retry={() => retry((n) => n + 1)} />} />
+        : <>
+          <div className="hidden @3xl:block"><Columns key={view} layout={layout} areas={areas} onOpen={openCard} actions={actions} /></div>
+          <PhoneList layout={layout} areas={areas} onOpen={openCard} actions={actions} />
+        </>}
       {actions.last && <UndoBar key={actions.last.change} change={actions.last} actions={actions} />}
       {layout.outside.length > 0 && (
         <div className="mt-4">
@@ -186,6 +202,33 @@ export function PlanView({ project, queues, tags, who, onOpen }: {
       )}
     </section>
   );
+}
+
+/** The clock the time axis is drawn at, a minute at a time. */
+function useNow(): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => { const tick = setInterval(() => setNow(new Date()), 60_000); return () => clearInterval(tick); }, []);
+  return now;
+}
+
+/**
+ * Why the time axis places only the set times: too few finished steps for estimates, or the estimates could not be
+ * loaded (with Retry): a failure must not look like an empty plan.
+ */
+function EstimatesNotice({ asked, retry }: { asked: { data?: EstimatesResponse; error?: string }; retry: () => void }) {
+  const box = "mb-3 rounded-lg border border-dashed border-line-strong px-3 py-2 text-xs text-fg-2";
+  if (asked.error) {
+    return (
+      <div className={`${box} flex flex-wrap items-center gap-x-3 gap-y-1`} role="alert" data-box="estimates notice">
+        <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{t("plan.time.loadFailed", { error: asked.error })}</span>
+        <Button variant="quiet" onClick={retry}>{t("plan.time.retryLoad")}</Button>
+      </div>
+    );
+  }
+  if (asked.data && asked.data.samples < asked.data.min) {
+    return <p className={box} data-box="estimates notice">{t("plan.time.noEstimates", { samples: asked.data.samples, min: asked.data.min })}</p>;
+  }
+  return null;
 }
 
 /** The critical path in words: the chain, its work, the chains as long, the queues without an estimate. */
@@ -230,7 +273,7 @@ function Marks({ mark, choose, cp, blocks, min }: { mark?: PlanMark; choose: (m:
 }
 
 /**
- * The views of the plan, one at a time: Columns (the base view) and Lanes by area; the time axis joins with PVA4.
+ * The views of the plan, one at a time: Columns (the base view), Lanes by area and the time axis.
  * Choosing writes nothing (the browser keeps it), and the mark stays.
  */
 function Views({ view, choose }: { view: PlanViewKind; choose: (v: PlanViewKind | null) => void }) {
@@ -244,7 +287,7 @@ function Views({ view, choose }: { view: PlanViewKind; choose: (v: PlanViewKind 
     <div className="flex items-center gap-1.5" data-box="views">
       <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-fg-3">{t("plan.view.label")}</span>
       <span role="group" aria-label={t("plan.view.label")} className="flex items-center gap-0.5 rounded-lg border border-line bg-surface-2 p-0.5">
-        {item("columns")}{item("lanes")}
+        {item("columns")}{item("lanes")}{item("time")}
       </span>
     </div>
   );

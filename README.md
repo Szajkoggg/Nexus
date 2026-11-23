@@ -447,6 +447,13 @@ columns in a band per area tag: a queue's own area, else the one most of its ste
 the bands follow the project's area list (Settings, tags). Each queue is in one band; a step in another area is named
 on its card ("also engine: ST31"). On a desktop the cards are compact (the lines say what the "after" chips did; click
 one for its details); on the phone each band is a group, its cards naming their column and keeping their chips.
+**Time axis** shows a row per queue on a ruler from now: when it may start (after its predecessors' expected ends, at
+its schedule, after the usage window's reset) and end, by the estimates. It is a reading of the estimates, not a
+promise: they are work time by model and effort, a running step counts whole, and the limit on queues at once and
+checkouts later on are not in it. What comes after a wait for you (a review, an answer, an approval) or a wait of
+unknown length is hatched and says "if …"; a diamond is a step that waits for your review; a dotted lead is a wait
+Nexus keeps by itself. A stopped or paused queue and what follows it have no bar, and without estimates (fewer than
+five finished steps, or when they cannot be loaded, with Retry) only the set times are placed.
 To change the order, use "After…" on a queue in the plan (or drag it onto another; onto "Next" to put it first): the
 queue then waits for the one you chose, and the queues that waited for it wait for what it waited for before, as when
 you move an item in a list. Dragging a queue onto another splits the target in two: "After B instead of A" (the move,

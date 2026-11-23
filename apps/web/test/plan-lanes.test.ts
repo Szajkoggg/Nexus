@@ -96,8 +96,9 @@ test("an empty plan has no lanes; a plan without areas is one lane, No area", ()
   assert.deepEqual(lanes[0]!.ids, planList(planLayout(bare)).map((n) => n.id));
 });
 
-test("the view: Lanes by area when chosen, else the base view (Columns); kept per project in the browser", () => {
+test("the view: Lanes by area or the time axis when chosen, else the base view (Columns); kept per project in the browser", () => {
   assert.equal(shownView("lanes"), "lanes");
-  for (const v of [null, undefined, "", "columns", "time", "critical"]) assert.equal(shownView(v), "columns", String(v));
+  assert.equal(shownView("time"), "time");
+  for (const v of [null, undefined, "", "columns", "axis", "critical"]) assert.equal(shownView(v), "columns", String(v));
   assert.equal(viewStoreKey("nexus"), "nexus.plan.view.nexus");
 });

@@ -753,14 +753,14 @@ export function shownMark(chosen: string | null | undefined, can: Readonly<Recor
   return (chosen === "critical" || chosen === "blocked") && can[chosen] ? chosen : undefined;
 }
 
-/** A view of the plan: its layout (a mark highlights on whichever is shown). The time axis joins with PVA4. */
-export type PlanViewKind = "columns" | "lanes";
+/** A view of the plan: its layout (a mark highlights on whichever is shown). */
+export type PlanViewKind = "columns" | "lanes" | "time";
 
 /** Where the browser keeps a project's view (docs/ux/plan-view-modes.md: the device's, not the project's files). */
 export const viewStoreKey = (project: string): string => `nexus.plan.view.${project}`;
 
 /** The view shown: the one chosen if there is such a view, else the base view (Columns). */
-export const shownView = (chosen: string | null | undefined): PlanViewKind => (chosen === "lanes" ? "lanes" : "columns");
+export const shownView = (chosen: string | null | undefined): PlanViewKind => (chosen === "lanes" || chosen === "time" ? chosen : "columns");
 
 /** How a mark draws a queue: on the path, a root, held up, dimmed; and a line: lit (on the path, or held) or dimmed. */
 export interface MarkLook {

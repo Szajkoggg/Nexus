@@ -123,6 +123,10 @@ export const formatDateTime = (iso: string): string => dates(current.locale, { d
 export const formatDay = (d: Date): string => dates(current.locale, DAY).format(d);
 /** A day of the week with its date, for a chart's tooltip: "Sat 14 Nov". */
 export const formatWeekday = (d: Date): string => dates(current.locale, { weekday: "short", ...DAY }).format(d);
+/** A time of day without its date, for an axis: "14:00". */
+export const formatTimeOfDay = (d: Date): string => dates(current.locale, CLOCK).format(d);
+/** A day's short name, for an axis at midnight: "Tue". */
+export const formatDayName = (d: Date): string => dates(current.locale, { weekday: "short" }).format(d);
 /** A date: "14 Nov 2026". */
 export const formatDate = (iso: string): string => dates(current.locale, { dateStyle: "medium" }).format(new Date(iso));
 /** A time of day with seconds: "14:02:05". */

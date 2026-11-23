@@ -220,6 +220,49 @@ Two points differ from the mockup, both to keep its own rules:
   dragging, the line panel and Undo work as in Columns. The seed has no area list of its own, so its bands read by
   name (dashboard, engine, orchestrator), as the mockup drew them.
 
+## As built in PVA4
+
+- The View group is complete: Columns | Lanes by area | Time axis. The axis is `timeAxis` in `apps/web/src/planTime.ts`
+  (pure, the clock passed in) drawn by `apps/web/src/components/PlanTime.tsx`; the dashboard's clock ticks each minute.
+- The contract above holds, with one detail it left open: a queue whose work is not known but whose start is set (a run
+  at work, the usage window's reset, a schedule, a wait for the user now) gets an open bar from that start, faded at
+  its end and saying only that ("running", "from 22:10", "if reviewed", "at 22:00"), as the mockup's view without
+  estimates draws it; a queue whose start depends on an unknown end has no bar, only "after RX · ?" or "not before
+  23:30 · ?". Nothing unknown becomes a sure end (tested on every case).
+- A wait for the user names its condition on every follower: "after RX and ST2; if ST2 is reviewed by then", the
+  conditions in the order of the predecessors. A stop, a pause, a failed start or a predecessor gone gives no bar to
+  the queue and its followers ("no time while S has none").
+- Estimates: the axis uses only a fresh answer of `/estimates` (asked again with every change of the files, and on
+  Retry). A failed fetch keeps no old answer: the notice says the estimates could not be loaded and the axis places only
+  the set times, so a failure never looks like an empty plan; too few finished steps say so the same way.
+- The ruler: "now 21:10", whole hours (every 2, 3 or 6 where they would crowd), the new day named at midnight ("Tue
+  00:00"), no label over another (the mockup's "Tue 00:00" ran into "01:00"). A plan longer than the window at 22 px an
+  hour scrolls sideways.
+- Marks on the axis: the path's and the roots' bars ringed, the rest dimmed; a root's title opens exactly its review
+  or question, as on the cards.
+- The pictures use the development instance's real clock, not the mockup's fixed 21:10: the seed's times are relative
+  to now, so the rows and their order are the mockup's while the ruler's hours differ.
+
+## PL's promises as built
+
+| PL promised | Built (where) | Tested by | Pictures |
+|---|---|---|---|
+| Layout A: columns, lines around the boxes, full titles | PB1: `drawPlan`, `Columns` in Plan.tsx | `apps/web/test/plan-draw.test.ts` | `plan-view-modes@1440/492/390` (PVA4: before, after) |
+| A line's details (who, when, Remove, hand back) | PB3: `LinePanel`, in Lanes too | `apps/web/test/plan-actions.test.ts`, `apps/web/test/plan.test.ts` | `plan-area-line-details@1440/390` (PVA3), `plan-marked-line-details@1440` (PVA2) |
+| "Also after…" by dragging, Undo | PB2, PB3: `DropZones`, `UndoBar`, in Lanes and under a mark | `apps/web/test/plan-actions.test.ts` | `plan-lanes-drag-undo@1440` (PVA4), `plan-marked-drag-undo@1440` (PVA2) |
+| Finished queues folded at the page's end | Unchanged (PL2's decision) | the queue groups' tests | PL's `plan-finished-folded@1440` |
+| Critical path | PVA2: `criticalPath`, `markLook` in plan.ts | `apps/web/test/plan-marks.test.ts` | `plan-critical-path@1440/492/390` (PVA2) |
+| What blocks, the exact item opened | PVA2: `whatBlocks`, framed roots, `openCard` | `apps/web/test/plan-marks.test.ts` | `plan-blocked-filter@1440/492/390` (PVA2), `plan-time-blocked-open@1440` (PVA4) |
+| Lanes by area | PVA3: `areaLanes`, `drawPlan` with bands | `apps/web/test/plan-lanes.test.ts`, `apps/web/test/plan-draw.test.ts` | `plan-area-lanes@1440/492/390` (PVA3) |
+| Time axis, hatched after a wait for the user | PVA4: `timeAxis`, `TimeView` | `apps/web/test/plan-time.test.ts` | `plan-time-axis@1440/492/390`, `plan-time-unknown@1440/492/390` (PVA4) |
+| The tools on the phone | `PhoneList` (marks, lane groups), the axis's phone rows | the same tests (pure functions) | every key's `@390` |
+| (PVA) the switcher, kept per device | `Views`, `Marks`, `shownView`, `shownMark` | `apps/web/test/plan-lanes.test.ts`, `apps/web/test/plan-marks.test.ts` | `plan-view-modes@…` |
+
+What the estimates cannot say, and the axis does not pretend to: they are work time by model and effort from the
+finished steps of every project (none below five); a running step counts whole; the wait for a review, an answer or an
+approval is not in them (hatched instead); the limit on queues at once and checkouts later on, and the usage window
+running out later, are not modelled.
+
 ## What each step builds
 
 | Step | Builds | Fills |

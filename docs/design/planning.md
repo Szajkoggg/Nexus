@@ -88,7 +88,7 @@ The Queues view shows the plan above the queue lists (`apps/web/src/plan.ts`, `c
   what waits for the user now; what ends by itself (usage window, time, checkout, limit, merge train, the
   orchestrator's review) is named apart, not a root.
 - Views (queue PVA, PVA3): Columns and Lanes by area, one at a time, kept like the mark (the device's, per project);
-  the time axis joins with PVA4. The View group came with the lanes: one choice is no choice. A lane is a band across
+  the time axis came with PVA4. The View group came with the lanes: one choice is no choice. A lane is a band across
   the same columns (`areaLanes`, `drawPlan` with bands): a queue's own area, else the area most of its steps left
   carry (a tie: the first step's), else "No area"; renamed areas read as their new name. The bands follow the
   project's area list, then other areas by name, "No area" last, so starting a queue never moves a band; an empty one
@@ -97,6 +97,14 @@ The Queues view shows the plan above the queue lists (`apps/web/src/plan.ts`, `c
   between bands changes height only between the columns, so no line crosses a card or a band's name (written upwards
   in a gutter left of the first column). On a desktop the cards drop their chips (the lines and the line panel say
   the same); on the phone, where there are no lines, each band is a group whose cards name their column and keep them.
+- The time axis (queue PVA, PVA4; `apps/web/src/planTime.ts`): a row per queue, a bar from its expected start (the
+  latest predecessor's expected end, a schedule, the usage window's reset, now for a run at work) for its estimate.
+  It is a reading of the estimates, not a scheduler: the limit, checkouts later on and the usage window running out
+  are not modelled. What the user must do first (a review, an answer, an approval) and a wait of unknown length (a
+  checkout, the limit) hatch the rest of the bar and every follower's, which name the condition ("if ST2 is reviewed
+  by then"); a stop, a pause, a failed start or a predecessor gone gives no bar to it and its followers; a missing
+  estimate is never 0 h, so what follows it has no end, only "not before". Only a fresh answer of `/estimates` is
+  used: a failed fetch shows a notice and the set times, never the last answer or an empty plan.
 - A line goes from a queue to the one that waits for it, solid in the accent colour where the user set the
   dependency, dashed where the orchestrator did; the card says "after A · set by you" too, so the phone's list (no
   lines) keeps who set what.

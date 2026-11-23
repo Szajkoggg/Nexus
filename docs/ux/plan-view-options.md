@@ -15,7 +15,8 @@ seed `scripts/capture/seed-plan-nexus.ts` writes the same plan for the dashboard
 
 PB built layout A, a line's details, dragging and Undo. The four features it left (critical path, what blocks, lanes by
 area, time axis) are fitted to the built view and its data in [plan-view-modes.md](plan-view-modes.md) (queue PVA),
-with the mockup `mockups/26-plan-modes.html`.
+with the mockup `mockups/26-plan-modes.html`, and built by PVA2 to PVA4: every promise below, where it is built, its
+test and its picture are in plan-view-modes.md, "PL's promises as built".
 
 ## The two layouts
 

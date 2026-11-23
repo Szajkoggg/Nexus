@@ -53,7 +53,9 @@ const plan = (id: string, after: [string, "user" | "orchestrator"][], min: numbe
 session("orchestrator", "orchestrator", "Orchestrator");
 const user = session("user", "user", "You");
 
-// Done, with their workers' turns for the estimates.
+// Done, with their workers' turns for the estimates. With NEXUS_SEED_FEW_TURNS=1 (seed-plan-unknown.ts) only FB's three
+// are written: too few for estimates (five), the time axis without them (queue PVA, plan-time-unknown).
+const few = process.env.NEXUS_SEED_FEW_TURNS === "1";
 const done = (id: string, title: string, minutes: number[], end: number) => {
   const w = session(newId(), "worker", `${id} worker`, id);
   queue(id, title, minutes.map((_, i) => [`${id}${i + 1}`, `Step ${i + 1}`]));
@@ -62,7 +64,7 @@ const done = (id: string, title: string, minutes: number[], end: number) => {
     emit(w, at + m, { type: "step.started", queue: id, step });
     emit(w, at, { type: "step.done", queue: id, step, summary: "Done." });
     emit(user, at - 5, { type: "review.accepted", queue: id, step });
-    appendTurn({ v: 1, at: ago(at), started_at: ago(at + m), duration_ms: m * 60_000, project: "nexus", session: w.id, role: "worker", runtime: "claude", queue: id, step, outcome: "ok" });
+    if (!few || id === "FB") appendTurn({ v: 1, at: ago(at), started_at: ago(at + m), duration_ms: m * 60_000, project: "nexus", session: w.id, role: "worker", runtime: "claude", queue: id, step, outcome: "ok" });
   });
 };
 done("FB", "Feedback buttons on review items", [40, 55, 35], 2400);
