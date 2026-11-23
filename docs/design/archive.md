@@ -92,7 +92,7 @@ Opening a closed queue at 4× (Q0001: its whole view, 72 KB, and its two workers
 
 What did not move is the start: it reads every event and derives the whole state once (a fold over all sessions'
 events in file order), and both are the same with or without the summaries. A start that skips closed queues' events
-needs the derivation per queue (model.md, "Beyond the decision") or a checkpoint of the model, below.
+needs the derivation per queue (model-built.md, "Beyond the decision") or a checkpoint of the model, below.
 
 ## Tests
 

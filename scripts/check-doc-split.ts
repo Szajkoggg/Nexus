@@ -2,6 +2,10 @@
 // a base commit, are the lines of the index and the topic files together, apart from what a split adds on purpose.
 //
 //   node scripts/check-doc-split.ts <PROTOCOL|DESIGN> <base commit>
+//   node scripts/check-doc-split.ts --topic <base commit> <topic file at the base> <new file> <new file>...
+//
+// The second form proves the split of one topic file that grew too large: the file at the base commit is the new files
+// together (its title is dropped; each new file's title, "Part of" and "See also:" lines are additions).
 //
 // A line is compared without its trailing whitespace, with a heading's `#`s dropped (a moved section changes its level)
 // and a Markdown link replaced by its text (a quoted section name becomes a link). Blank lines are not compared. What
@@ -61,8 +65,30 @@ export function differences(original: string, index: string, topics: string[]): 
   return [...seen].filter(([, n]) => n !== 0).map(([line, n]) => `${n > 0 ? "missing" : "added"} ${Math.abs(n)}x: ${line.slice(0, 160)}`);
 }
 
+/** A topic file split into several: its lines (without its title) are the new files' lines, apart from their additions. */
+export function topicDifferences(original: string, topics: string[]): string[] {
+  return differences(original.split("\n").slice(1).join("\n"), "", topics);
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [doc, base] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  if (args[0] === "--topic") {
+    const [, base, old, ...news] = args;
+    if (!base || !old || news.length < 2) {
+      console.error("usage: node scripts/check-doc-split.ts --topic <base commit> <topic file at the base> <new file> <new file>...");
+      process.exit(2);
+    }
+    const before = execFileSync("git", ["show", `${base}:${old}`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).replace(/\r\n/g, "\n");
+    const diff = topicDifferences(before, news.map((f) => readFileSync(f, "utf8").replace(/\r\n/g, "\n")));
+    if (diff.length) {
+      console.log(diff.join("\n"));
+      console.log(`${diff.length} line(s) differ from ${base}:${old}`);
+      process.exit(1);
+    }
+    console.log(`ok: ${old} at ${base} = ${news.join(", ")}, only moved`);
+    process.exit(0);
+  }
+  const [doc, base] = args;
   const split = SPLITS.find((s) => s.index === `docs/${doc}.md`);
   if (!doc || !base || !split) {
     console.error("usage: node scripts/check-doc-split.ts <PROTOCOL|DESIGN> <base commit>");

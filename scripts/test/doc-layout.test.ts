@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { ABSENT_ON_PURPOSE, brokenLinks, contentsProblems, helpCommands, largeTopics, proseProblems, SPLITS, TOPIC_WARN_BYTES } from "../doc-layout.ts";
-import { differences } from "../check-doc-split.ts";
+import { differences, topicDifferences } from "../check-doc-split.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -73,6 +73,16 @@ test("the proof that a split only moved text finds a rewritten, a dropped and an
   assert.equal(differences(original, idx, [one.replace("A line", "Another line"), two]).length, 2);
   assert.equal(differences(original, idx, [one]).length, 2);
   assert.equal(differences(original, idx, [one, two + "\nExtra.\n"]).length, 1);
+});
+
+test("the proof that a topic file was split finds a rewritten, a dropped and an added line", () => {
+  const original = "# T\n\nIntro.\n\n## One\n\nA line.\n\n## Two\n\nSecond.\n";
+  const one = "# T\n\nSee also: [Two](two.md).\n\nIntro.\n\n## One\n\nA line.\n";
+  const two = "# T two\n\nPart of [the design](../DESIGN.md).\n\n## Two\n\nSecond.\n";
+  assert.deepEqual(topicDifferences(original, [one, two]), []);
+  assert.equal(topicDifferences(original, [one.replace("A line", "Another line"), two]).length, 2);
+  assert.equal(topicDifferences(original, [one]).length, 2);
+  assert.equal(topicDifferences(original, [one, two + "\nExtra.\n"]).length, 1);
 });
 
 test("the CLI's commands are read from its help: literal subcommands, or a free word after the command", () => {

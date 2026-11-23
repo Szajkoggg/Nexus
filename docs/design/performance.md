@@ -280,7 +280,7 @@ as long as before: on this machine nothing else wanted the cores it gave way on.
 
 The user's decision of 2026-11-18 put the processing of agent output, the ingesting and the round of decisions on a
 worker thread; queue SM built the model on the event loop and left the thread to a measurement after SM4
-([model.md](model.md#beyond-the-decision-proposals-not-decided)). SW1 measured (2026-11-21) and weighed it.
+([model-built.md](model-built.md#beyond-the-decision-proposals-not-decided)). SW1 measured (2026-11-21) and weighed it.
 
 **The measurement**: `node scripts/perf-load.ts --minutes 3` at main's `01cb79b` (after SM4 and MF), the same load as
 SV1's quiet run, on the user's machine with nothing else at work.
