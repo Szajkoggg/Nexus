@@ -254,10 +254,15 @@ export interface AreaLanes {
   also: Map<string, { area: string; steps: string[] }[]>;
 }
 
+const CLOSED_STEP = new Set(["done", "skipped", "rejected"]);
+
+/** The steps still to come: not done, skipped or rejected. */
+export const stepsLeftOf = <S extends { status: string }>(steps: readonly S[]): S[] => steps.filter((s) => !CLOSED_STEP.has(s.status));
+
 /** A queue's own steps (not Nexus's closing or integration step) that are left: the steps its lane is chosen by. */
 function stepsLeft(q: LaneQueue) {
   const own = q.steps.filter((s) => !s.closing && !s.integration);
-  const left = own.filter((s) => !CLOSED_STEP.has(s.status));
+  const left = stepsLeftOf(own);
   return left.length ? left : own;
 }
 
@@ -506,6 +511,9 @@ export function estimateWords(e: { steps: number; ms?: number } | undefined): Wo
 
 // ---------------------------------------------------------------- where the plan will wait for the user's review
 
+/** The estimates by queue (GET /estimates): each queue's steps left and their expected work. */
+export type Estimates = Readonly<Record<string, { steps: number; ms?: number }>>;
+
 /** Who reviews: whether the project's orchestrator takes reviews (it exists, its notices on), and away mode now. */
 export interface ReviewWho { orchestrating: boolean; away: boolean }
 
@@ -533,16 +541,18 @@ export interface UserReviews {
   left: number;
 }
 
-const CLOSED_STEP = new Set(["done", "skipped", "rejected"]);
-
 /**
- * The steps left in a queue (not done, skipped or rejected) that wait for the user's review: one in review for the
- * user counts, one in review for the orchestrator does not (it is the orchestrator's now); the others by their level
- * (the step's own, its queue's, the project's: the state derives it), as `userReviews` says.
+ * A step left waits for the user's review: one in review for the user does, one in review for the orchestrator does
+ * not (it is the orchestrator's now); the others by their level (the step's own, its queue's, the project's: the state
+ * derives it), as `userReviews` says.
  */
+export const waitsForUser = (s: ReviewQueue["steps"][number], who: ReviewWho): boolean =>
+  s.status === "review" ? s.review_with !== "orchestrator" : userReviews(s.level, who);
+
+/** The steps left in a queue (not done, skipped or rejected) that wait for the user's review (`waitsForUser`). */
 export function userReviewsOf(q: ReviewQueue, who: ReviewWho): UserReviews | undefined {
-  const left = q.steps.filter((s) => !CLOSED_STEP.has(s.status));
-  const mine = left.filter((s) => (s.status === "review" ? s.review_with !== "orchestrator" : userReviews(s.level, who)));
+  const left = stepsLeftOf(q.steps);
+  const mine = left.filter((s) => waitsForUser(s, who));
   const next = mine[0];
   if (!next) return undefined;
   return {
@@ -561,7 +571,7 @@ export interface FirstWait { queue: string; step: string; title?: string; now: b
  * the latest of its predecessors shown ends (the first column now), then its steps up to that one (the queue's
  * estimate shared evenly over its steps left); none when an estimate on the way is missing.
  */
-export function firstUserWait(l: PlanLayout, queues: readonly ReviewQueue[], who: ReviewWho, estimates?: Readonly<Record<string, { steps: number; ms?: number }>>): FirstWait | undefined {
+export function firstUserWait(l: PlanLayout, queues: readonly ReviewQueue[], who: ReviewWho, estimates?: Estimates): FirstWait | undefined {
   const byId = new Map(queues.map((q) => [q.id, q]));
   const nodes = new Map(planList(l).map((n) => [n.id, n]));
   const starts = new Map<string, number | undefined>();
@@ -600,12 +610,14 @@ export function firstUserWait(l: PlanLayout, queues: readonly ReviewQueue[], who
 // ---------------------------------------------------------------- the marks: critical path, what blocks
 // docs/ux/plan-view-modes.md (queue PVA): highlights on the plan as it is laid out; they move no queue and write nothing.
 
-/** A queue's expected work in ms from the estimates; undefined: not known (never 0 for a missing estimate). */
-function workOf(id: string, estimates: Readonly<Record<string, { steps: number; ms?: number }>>): number | undefined {
-  const e = estimates[id];
+/**
+ * A queue's expected work in ms from the estimates; undefined: not known (no estimates, or none for it; never 0 for a
+ * missing estimate). No step left: none to do.
+ */
+export function workOf(id: string, estimates: Estimates | undefined): number | undefined {
+  const e = estimates?.[id];
   if (!e) return undefined;
-  if (!e.steps) return 0;
-  return e.ms;
+  return e.steps ? e.ms : 0;
 }
 
 /** Two totals within a minute are as long as each other (the estimates are rounder than that). */
@@ -630,7 +642,7 @@ export interface CriticalPath {
  * through it is not compared (it starts again after it), and it is named in `unknown`. A loop (refused in the files,
  * possible in damaged ones) is cut where it closes. Undefined when no chain has a known length.
  */
-export function criticalPath(l: PlanLayout, estimates: Readonly<Record<string, { steps: number; ms?: number }>>): CriticalPath | undefined {
+export function criticalPath(l: PlanLayout, estimates: Estimates): CriticalPath | undefined {
   const order = planList(l).map((n) => n.id);
   const rank = new Map(order.map((id, i) => [id, i]));
   const preds = new Map<string, string[]>(order.map((id) => [id, []]));

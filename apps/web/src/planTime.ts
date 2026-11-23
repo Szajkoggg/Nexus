@@ -6,7 +6,7 @@
 // its note saying "if …"); a stopped, paused or gone predecessor gives no bar to it and its followers; a missing
 // estimate is never 0 h. Pure, with the clock passed in, and unit tested (test/plan-time.test.ts).
 import { formatClock, t, type Key, type Params } from "./i18n.ts";
-import { planList, userReviews, type PlanLayout, type PlanNode, type PlanQueue, type ReviewWho, type Words } from "./plan.ts";
+import { planList, stepsLeftOf, waitsForUser, workOf, type Estimates, type PlanLayout, type PlanNode, type PlanQueue, type ReviewWho, type Words } from "./plan.ts";
 
 /** What the axis reads of a queue beyond the plan's (a QueueView fits). */
 export interface TimeQueue extends PlanQueue {
@@ -16,7 +16,7 @@ export interface TimeQueue extends PlanQueue {
 }
 
 /** The estimates as the axis reads them: none (not loaded, failed, or too few finished steps) is `undefined`. */
-export type TimeEstimates = Readonly<Record<string, { steps: number; ms?: number }>> | undefined;
+export type TimeEstimates = Estimates | undefined;
 
 /** Why a bar becomes conditional from some point: a wait for the user, or one Nexus keeps for an unknown time. */
 export interface Cause { queue: string; kind: "review" | "answer" | "approval" | "held" }
@@ -59,9 +59,8 @@ const and = (ids: readonly string[]) => ids.join(" and ");
 /** The steps left that surely wait for the user's review (PVAR's rule, plan.ts userReviewsOf): their place among the steps left. */
 function reviewPoints(q: TimeQueue | undefined, who: ReviewWho): { id: string; at: number; left: number; waiting: boolean }[] {
   if (!q) return [];
-  const left = q.steps.filter((s) => s.status !== "done" && s.status !== "skipped" && s.status !== "rejected");
-  return left.flatMap((s, i) => ((s.status === "review" ? s.review_with !== "orchestrator" : userReviews(s.level, who))
-    ? [{ id: s.id, at: i + 1, left: left.length, waiting: s.status === "review" }] : []));
+  const left = stepsLeftOf(q.steps);
+  return left.flatMap((s, i) => (waitsForUser(s, who) ? [{ id: s.id, at: i + 1, left: left.length, waiting: s.status === "review" }] : []));
 }
 
 /** A cause in words: "ST2 is reviewed", "CH is approved". */
@@ -87,13 +86,6 @@ export function timeAxis(l: PlanLayout, queues: readonly TimeQueue[], estimates:
   const placed = new Map<string, Placed>();
   const rows = new Map<string, TimeRow>();
   const at = (iso: string | undefined) => (iso ? Math.max(0, new Date(iso).getTime() - now.getTime()) : undefined);
-
-  /** A queue's work in ms; undefined: not known (no estimates, or none for it). No step left: none to do. */
-  const workOf = (id: string): number | undefined => {
-    const e = estimates?.[id];
-    if (!e) return undefined;
-    return e.steps ? e.ms : 0;
-  };
 
   const place = (id: string, path: Set<string>): Placed => {
     const known = placed.get(id);
@@ -173,21 +165,21 @@ export function timeAxis(l: PlanLayout, queues: readonly TimeQueue[], estimates:
         cond = cond ?? start; ownCause("held");
         row.note.push(w("plan.time.held", { reason: held?.reason ?? n.resting!.label }));
       }
-      if (cond === undefined && causes.length) cond = start;
     }
     if (cond === undefined && causes.length && start !== undefined) cond = start;
 
     // The work: the estimate from the start; the review points where the queue's estimate shares it evenly.
-    const work = workOf(id);
+    const work = workOf(id, estimates);
     const end = start !== undefined && work !== undefined ? start + work : undefined;
-    for (const r of reviewPoints(q, who)) {
+    const reviews = reviewPoints(q, who);
+    for (const r of reviews) {
       const m = r.waiting ? start : start !== undefined && work !== undefined ? start + (work * r.at) / Math.max(1, r.left) : undefined;
       if (m === undefined) continue;
       row.marks.push(Math.round(m));
       if (cond === undefined || m < cond) cond = m;
       if (!causes.some((c) => c.queue === id)) ownCause("review");
     }
-    const points = reviewPoints(q, who).filter((r) => !r.waiting);
+    const points = reviews.filter((r) => !r.waiting);
     if (points.length && !(n.now && n.status.tone === "review")) row.note.push(w("plan.time.reviewLater", { count: points.length, steps: and(points.map((x) => x.id)) }));
     const inherited = causes.filter((c) => c.queue !== id);
     if (inherited.length) row.note.push(w("plan.time.ifBy", { conds: inherited.map(causeWords).join(" and ") }));
