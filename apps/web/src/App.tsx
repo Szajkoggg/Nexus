@@ -225,7 +225,7 @@ export function App() {
   const queuesPage = <>
     {state && <RulesWarning key={state.project.id} project={state} />}
     {state && <NewFromTemplate key={state.project.id} project={state.project.id} />}
-    {state && <PlanView project={state.project.id} queues={state.queues} who={reviewWho} onOpen={(id) => projectId && nav.item(projectId, id)} />}
+    {state && <PlanView project={state.project.id} queues={state.queues} who={reviewWho} onOpen={(id, step, qid) => projectId && nav.item(projectId, id, step, qid)} />}
     {state && byGroup.map((g) => (
       <section key={g.title} className="mb-8">
         <div className="mb-3 flex items-baseline gap-3">

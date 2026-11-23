@@ -492,6 +492,181 @@ export function firstUserWait(l: PlanLayout, queues: readonly ReviewQueue[], who
   return points.reduce<FirstWait | undefined>((a, p) => (!a || p.ms! < a.ms! ? p : a), undefined);
 }
 
+// ---------------------------------------------------------------- the marks: critical path, what blocks
+// docs/ux/plan-view-modes.md (queue PVA): highlights on the plan as it is laid out; they move no queue and write nothing.
+
+/** A queue's expected work in ms from the estimates; undefined: not known (never 0 for a missing estimate). */
+function workOf(id: string, estimates: Readonly<Record<string, { steps: number; ms?: number }>>): number | undefined {
+  const e = estimates[id];
+  if (!e) return undefined;
+  if (!e.steps) return 0;
+  return e.ms;
+}
+
+/** Two totals within a minute are as long as each other (the estimates are rounder than that). */
+const TIE_MS = 60_000;
+
+export interface CriticalPath {
+  /** The chain, first to last: each waits for the one before. */
+  path: string[];
+  /** Its work by the estimates, in ms. */
+  ms: number;
+  /** How many other chains are as long (to the minute). */
+  ties: number;
+  /** Shown queues without an estimate: chains through them are not compared. */
+  unknown: string[];
+}
+
+/**
+ * The critical path (docs/ux/plan-view-modes.md, "Critical path"): of the chains along the plan's lines (each queue
+ * waiting for the one before), the one whose work adds up to the most by the estimates. Not the run order: reviews,
+ * approvals, the limit, checkouts and the usage window are not in it. A tie goes to the chain whose last queue comes
+ * first in the plan's order (then whose earlier queues do). A queue without an estimate counts as no time known: a chain
+ * through it is not compared (it starts again after it), and it is named in `unknown`. A loop (refused in the files,
+ * possible in damaged ones) is cut where it closes. Undefined when no chain has a known length.
+ */
+export function criticalPath(l: PlanLayout, estimates: Readonly<Record<string, { steps: number; ms?: number }>>): CriticalPath | undefined {
+  const order = planList(l).map((n) => n.id);
+  const rank = new Map(order.map((id, i) => [id, i]));
+  const preds = new Map<string, string[]>(order.map((id) => [id, []]));
+  for (const e of l.edges) if (rank.has(e.from) && rank.has(e.to) && e.from !== e.to) preds.get(e.to)!.push(e.from);
+  for (const p of preds.values()) p.sort((a, b) => rank.get(a)! - rank.get(b)!);
+  const dist = new Map<string, number | undefined>(), from = new Map<string, string>(), tiesAt = new Map<string, number>();
+  const visiting = new Set<string>();
+  const d = (id: string): number | undefined => {
+    if (dist.has(id)) return dist.get(id);
+    if (visiting.has(id)) return undefined; // a loop: cut here
+    visiting.add(id);
+    const w = workOf(id, estimates);
+    let best: number | undefined, ties = 0;
+    for (const p of preds.get(id) ?? []) {
+      const v = d(p);
+      if (v === undefined) continue;
+      if (best === undefined || v > best + TIE_MS) { best = v; from.set(id, p); ties = 0; } else if (Math.abs(v - best) <= TIE_MS) ties++;
+    }
+    visiting.delete(id);
+    const out = w === undefined ? undefined : w + (best ?? 0);
+    if (w === undefined) from.delete(id);
+    dist.set(id, out);
+    tiesAt.set(id, ties);
+    return out;
+  };
+  order.forEach(d);
+  let end: string | undefined, endTies = 0;
+  for (const id of order) {
+    const v = dist.get(id);
+    if (v === undefined) continue;
+    const best = end === undefined ? undefined : dist.get(end)!;
+    if (best === undefined || v > best + TIE_MS) { end = id; endTies = 0; } else if (Math.abs(v - best) <= TIE_MS) endTies++;
+  }
+  if (end === undefined) return undefined;
+  const path = [end];
+  while (from.has(path[0]!) && !path.includes(from.get(path[0]!)!)) path.unshift(from.get(path[0]!)!);
+  const ties = endTies + path.reduce((a, id) => a + (tiesAt.get(id) ?? 0), 0);
+  return { path, ms: dist.get(end)!, ties, unknown: order.filter((id) => workOf(id, estimates) === undefined) };
+}
+
+/** Why a queue waits for the user now: what its button opens. */
+export type RootKind = "review" | "question" | "approval" | "failed" | "stopped" | "paused" | "blocked";
+
+/** A queue that waits for the user now, and the item its button opens (the step, the question, else the queue). */
+export interface BlockRoot { queue: string; kind: RootKind; step?: string; qid?: string }
+
+export interface Blocks {
+  /** What waits for the user now, in the plan's order. */
+  roots: BlockRoot[];
+  /** The queues held up by the roots (each with the roots it waits for, in the plan's order); a root held by another is here too. */
+  held: Map<string, string[]>;
+  /** Queues that wait by themselves (the usage window, a time, a checkout, the limit, the merge train) and hold others up. */
+  byItself: string[];
+}
+
+/** What the roots read of a queue (a QueueView fits). */
+export interface BlockQueue extends PlanQueue {
+  steps: readonly { id: string; status: string; review_with?: "orchestrator" | "user" }[];
+  questions: readonly { qid?: string; state: string; can_continue: boolean; step?: string }[];
+}
+
+/**
+ * What blocks (docs/ux/plan-view-modes.md, "What blocks"): the shown queues that wait for the user now (a step in the
+ * user's review, an open question, a permission or a check decision, its approval, a failed start, a stop, a pause, a
+ * predecessor cancelled or gone), what each holds up along the plan's lines, and the queues that wait by themselves
+ * (they end without the user) while holding others up.
+ */
+export function whatBlocks(l: PlanLayout, queues: readonly BlockQueue[], now = new Date()): Blocks {
+  const byId = new Map(queues.map((q) => [q.id, q]));
+  const nodes = planList(l);
+  const roots: BlockRoot[] = [];
+  for (const n of nodes) {
+    const q = byId.get(n.id);
+    if (!q || ENDED.has(q.status)) continue;
+    const review = q.steps.find((s) => s.status === "review" && s.review_with !== "orchestrator");
+    const question = q.questions.find((x) => x.state === "open" || x.state === "escalated");
+    const waiting = q.steps.find((s) => s.status === "waiting");
+    const s = queueStatus(q as QueueLike, now);
+    const root: BlockRoot | undefined =
+      review ? { queue: n.id, kind: "review", step: review.id }
+      : question ? { queue: n.id, kind: "question", ...(question.step ? { step: question.step } : {}), ...(question.qid && question.step ? { qid: question.qid } : {}) }
+      : waiting ? { queue: n.id, kind: "question", step: waiting.id }
+      : q.approved === false ? { queue: n.id, kind: "approval" }
+      : q.start?.failed || s.tone === "failed" ? { queue: n.id, kind: "failed" }
+      : q.status === "stopped" ? { queue: n.id, kind: "stopped" }
+      : s.tone === "paused" || n.resting?.tone === "paused" ? { queue: n.id, kind: "paused" }
+      : n.why.some((w) => w.tone === "blocked" && w.key !== "plan.why.stopped") ? { queue: n.id, kind: "blocked" }
+      : undefined;
+    if (root) roots.push(root);
+  }
+  const next = new Map<string, string[]>();
+  for (const e of l.edges) (next.get(e.from) ?? next.set(e.from, []).get(e.from)!).push(e.to);
+  const held = new Map<string, string[]>();
+  for (const r of roots) {
+    const seen = new Set<string>([r.queue]);
+    const walk = [r.queue];
+    while (walk.length) {
+      for (const to of next.get(walk.pop()!) ?? []) {
+        if (seen.has(to)) continue;
+        seen.add(to); walk.push(to);
+        (held.get(to) ?? held.set(to, []).get(to)!).push(r.queue);
+      }
+    }
+  }
+  const isRoot = new Set(roots.map((r) => r.queue));
+  const byItself = nodes.filter((n) => !isRoot.has(n.id) && next.has(n.id) && (
+    (n.now && n.status.tone === "waiting") || n.why.some((w) => w.tone === "time" || w.tone === "usage" || w.tone === "checkout" || w.tone === "limit")
+    || n.resting?.tone === "waiting")).map((n) => n.id);
+  return { roots, held, byItself };
+}
+
+/** A mark on the plan: none or one at a time (docs/ux/plan-view-modes.md, "The switcher"). */
+export type PlanMark = "critical" | "blocked";
+
+/** Where the dashboard keeps a project's mark: the browser's storage, never the project's files. */
+export const markStoreKey = (project: string): string => `nexus.plan.mark.${project}`;
+
+/** The mark shown: the one chosen, while it can work (the critical path needs estimates; what blocks, a root). */
+export function shownMark(chosen: string | null | undefined, can: Readonly<Record<PlanMark, boolean>>): PlanMark | undefined {
+  return (chosen === "critical" || chosen === "blocked") && can[chosen] ? chosen : undefined;
+}
+
+/** How a mark draws a queue: on the path, a root, held up, dimmed; and a line: lit (on the path, or held) or dimmed. */
+export interface MarkLook {
+  card: (id: string) => "path" | "root" | "held" | "dim";
+  edge: (from: string, to: string) => "path" | "lit" | "dim";
+}
+
+export function markLook(mark: PlanMark, cp: CriticalPath | undefined, b: Blocks): MarkLook {
+  if (mark === "critical") {
+    const on = new Set(cp?.path ?? []);
+    const next = new Map((cp?.path ?? []).map((id, i, p) => [id, p[i + 1]]));
+    return { card: (id) => (on.has(id) ? "path" : "dim"), edge: (from, to) => (next.get(from) === to ? "path" : "dim") };
+  }
+  const roots = new Set(b.roots.map((r) => r.queue));
+  return {
+    card: (id) => (roots.has(id) ? "root" : b.held.has(id) ? "held" : "dim"),
+    edge: (from, to) => ((roots.has(from) || b.held.has(from)) && b.held.has(to) ? "lit" : "dim"),
+  };
+}
+
 const nodeOf = (l: PlanLayout, id: string): PlanNode | undefined => l.columns.flat().find((n) => n.id === id);
 const names = (ids: readonly string[]) => ids.join(", ");
 

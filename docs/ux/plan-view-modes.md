@@ -198,6 +198,16 @@ Each has this step's recommendation, drawn in the mockups; the review decides.
    With Nexus's own plan this hatches most rows after 23:00: that is what the data says.
 7. The critical path is disabled, not guessed, without estimates.
 
+## As built in PVA2
+
+Two points differ from the mockup, both to keep its own rules:
+
+- The View group is not shown yet: with Columns the only view, it would be a choice of one. It joins the row with
+  PVA3's lanes.
+- What blocks' buttons and "holds up …" stand in a list under the Mark row, not on the cards, and a held card says
+  "held by ST2" on its top line: words added inside the cards would make them taller and move the boxes below, which
+  "nothing moves" rules out.
+
 ## What each step builds
 
 | Step | Builds | Fills |

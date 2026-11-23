@@ -77,6 +77,16 @@ The Queues view shows the plan above the queue lists (`apps/web/src/plan.ts`, `c
   names the first such point and its time from the estimates (a queue's estimate shared evenly over its steps left,
   after its predecessors' ends). Of the queues' next points the earliest by time wins when every one has a time,
   else the first in the plan's order, so a missing estimate does not reorder by guesswork (`firstUserWait`).
+- Marks (queue PVA, docs/ux/plan-view-modes.md): Critical path and What blocks light part of the plan and dim the
+  rest, one at a time, and write nothing (the browser keeps the choice per project: a way of looking, not project
+  state). They change frames, dimming and a word on a card's top line, never a card's size, so the boxes stay where
+  they are; what blocks' buttons stand in a list above the plan rather than on the cards for the same reason. The
+  critical path is the longest chain of work by the estimates along the lines (`criticalPath`): not the run order; a
+  missing estimate is no time known, so a chain through it is not compared rather than counted as 0 h; a tie goes to
+  the chain first in the plan's order; a loop is cut where it closes. What blocks (`whatBlocks`) takes as roots only
+  what waits for the user now; what ends by itself (usage window, time, checkout, limit, merge train, the
+  orchestrator's review) is named apart, not a root. The View group (lanes, time axis) joins the row once a second
+  view is built: one choice is no choice.
 - A line goes from a queue to the one that waits for it, solid in the accent colour where the user set the
   dependency, dashed where the orchestrator did; the card says "after A · set by you" too, so the phone's list (no
   lines) keeps who set what.

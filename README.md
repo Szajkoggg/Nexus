@@ -433,6 +433,14 @@ it appears under "Waiting for you". The plan shows on both queues and can be can
 why, and if B is not approved when A is done, B waits for your approval and starts once you give it. If A is stopped
 or cancelled, B waits and it appears under "Waiting for you". What you set in the plan is yours: the orchestrator
 builds around it and may only propose a change, which appears under "Waiting for you" too.
+"Mark" above the plan lights one thing at a time, and nothing moves or changes in the plan when you switch (the browser
+remembers your choice per project; click it again, its ×, or press Escape to go back to the plan as it is).
+**Critical path** marks the longest chain of work along the dependencies by the estimates ("MX → RX → ST3 → DG … about
+8 h (estimate)"); it leaves out the waits for you, the limit on queues at once and checkouts, and needs the estimates (a
+queue without one is never counted as no time). **What blocks** lists what waits for you now (a review, a question, an
+approval, a failed start, a stop or a pause, a predecessor cancelled or gone), each with what it holds up and a button
+that opens exactly that review, question or queue; what it holds up stays lit ("held by ST2"), the rest is dimmed, and
+what waits by itself (the usage window, a time, a checkout) is named apart.
 To change the order, use "After…" on a queue in the plan (or drag it onto another; onto "Next" to put it first): the
 queue then waits for the one you chose, and the queues that waited for it wait for what it waited for before, as when
 you move an item in a list. Dragging a queue onto another splits the target in two: "After B instead of A" (the move,

@@ -15,8 +15,10 @@ import { act, actResult, enc, projectUrl, useAction, useQuery, type AttentionIte
 import type { EstimatesResponse } from "@nexus/protocol";
 import { t } from "../i18n.ts";
 import {
-  UNDO_SHOWN_MS, changeWords, drawPlan, dropChoices, estimateWords, firstUserWait, lineDetails, moveTargets, planLayout, planList, roundedPath,
-  userReviewsOf, type FirstWait, type ReviewWho, type UserReviews, type PlanLayout, type PlanNode, type Why, type Words,
+  UNDO_SHOWN_MS, changeWords, criticalPath, drawPlan, dropChoices, estimateWords, firstUserWait, lineDetails, markLook, markStoreKey, moveTargets,
+  planLayout, planList, roundedPath, shownMark, userReviewsOf, whatBlocks,
+  type BlockRoot, type Blocks, type CriticalPath, type FirstWait, type MarkLook, type PlanMark, type ReviewWho, type UserReviews, type PlanLayout,
+  type PlanNode, type Why, type Words,
 } from "../plan.ts";
 import { Button } from "./ui.tsx";
 import { TONE } from "./QueueRow.tsx";
@@ -26,6 +28,11 @@ import { usePage } from "../page.ts";
 const WHY: Record<Why["tone"], string> = {
   approval: "text-info", blocked: "text-stop", time: "text-fg-2", usage: "text-warn",
   checkout: "text-warn", limit: "text-warn", failed: "text-danger", ready: "text-ok",
+};
+
+/** A root's frame by what it waits for: a review or a question, an approval; the rest (a stop, a pause) in the stop colour. */
+const ROOT_RING: Partial<Record<PlanNode["status"]["tone"], string>> = {
+  review: "border-review ring-review", waiting: "border-review ring-review", approval: "border-info ring-info",
 };
 
 const columnTitle = (c: number) => t(c === 0 ? "plan.column.now" : c === 1 ? "plan.column.next" : "plan.column.then");
@@ -73,10 +80,30 @@ type Actions = ReturnType<typeof usePlanActions> & {
   reviews: ReadonlyMap<string, UserReviews>;
   /** The first point where the plan will wait for the user's review. */
   first?: FirstWait;
+  /** The mark on the plan (critical path, what blocks): how it draws the cards and lines, and who holds whom up. */
+  mark?: { kind: PlanMark; look: MarkLook; held: ReadonlyMap<string, string[]> };
 };
 
+/**
+ * The project's mark, kept in the browser's storage (docs/ux/plan-view-modes.md): a way of looking, not project state,
+ * so nothing is written to the plan or the project's files when it changes.
+ */
+function useMark(project: string): [string | null, (m: PlanMark | null) => void] {
+  const key = markStoreKey(project);
+  const read = useCallback(() => { try { return localStorage.getItem(key); } catch { return null; } }, [key]);
+  const [mark, setMark] = useState<string | null>(read);
+  useEffect(() => setMark(read()), [read]);
+  const set = useCallback((m: PlanMark | null) => {
+    setMark(m);
+    try { if (m) localStorage.setItem(key, m); else localStorage.removeItem(key); } catch { /* storage off: the mark lasts the page */ }
+  }, [key]);
+  return [mark, set];
+}
+
 export function PlanView({ project, queues, who, onOpen }: {
-  project: string; queues: readonly QueueView[]; onOpen: (queue: string) => void;
+  project: string; queues: readonly QueueView[];
+  /** Opens a queue, or a step or question of it (what blocks' buttons). */
+  onOpen: (queue: string, step?: string, qid?: string) => void;
   /** Who reviews (the project's orchestrator, away mode): which steps will wait for the user's review. */
   who: ReviewWho;
   /** Changes when the project's files do: the estimates are fetched again. */
@@ -88,8 +115,22 @@ export function PlanView({ project, queues, who, onOpen }: {
   const { orchestrating, away } = who;
   const reviews = useMemo(() => new Map(queues.flatMap((q) => { const r = userReviewsOf(q, { orchestrating, away }); return r ? [[q.id, r] as const] : []; })), [queues, orchestrating, away]);
   const first = useMemo(() => firstUserWait(layout, queues, { orchestrating, away }, estimates?.queues), [layout, queues, orchestrating, away, estimates]);
+  const known = !!estimates && estimates.samples >= estimates.min;
+  const cp = useMemo(() => (known && estimates ? criticalPath(layout, estimates.queues) : undefined), [known, layout, estimates]);
+  const blocks = useMemo(() => whatBlocks(layout, queues), [layout, queues]);
+  const [chosen, choose] = useMark(project);
+  const mark = shownMark(chosen, { critical: !!cp, blocked: blocks.roots.length > 0 });
+  const look = useMemo(() => (mark ? markLook(mark, cp, blocks) : undefined), [mark, cp, blocks]);
+  // Escape clears the mark (an open line panel or menu takes its Escape first: it closes, the mark stays).
+  useEffect(() => {
+    if (!mark) return;
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !document.querySelector("[data-box='line details'], [role='menu']")) choose(null); };
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, [mark, choose]);
   const actions: Actions = {
     ...base, targets: (q) => moveTargets(layout, queues, q), estimates, reviews, ...(first ? { first } : {}),
+    ...(mark && look ? { mark: { kind: mark, look, held: blocks.held } } : {}),
     move: (q, after) => base.moveReplacing(q, after, planList(layout).find((n) => n.id === q)?.before.map((b) => b.queue) ?? []),
   };
   // Nothing planned: the view says nothing (the queue lists below say what there is).
@@ -98,13 +139,18 @@ export function PlanView({ project, queues, who, onOpen }: {
     <section className="mb-8" aria-label={t("plan.title")}>
       <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-fg-2">{t("plan.title")}</h2>
-        <span className="text-xs text-fg-3">{t("plan.hint")}<span className="hidden @3xl:inline"> {t("plan.hintLines")}</span></span>
+        <span className="text-xs text-fg-3" data-plan-hint>
+          {mark === "critical" && cp ? criticalHint(cp) : mark === "blocked" ? blocksHint(blocks)
+            : <>{t("plan.hint")}<span className="hidden @3xl:inline"> {t("plan.hintLines")}</span></>}
+        </span>
         <span className="flex-1" />
         <span className="hidden items-center gap-3 text-xs text-fg-3 @3xl:flex">
           <span className="flex items-center gap-1.5"><svg width="22" height="6" aria-hidden><line x1="0" y1="3" x2="22" y2="3" className="stroke-accent" strokeWidth="2" /></svg>{t("plan.legend.you")}</span>
           <span className="flex items-center gap-1.5"><svg width="22" height="6" aria-hidden><line x1="0" y1="3" x2="22" y2="3" className="stroke-fg-3" strokeWidth="1.5" strokeDasharray="4 3" /></svg>{t("plan.legend.orchestrator")}</span>
         </span>
       </div>
+      <Marks mark={mark} choose={choose} cp={cp} blocks={blocks} min={estimates?.min} />
+      {mark === "blocked" && <Roots roots={blocks.roots} held={blocks.held} onOpen={onOpen} />}
       {first && <FirstWaitLine first={first} />}
       {actions.error && <p className="mb-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger" role="alert">{actions.error}</p>}
       <div className="hidden @3xl:block"><Lanes layout={layout} onOpen={onOpen} actions={actions} /></div>
@@ -126,6 +172,66 @@ export function PlanView({ project, queues, who, onOpen }: {
         </div>
       )}
     </section>
+  );
+}
+
+/** The critical path in words: the chain, its work, the chains as long, the queues without an estimate. */
+function criticalHint(cp: CriticalPath): string {
+  const time = estimateWords({ steps: 1, ms: cp.ms });
+  return [
+    t("plan.critical.hint", { path: cp.path.join(" → "), time: time ? say(time) : "" }),
+    ...(cp.ties ? [t("plan.critical.ties", { count: cp.ties })] : []),
+    ...(cp.unknown.length ? [t("plan.critical.unknown", { queues: cp.unknown.join(", ") })] : []),
+  ].join(" ");
+}
+
+/** What blocks in words: how many wait for the user, how many more they hold up, and what waits by itself. */
+function blocksHint(b: Blocks): string {
+  const roots = new Set(b.roots.map((r) => r.queue));
+  const held = [...b.held.keys()].filter((id) => !roots.has(id)).length;
+  return [t("plan.blocks.hint", { count: b.roots.length, held }), ...(b.byItself.length ? [t("plan.blocks.byItself", { queues: b.byItself.join(", ") })] : [])].join(" ");
+}
+
+/**
+ * The marks over the plan: Critical path and What blocks, none or one at a time (a second click or × clears it, and
+ * Escape). Each can be chosen only while it can work: the path needs the estimates; what blocks, something waiting for
+ * the user. Choosing writes nothing (the browser keeps it). The views (lanes, the time axis) join this row when built.
+ */
+function Marks({ mark, choose, cp, blocks, min }: { mark?: PlanMark; choose: (m: PlanMark | null) => void; cp?: CriticalPath; blocks: Blocks; min?: number }) {
+  const chip = (m: PlanMark, label: string, can: boolean, title?: string) => {
+    const on = mark === m;
+    return (
+      <button key={m} onClick={() => choose(on ? null : m)} disabled={!can} aria-pressed={on} title={title ?? (on ? t("plan.mark.clear") : undefined)} data-plan-mark={m}
+        className={`whitespace-nowrap rounded-md border px-2.5 py-0.5 text-xs max-lg:min-h-8 ${on ? "border-accent bg-accent/15 font-semibold text-accent" : can ? "border-line-strong bg-surface text-fg-2 hover:text-fg" : "border-dashed border-line-strong text-fg-3 opacity-60"}`}>
+        {label}{on && <span className="ml-1 font-normal" aria-hidden>×</span>}
+      </button>
+    );
+  };
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-1.5" data-box="marks">
+      <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-fg-3">{t("plan.mark.label")}</span>
+      {cp ? chip("critical", t("plan.mark.critical"), true) : chip("critical", t("plan.mark.noEstimates"), false, t("plan.mark.noEstimatesTitle", { min: min ?? 5 }))}
+      {chip("blocked", t("plan.mark.blocked", { count: blocks.roots.length }), blocks.roots.length > 0, blocks.roots.length ? undefined : t("plan.mark.nothingBlocks"))}
+    </div>
+  );
+}
+
+/** What waits for the user now: each with what it holds up and the button that opens the exact review, question or queue. */
+function Roots({ roots, held, onOpen }: { roots: readonly BlockRoot[]; held: ReadonlyMap<string, string[]>; onOpen: (queue: string, step?: string, qid?: string) => void }) {
+  const holds = (id: string) => [...held].filter(([, by]) => by.includes(id)).map(([q]) => q);
+  return (
+    <ul className="mb-3 flex flex-col gap-1.5" data-box="roots">
+      {roots.map((r) => {
+        const h = holds(r.queue);
+        return (
+          <li key={r.queue} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs" data-plan-root={r.queue}>
+            <Button onClick={() => onOpen(r.queue, r.step, r.qid)}>{t(`plan.blocks.open.${r.kind}`, { step: r.step ?? "", queue: r.queue })}</Button>
+            <span className="font-mono text-fg-3">{r.queue}</span>
+            <span className="text-fg-2">{h.length ? t("plan.blocks.holds", { queues: h.join(", ") }) : t("plan.blocks.holdsNothing")}</span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -249,14 +355,17 @@ function Lanes({ layout, onOpen, actions }: { layout: PlanLayout; onOpen: (queue
           <defs>
             {/* The tip at the line's end, which stops a pixel before the box. */}
             <marker id="plan-arrow-user" viewBox="0 0 6 6" refX="6" refY="3" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L6,3 L0,6 z" className="fill-accent" /></marker>
+            <marker id="plan-arrow-path" viewBox="0 0 6 6" refX="6" refY="3" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L6,3 L0,6 z" className="fill-warn" /></marker>
             <marker id="plan-arrow-orchestrator" viewBox="0 0 6 6" refX="6" refY="3" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L6,3 L0,6 z" className="fill-fg-3" /></marker>
           </defs>
           {ready && drawing.routes.map((r) => {
             const lit = r.key === sel || r.key === actions.last?.edge;
+            const marked = actions.mark?.look.edge(r.from, r.to);
+            const path = marked === "path";
             return (
-              <path key={r.key} d={roundedPath(r.points)} fill="none" markerEnd={`url(#plan-arrow-${r.by})`} data-edge={r.key}
-                className={r.by === "user" ? "stroke-accent" : "stroke-fg-3"} strokeWidth={(r.by === "user" ? 2 : 1.5) + (lit ? 1.5 : 0)}
-                strokeDasharray={r.by === "user" ? undefined : "4 3"} opacity={sel && !lit ? 0.45 : 1}
+              <path key={r.key} d={roundedPath(r.points)} fill="none" markerEnd={`url(#plan-arrow-${path ? "path" : r.by})`} data-edge={r.key} data-plan-look={marked}
+                className={path ? "stroke-warn" : r.by === "user" ? "stroke-accent" : "stroke-fg-3"} strokeWidth={(path ? 2.5 : r.by === "user" ? 2 : 1.5) + (lit ? 1.5 : 0)}
+                strokeDasharray={r.by === "user" || path ? undefined : "4 3"} opacity={sel && !lit ? 0.45 : marked === "dim" ? 0.25 : 1}
                 style={lit ? { filter: "drop-shadow(0 0 3px var(--color-accent))" } : undefined} />
             );
           })}
@@ -387,13 +496,20 @@ function Card({ node: n, onOpen, actions, cardRef, drag, highlight, moving, styl
   chip?: (from: string) => void; chosen?: string; chipsDone?: boolean; children?: React.ReactNode;
 }) {
   const [dot, word] = TONE[n.status.tone];
+  // A mark changes the frame and the dimming, and adds a word on the top line: the boxes keep their places.
+  const look = actions.mark?.look.card(n.id);
+  const heldBy = look === "held" || look === "root" ? actions.mark?.held.get(n.id) : undefined;
+  const frame = moving ? "border-dashed border-line-strong opacity-45" : highlight ? "border-accent ring-2 ring-accent/30"
+    : look === "path" ? "border-warn ring-1 ring-warn" : look === "root" ? `ring-1 ${ROOT_RING[n.status.tone] ?? "border-stop ring-stop"}`
+    : n.proposal ? "border-review/50" : "border-line hover:border-line-strong";
   // The id and "After…" on top, the whole title under them (it wraps, never cut short).
   return (
-    <div ref={cardRef} {...drag} data-plan-card={n.id} style={style}
-      className={`rounded-lg border bg-surface px-3 py-2 ${moving ? "border-dashed border-line-strong opacity-45" : highlight ? "border-accent ring-2 ring-accent/30" : n.proposal ? "border-review/50" : "border-line hover:border-line-strong"} ${n.movable && drag ? "cursor-grab active:cursor-grabbing" : ""}`}>
+    <div ref={cardRef} {...drag} data-plan-card={n.id} data-plan-look={look} style={style}
+      className={`rounded-lg border bg-surface px-3 py-2 ${frame} ${look === "dim" ? "opacity-40" : ""} ${n.movable && drag ? "cursor-grab active:cursor-grabbing" : ""}`}>
       {children}
-      <div className="flex min-h-5 items-center gap-2">
+      <div className="flex min-h-5 flex-wrap items-center gap-x-2">
         <span className="font-mono text-xs text-fg-3">{n.id}</span>
+        {heldBy && <span className="shrink-0 whitespace-nowrap text-[11px] text-fg-2" title={heldBy.join(", ")} data-plan-held={n.id}>{heldBy.length > 1 ? t("plan.blocks.heldByMore", { queues: heldBy[0]!, more: heldBy.length - 1 }) : t("plan.blocks.heldBy", { queues: heldBy[0]! })}</span>}
         <span className="flex-1" />
         {n.movable && <AfterMenu queue={n.id} actions={actions} />}
       </div>
