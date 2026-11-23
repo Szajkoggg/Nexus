@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, Effort, ProjectStore, type ConversationSettings, type ConversationWeb, effortIssue, ideaContext, ideaHash, languageName, loadProjectState, newId, normPath, now, type SessionFile,
+  ActionError, Effort, ProjectStore, type ConversationSettings, type ConversationWeb, type SettingSource, effortIssue, ideaContext, ideaHash, languageName, loadProjectState, newId, normPath, now, type SessionFile,
 } from "@nexus/protocol";
 import { findStep, sinceThen, stepSeed } from "./step-seed.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
@@ -140,18 +140,18 @@ export class Conversations {
    * conversation").
    */
   private settingsOf(s: SessionFile): ConversationSettings {
-    const c = this.store.readProject().conversations;
-    const same = s.runtime === c.runtime;
-    const from = (own: unknown, project: unknown) => (own !== undefined ? "own" : same && project !== undefined ? "project" : "runtime");
+    // Without its own value: the project's (when it runs on their runtime), else the runtime's default.
+    const inherited = this.resolved({ ...s, model: undefined, effort: undefined });
+    const fallback = (v: unknown): Exclude<SettingSource, "own"> => (v !== undefined ? "project" : "runtime");
+    const from = (own: unknown, v: unknown): SettingSource => (own !== undefined ? "own" : fallback(v));
     const v = this.resolved(s);
-    const next = { model: v.model ?? null, effort: v.effort ?? null, model_from: from(s.model, c.model), effort_from: from(s.effort, c.effort) } as const;
+    const next = { model: v.model ?? null, effort: v.effort ?? null, model_from: from(s.model, inherited.model), effort_from: from(s.effort, inherited.effort) };
     const was = this.host.launchedWith(s.id);
     const running = was ? { model: was.model ?? null, effort: was.effort ?? null } : null;
-    const inherited = {
-      model: (same ? c.model : undefined) ?? null, effort: (same ? c.effort : undefined) ?? null,
-      model_from: from(undefined, c.model) as "project" | "runtime", effort_from: from(undefined, c.effort) as "project" | "runtime",
+    return {
+      running, next, changes: !!running && (running.model !== next.model || running.effort !== next.effort),
+      inherited: { model: inherited.model ?? null, effort: inherited.effort ?? null, model_from: fallback(inherited.model), effort_from: fallback(inherited.effort) },
     };
-    return { running, next, changes: !!running && (running.model !== next.model || running.effort !== next.effort), inherited };
   }
 
   private canCompact(s: SessionFile): boolean { return s.runtime !== "external" && this.compacts(s.runtime); }
