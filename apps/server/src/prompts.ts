@@ -813,7 +813,7 @@ export function helperPacket(q: QueueView, st: StepView, c: HelperPacketContext)
     ? set.checks.map((x) => {
       const last = x.runs.at(-1);
       const unrelated = set.state === "accepted" && set.dispute?.name === x.name ? " (failed, accepted as unrelated to this step: it fails on the queue's base too, or the orchestrator accepted it)" : "";
-      return `${x.name}: ${x.ok ? "passed" : "FAILED"}${x.flaky ? " (flaky: failed, then passed on the second run)" : ""}${unrelated}${last?.duration !== undefined ? `, ${formatSeconds(last.duration)}` : ""}${last?.log ? `; log: ${`${c.queueDir}/${last.log}`.replaceAll("\\", "/")}` : ""}`;
+      return `${x.name}: ${x.ok ? "passed" : "FAILED"}${x.flaky ? " (flaky: failed, then passed on the second run)" : ""}${x.snapshot_rerun ? " (rerun after a disk snapshot)" : ""}${unrelated}${last?.duration !== undefined ? `, ${formatSeconds(last.duration)}` : ""}${last?.log ? `; log: ${`${c.queueDir}/${last.log}`.replaceAll("\\", "/")}` : ""}`;
     })
     : st.checks.filter((x) => x.at >= since).map((x) => `${x.name}: ${x.ok ? "ok" : "FAILED"} (reported by the worker)${x.summary ? ` - ${x.summary}` : ""}`);
   const items = st.review_items.filter((i) => i.at >= since)

@@ -48,7 +48,7 @@ export function checkLine(step: CheckStep, now = new Date()): string | undefined
   }
 }
 
-export type CheckRowState = "passed" | "flaky" | "failed" | "running" | "waiting" | "interrupted" | "notCommand";
+export type CheckRowState = "passed" | "snapshotRerun" | "flaky" | "failed" | "running" | "waiting" | "interrupted" | "notCommand";
 
 /** One check of a set as a row: its state now, its time once it ended, the failing tests' names. */
 export interface CheckRow { name: string; state: CheckRowState; duration?: number; tests: readonly string[]; log?: string }
@@ -66,7 +66,7 @@ export function checkRows(set: CheckSet, names: readonly string[]): CheckRow[] {
     if (!c || !last) return { name, state: "waiting", tests: [] };
     if (!last.ended_at) return { name, state: "running", tests: [] };
     if (last.interrupted) return { name, state: "interrupted", tests: [] };
-    const state: CheckRowState = c.ok ? (c.flaky ? "flaky" : "passed") : c.ok === false ? "failed" : "running";
+    const state: CheckRowState = c.ok ? (c.flaky ? "flaky" : c.snapshot_rerun ? "snapshotRerun" : "passed") : c.ok === false ? "failed" : "running";
     return { name, state, duration: last.duration, tests: last.failed_tests ?? [], log: state === "failed" ? last.log : undefined };
   });
 }

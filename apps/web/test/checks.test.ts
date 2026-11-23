@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CheckSet } from "@nexus/protocol";
 import { checkLine, checkRows, checkTone, checkWord, queuedText } from "../src/checks.ts";
+import { t } from "../src/i18n.ts";
 
 const SINCE = "2026-11-18T10:02:00.000Z";
 const NOW = new Date("2026-11-18T10:05:00.000Z");
@@ -47,6 +48,16 @@ test("the latest set's checks one by one: passed, flaky, failed with its tests a
     ["npm run lint", "passed"], ["npm run typecheck", "flaky"], ["npm test", "failed"], ["npm run build", "running"], ["npm run e2e", "waiting"],
   ]);
   assert.deepEqual(rows[2], { name: "npm test", state: "failed", duration: 200, tests: ["engine › halts"], log: "checks/A2/r1f0-3-npm-test.2.log" });
+});
+
+test("a check run again after its time limit with a disk snapshot reads passed with the snapshot named (queue CK)", () => {
+  const run = (o: Partial<CheckSet["checks"][number]["runs"][number]>) => ({ started_at: SINCE, log: "checks/A2/r1f0-x.1.log", ...o });
+  const set: CheckSet = {
+    done: "d1", round: 1, fix: 0, requested_at: SINCE, state: "passed",
+    checks: [{ name: "npm test", command: "npm test", runs: [run({ ended_at: SINCE, exit_code: null, timed_out: true }), run({ ended_at: SINCE, exit_code: 0, duration: 900 })], ok: true, snapshot_rerun: true }],
+  };
+  assert.deepEqual(checkRows(set, ["npm test"]), [{ name: "npm test", state: "snapshotRerun", duration: 900, tests: [], log: undefined }]);
+  assert.equal(t("checks.row.snapshotRerun"), "passed (rerun after a disk snapshot)");
 });
 
 test("an older queue's check in words is shown as not a command, not as waiting its turn (queue EF)", () => {

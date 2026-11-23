@@ -47,16 +47,20 @@ of what it changes.
    to its log. The server writes the run (`started_at`, `log`) before it starts and its end (`ended_at`, `exit_code`,
    `duration`) after its tree has ended.
 3. The checks that failed run once more, in the same grant: the code has not changed. One that passes then is `ok`
-   and `flaky` **(P3)**.
+   and `flaky` **(P3)**. A check that ran into its time limit (`timed_out`) is not run again: it has failed, and the
+   worker's check-fix round says it ended at its time limit (the user's decision of 2026-11-23, queue CK). Only when
+   Windows made a volume shadow copy while it ran (its run has `snapshots`, below) does it run once more: passing then,
+   it is `ok` and `snapshot_rerun` (not `flaky`), shown as "passed (rerun after a disk snapshot)".
 4. The grant ends; the slot is free once the last tree has ended.
 5. Every check passed: the set is `passed`, and the step goes to its review as a `step.done` did before, with the
-   step's end handled there (the next step, context care, a plan or a deploy waiting for it). A check failed twice: the
-   set is `failed`, and the worker gets a check-fix round (below), unless the set's `fix` has reached
+   step's end handled there (the next step, context care, a plan or a deploy waiting for it). A check failed (twice, or
+   once at its time limit): the set is `failed`, and the worker gets a check-fix round (below), unless the set's `fix` has reached
    `defaults.check_fix_limit`: then the set gets `limit: true` and the run halts for the orchestrator **(P4, P5)**.
 
 `nexus step failed` and `nexus stop` run no checks. A check longer than `CHECK_LIMIT_MS` (60 minutes) **(P10)** is
-ended with its tree and counts as failed (`timed_out`). After a check-fix round or a send-back (any new `step.done`)
-every check runs again, the ones that passed before too: an earlier result does not hold for new code **(P3)**.
+ended with its tree and counts as failed (`timed_out`), without a second run unless a shadow copy was made meanwhile
+(step 3). After a check-fix round or a send-back (any new `step.done`) every check runs again, the ones that passed
+before too: an earlier result does not hold for new code **(P3)**.
 
 **`queues/<id>/checks.yaml`** (server-owned, one writer: the engine's `CheckRunner`; `ChecksFile` in schemas.ts):
 
@@ -83,7 +87,8 @@ steps:
               - { started_at: ..., ended_at: ..., exit_code: 1, duration: 212, log: checks/W3/r1f0-1-npm-test.1.log,
                   failed_tests: ["engine › halts after the fix limit"], tail: "..." }
               - { started_at: ..., ended_at: ..., exit_code: 1, duration: 205, log: checks/W3/r1f0-1-npm-test.2.log }
-            ok: false              # its outcome in the set; flaky: true when it failed, then passed
+            ok: false              # its outcome in the set; flaky: true when it failed, then passed;
+                                   # snapshot_rerun: true when it ran again after a time limit with a shadow copy, then passed
           - name: All tests green  # an older queue's check in words: not_command: true, no runs, neither ok nor failed
             command: All tests green
             not_command: true
@@ -148,8 +153,8 @@ its fix queue gets the occurrence once.
 
 The review round (`reviewRound`) counts only the step.dones that reached review, so a check-fix round is no send-back
 round, and the review pictures keep their round **(P13)**. The engine's results join the step's `checks` (`by:
-"nexus"`, `flaky`; the summary "passed", "failed, then passed on the second run (flaky)", "exit code 1; 2 tests
-failed, twice") and its metrics (`check:<name>`), so `nexus status`, the dashboard, the review notice and the
+"nexus"`, `flaky`; the summary "passed", "failed, then passed on the second run (flaky)", "passed (rerun after a
+disk snapshot)", "ended at its time limit", "exit code 1; 2 tests failed, twice") and its metrics (`check:<name>`), so `nexus status`, the dashboard, the review notice and the
 statistics read both kinds alike. `nexus status` adds a line under a checking step (`checks by Nexus: waiting for the
 machine since …`, `running <check>`, `running <check> on the queue's base commit`, `a disputed failure waits for the
 orchestrator's decision`) and under a fix round (`check-fix round 1 of 3`).

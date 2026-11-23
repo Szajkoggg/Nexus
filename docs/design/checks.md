@@ -46,6 +46,14 @@ twice, the worker gets a check-fix round: a message to its session with the fail
 format is known), the end of the output and the full log's path **(P15)**. It fixes, commits and ends with `nexus
 step done` again, and the checks run again, all of them.
 
+**A check at its time limit is not run once more** (the user's decision of 2026-11-23, queue CK, on the LY survey's
+question). An hour's run ended by the limit would most likely end the same way, and holds the machine another hour:
+the worker gets its check-fix round at once, the text saying the check ended at its time limit. The one exception is
+the machine's own: when Windows made a volume shadow copy while it ran (src/snapshots.ts), which stops the volume's
+writes and can make every waiting test run long, it runs once more. Passing then, it is not flaky (the tests did not
+waver; the disk stood still) but recorded as `snapshot_rerun`, and the dashboard's row and the reviewer's packet say
+"passed (rerun after a disk snapshot)". A plain failure keeps its one rerun, whether or not a copy was made meanwhile.
+
 **The check-fix round is not a send-back.** It has its own limit, 3 by default (decided "like
 `review_send_back_limit`") **(P4)**, and is counted apart: the step's review round (send-backs, the round of
 its review pictures) stays as it is, and the fix round is numbered within it **(P13)**. After the limit the run halts

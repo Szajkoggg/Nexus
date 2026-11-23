@@ -1462,9 +1462,14 @@ const CheckRun = z.object({
   name: z.string(),
   command: z.string(),
   runs: z.array(CheckAttempt).default([]),
-  /** Its outcome in the set: passed on the first run or the second (then also `flaky`). */
+  /** Its outcome in the set: passed on the first run or the second (then also `flaky`, or `snapshot_rerun`). */
   ok: z.boolean().optional(),
   flaky: z.boolean().optional(),
+  /**
+   * Passed on the second run, which ran because the first ended at its time limit while Windows made a volume shadow
+   * copy (queue CK): the machine's cause, not flaky. A time limit without a copy is not run again.
+   */
+  snapshot_rerun: z.boolean().optional(),
   /**
    * Not a command (queue EF, P1): its first word is no program on the PATH nor a file in the checkout (commands.ts), as
    * a check of an older queue written in words. Not run, neither passed nor failed: the set goes on without it, and the

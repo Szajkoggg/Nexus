@@ -1,0 +1,11 @@
+# A check run again after its time limit because Windows made a volume shadow copy meanwhile (queue CK2), on
+# scripts/capture/seed-check-snapshot.ts: its row in the step's checks box reads "passed (rerun after a disk snapshot)"
+# in the passed tone. A new view: --no-before.
+#   node scripts/capture.ts scripts/capture/examples/check-snapshot.yaml --no-before
+seed: scripts/capture/seed-check-snapshot.ts
+views:
+  - key: check-row-snapshot@492
+    route: "#/demo/SR/SR1"
+    label: "Pillanatkép miatt újrafutott check sora a lépés checkjei között"
+    actions:
+      - wait: 3000

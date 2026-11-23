@@ -27,7 +27,7 @@ const capacity = (jobs = false) => new Capacity({ testLock: lockFile(), pollMs: 
  * The stand-in checks: `node check.cjs <name>` exits with the next planned code of <name> (the last one stays), after
  * an optional wait ("<ms>ms:<code>"), printing a passing or failing test as node:test's spec reporter does. Run outside
  * the project's checkout (the base worktree), it takes the plan <name>.base; without one there it cannot run ("Missing
- * script"). The test it prints is named after <name>, or the second argument. Each run is logged.
+ * script"). The test it prints is named after <name>, or the second argument. Each run is logged, once its plan is written.
  */
 function standIns(root: string) {
   const dir = mkdtempSync(join(tmpdir(), "nexus-checks-"));
@@ -37,12 +37,15 @@ function standIns(root: string) {
 const dir = __dirname, name = process.argv[2], shown = process.argv[3] || name;
 const main = fs.readFileSync(path.join(dir, "main-cwd"), "utf8").trim();
 const base = process.cwd().replaceAll("\\\\", "/").toLowerCase() !== main;
-fs.appendFileSync(path.join(dir, "runs.log"), name + (base ? "@base" : "") + "\\n");
 const plan = path.join(dir, name + (base ? ".base" : ""));
-if (!fs.existsSync(plan)) { if (base) { console.error("npm error Missing script: " + name); process.exit(1); } process.exit(0); }
+const log = () => fs.appendFileSync(path.join(dir, "runs.log"), name + (base ? "@base" : "") + "\\n");
+if (!fs.existsSync(plan)) { log(); if (base) { console.error("npm error Missing script: " + name); process.exit(1); } process.exit(0); }
 const lines = fs.readFileSync(plan, "utf8").split("\\n").filter(Boolean);
 const next = lines.length > 1 ? lines.shift() : lines[0];
 fs.writeFileSync(plan, lines.join("\\n") + "\\n");
+// Logged once the plan is written: a test that ends the check as soon as it sees the run (a restart) cannot end it
+// between the plan's truncation and its write, which left the plan empty and every later run failing (queue CK2).
+log();
 const [wait, code] = next.includes("ms:") ? next.split("ms:").map(Number) : [0, Number(next)];
 setTimeout(() => {
   if (code === 0) { console.log("✔ " + shown + " works (1ms)"); process.exit(0); }
@@ -144,6 +147,44 @@ test("a Windows volume shadow copy made while a check failed is kept with its ru
     assert.match(m!.text, /Failing tests:\n- unit breaks\nWhile it ran, Windows made a volume shadow copy \(at 2026-11-20T17:44:20\.360Z, 32\.5 s, asked by taskhostw\.exe\)/);
     assert.equal(m!.text.match(/volume shadow copy \(/g)!.length, 1, "the same copy named once");
     assert.match(m!.text, /is the machine's \(docs\/design\/tests\.md, "Volume shadow copies stop the tests"\)/);
+  } finally { x.engine.shutdown(); x.cap.shutdown(); }
+});
+
+/** A time limit a stand-in's quick run stays well inside even on a busy machine, and a planned wait runs past (queue CK). */
+const LIMIT_MS = 8000;
+
+test("a check that runs into its time limit is not run again: the worker gets a check-fix round naming the limit (queue CK)", async () => {
+  const x = withChecks(["done"], ["unit"], { checkLimitMs: LIMIT_MS, capacity: capacity(true) });
+  x.plan("unit", ["60000ms:0", 0]);
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+    const [first, second] = x.sets();
+    const c = first!.checks[0]!;
+    assert.deepEqual([first!.state, c.ok, c.flaky, c.runs.length, c.runs[0]!.timed_out, c.runs[0]!.exit_code], ["failed", false, undefined, 1, true, null], "one run, ended at the limit");
+    assert.deepEqual(x.runs(), ["unit", "unit"], "not run again in its set; once more after the fix round's done");
+    const [m] = fixMessages(x);
+    assert.match(m!.text, /Check ".*unit" ended at its time limit and was not run again/);
+    assert.match(x.queue().steps[0]!.checks[0]!.summary!, /^ended at its time limit$/);
+    assert.equal(second!.state, "passed");
+  } finally { x.engine.shutdown(); x.cap.shutdown(); }
+});
+
+test("a check that runs into its time limit while Windows made a shadow copy runs once more: passing, it is a snapshot rerun, not flaky (queue CK)", async () => {
+  const snapshot = { at: "2026-11-23T09:12:00.000Z", seconds: 41.2, by: "taskhostw.exe" };
+  const x = withChecks(["done"], ["unit"], { checkLimitMs: LIMIT_MS, capacity: capacity(true), snapshots: async () => [snapshot] });
+  x.plan("unit", ["60000ms:0", 0]);
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+    assert.equal(x.sets().length, 1, "no fix round");
+    const [set] = x.sets();
+    const c = set!.checks[0]!;
+    assert.deepEqual([set!.state, c.ok, c.snapshot_rerun, c.flaky], ["passed", true, true, undefined]);
+    assert.deepEqual(c.runs.map((r) => [r.timed_out, r.exit_code]), [[true, null], [undefined, 0]]);
+    assert.deepEqual(c.runs[0]!.snapshots, [snapshot], "the copy is kept with the timed-out run");
+    assert.equal(fixMessages(x).length, 0);
+    assert.equal(x.queue().steps[0]!.checks[0]!.summary, "passed (rerun after a disk snapshot)");
   } finally { x.engine.shutdown(); x.cap.shutdown(); }
 });
 

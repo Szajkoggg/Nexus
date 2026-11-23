@@ -832,6 +832,7 @@ export const en = {
   "checks.fix": "Check-fix round {fix} of {limit}: the checks failed twice after the step's done, and the worker fixes them in the same session. This is no send-back: the step stays in review round {round}. Every check runs again after its next done.",
   "checks.limit": "The checks failed after {limit} check-fix rounds: the run halted for the orchestrator. Resume gives one more round.",
   "checks.row.passed": "passed",
+  "checks.row.snapshotRerun": "passed (rerun after a disk snapshot)",
   "checks.row.flaky": "flaky",
   "checks.row.failed": "failed twice",
   "checks.row.running": "running",

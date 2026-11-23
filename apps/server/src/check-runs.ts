@@ -2,7 +2,8 @@
 // decided 2026-11-17 and 2026-11-18). After a worker's `nexus step done`, the engine runs the project's and the queue's
 // checks itself, as one heavy operation of the workstation (src/capacity.ts), each a child process outside the event
 // loop with its output in a log under the queue's folder, its state written to queues/<id>/checks.yaml before it
-// starts and after it ends. A failing check runs once more in the same grant (passing then: flaky); failing twice, the
+// starts and after it ends. A failing check runs once more in the same grant (passing then: flaky), one that ran into
+// its time limit only when Windows made a volume shadow copy meanwhile (passing then: snapshot_rerun); failing twice, the
 // worker gets a check-fix round with the failing tests, the end of the output and the log's path, up to
 // `check_fix_limit` rounds, then the run halts for the orchestrator. A failure the worker says is not its work's is run
 // on the queue's base commit, in a worktree of its own: failing there too, it is accepted (the step goes to review, and
@@ -251,11 +252,16 @@ export class CheckRunner {
         }
         if (!(await this.attempt(a, grant, queue, step, done, c, i, cwd, 1))) failed.push(c.name);
       }
-      // Each failed check once more, in the same grant: the code has not changed (P3).
+      // Each failed check once more, in the same grant: the code has not changed (P3). One that ran into its time limit
+      // is not run again (the user's decision of 2026-11-23, queue CK): another hour would end the same way; only when
+      // Windows made a volume shadow copy while it ran, which stops the volume's writes, it runs once more.
       const twice: string[] = [];
+      const runs = checkSetOf(this.read(queue), step, done)!.checks;
       for (const name of failed) {
         if (a.stopped) break;
         const i = set.checks.findIndex((c) => c.name === name);
+        const first = runs[i]!.runs.at(-1);
+        if (first?.timed_out && !first.snapshots?.length) { this.update(queue, step, done, (s) => { s.checks[i]!.ok = false; }); twice.push(name); continue; }
         if (!(await this.attempt(a, grant, queue, step, done, set.checks[i]!, i, cwd, 2))) twice.push(name);
       }
       if (a.stopped) {
@@ -321,7 +327,9 @@ export class CheckRunner {
       const run = s.checks[index]!;
       run.runs[run.runs.length - 1] = ended;
       if (a.stopped) return;
-      if (result.ok) { run.ok = true; if (n > 1) run.flaky = true; }
+      // Passing on the run after a time limit with a shadow copy: the copy's, not flaky (queue CK).
+      const snapshotRerun = n > 1 && !!run.runs.at(-2)?.timed_out;
+      if (result.ok) { run.ok = true; if (snapshotRerun) run.snapshot_rerun = true; else if (n > 1) run.flaky = true; }
       else if (n > 1) run.ok = false;
     });
     return result.ok;
@@ -588,13 +596,25 @@ function failureText(store: ProjectStore, queue: string, set: CheckSet): string 
     return [
       c === set.setup
         ? `The worktree setup (${c.command}) ran first, because ${set.setup.reason}, and failed twice; the checks did not run.`
-        : `Check "${c.name}" failed twice${last.timed_out ? " (ended at its time limit)" : ` (exit code ${last.exit_code ?? "none"})`}.`,
+        : failedLine(c),
       last.failed_tests?.length ? `Failing tests:\n${last.failed_tests.map((t) => `- ${t}`).join("\n")}` : "",
       copiesNote(c),
       `Full log: ${join(store.queueDir(queue), last.log)}`,
       last.tail ? `The end of its output:\n${last.tail}` : "",
     ].filter(Boolean).join("\n");
   }).join("\n\n");
+}
+
+/**
+ * How a check failed, for the worker: twice, or once at its time limit (not run again, queue CK), or at its time limit
+ * with a shadow copy and once more after it.
+ */
+function failedLine(c: CheckRun): string {
+  const last = c.runs.at(-1)!;
+  const how = (r: CheckAttempt) => r.timed_out ? "ended at its time limit" : `exit code ${r.exit_code ?? "none"}`;
+  if (c.runs.length === 1 && last.timed_out) return `Check "${c.name}" ended at its time limit and was not run again (a check that runs into its limit fails at once).`;
+  if (c.runs[0]?.timed_out) return `Check "${c.name}" ended at its time limit while Windows made a volume shadow copy, ran once more and failed again (${how(last)}).`;
+  return `Check "${c.name}" failed twice (${how(last)}).`;
 }
 
 /** The volume shadow copies made while a check's failed runs ran, in words (empty without one). */

@@ -41,7 +41,7 @@ export function RetryLine({ queue, step }: InQueue) {
 }
 
 const ROW: Record<CheckRowState, { mark: string; tone: string }> = {
-  passed: { mark: "✓", tone: "text-ok" }, flaky: { mark: "✓", tone: "text-warn" }, failed: { mark: "✗", tone: "text-danger" },
+  passed: { mark: "✓", tone: "text-ok" }, snapshotRerun: { mark: "✓", tone: "text-ok" }, flaky: { mark: "✓", tone: "text-warn" }, failed: { mark: "✗", tone: "text-danger" },
   running: { mark: "●", tone: "text-accent" }, waiting: { mark: "○", tone: "text-fg-3" }, interrupted: { mark: "–", tone: "text-fg-3" },
   notCommand: { mark: "–", tone: "text-warn" },
 };

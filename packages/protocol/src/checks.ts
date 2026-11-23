@@ -32,7 +32,7 @@ export function reviewRound(q: Pick<QueueView, "check_runs">, st: Pick<StepView,
 /** One check's outcome in a few words: "passed", "passed on the second run (flaky)", "exit code 1; 2 tests failed". */
 function checkRunSummary(c: CheckRun): string {
   const last = c.runs.at(-1);
-  if (c.ok) return c.flaky ? "failed, then passed on the second run (flaky)" : "passed";
+  if (c.ok) return c.flaky ? "failed, then passed on the second run (flaky)" : c.snapshot_rerun ? "passed (rerun after a disk snapshot)" : "passed";
   if (!last) return "not run";
   const why = last.timed_out ? "ended at its time limit" : last.exit_code === null || last.exit_code === undefined ? "ended" : `exit code ${last.exit_code}`;
   const tests = last.failed_tests?.length ? `; ${last.failed_tests.length} test${last.failed_tests.length === 1 ? "" : "s"} failed` : "";
