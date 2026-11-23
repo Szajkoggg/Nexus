@@ -382,6 +382,12 @@ function Card({ node: n, onOpen, actions, cardRef, drag, highlight, moving, styl
           <span className={`min-w-0 [overflow-wrap:anywhere] ${word}`}>{n.now ? n.status.label : `${t("plan.notPlanned")} · ${n.status.label}`}</span>
         </span>
       )}
+      {n.resting && (
+        <span className="mt-1 flex items-baseline gap-1.5 text-xs" data-plan-resting={n.id}>
+          <span className={`h-1.5 w-1.5 shrink-0 -translate-y-px rounded-full ${TONE[n.resting.tone][0]}`} />
+          <span className={`min-w-0 [overflow-wrap:anywhere] ${TONE[n.resting.tone][1]}`}>{n.resting.label}</span>
+        </span>
+      )}
       {(n.now || n.planned) && n.why.map((w) => (
         <span key={w.key} className={`mt-1 block text-xs ${WHY[w.tone]}`}>{say(w)}</span>
       ))}

@@ -39,10 +39,18 @@ interface Before { queue: string; by: "user" | "orchestrator"; done: boolean; at
 export interface PlanNode {
   id: string;
   title: string;
-  /** 0: now (running, waiting, paused or stopped: in progress); 1: next; 2 and on: later. */
+  /**
+   * 0: now (at work or waiting for the user; a paused or stopped one with no predecessor shown); 1: next; 2 and on:
+   * later.
+   */
   column: number;
-  /** In progress now: its honest status says where it stands. */
+  /** In progress, in the first column: its honest status says where it stands. */
   now: boolean;
+  /**
+   * It has started but does not work now (paused, stopped, held) and stands after the queues it waits for: its state
+   * in a word, for the card (its honest status may only say "starts after …").
+   */
+  resting?: { tone: HonestStatus["tone"]; label: string };
   /** In the plan (planned, or a schedule). A queue only some planned queue waits for may not be. */
   planned: boolean;
   status: HonestStatus;
@@ -70,10 +78,29 @@ export interface PlanLayout {
 const NOW_STATUS = new Set(["running", "waiting", "paused", "stopped"]);
 const ENDED = new Set(["done", "cancelled"]);
 
-/** In progress now: at work, waiting for a review or an answer, paused, stopped, or its run holds its checkout. */
+/** In progress: at work, waiting for a review or an answer, paused, stopped, or its run holds its checkout. */
 export function isNow(q: Pick<PlanQueue, "status" | "run">): boolean {
   if (ENDED.has(q.status)) return false;
   return NOW_STATUS.has(q.status) || runGoing(q.run);
+}
+
+/**
+ * At work or waiting for the user now: its run goes (not held at the limit), or its honest status is running, a
+ * review, or waiting for an answer, a permission or a check decision. A paused, stopped or held queue is not.
+ */
+export function isActive(q: PlanQueue, now = new Date()): boolean {
+  if (ENDED.has(q.status)) return false;
+  if (runGoing(q.run) && !q.run?.held) return true;
+  const s = queueStatus(q as QueueLike, now);
+  return (s.tone === "running" || s.tone === "review" || s.tone === "waiting") && s.says?.key !== "status.heldLimit";
+}
+
+/** A started queue's state in a word when it does not work: its honest status if that says it, else "paused". */
+function restingOf(q: PlanQueue, s: HonestStatus): { tone: HonestStatus["tone"]; label: string } {
+  if (s.tone !== "planned" && s.tone !== "approval") return { tone: s.tone, label: s.label };
+  if (s.says?.key === "status.heldCheckout" || s.says?.key === "status.heldLimit") return { tone: "waiting", label: s.label };
+  const step = q.current_step ?? q.run?.step;
+  return { tone: "paused", label: step ? t("status.withStep", { label: t("status.paused"), step }) : t("status.paused") };
 }
 
 /** In the plan: a place that is not used yet (planned and not started since), or a schedule. */
@@ -115,10 +142,12 @@ function trainWhy(q: PlanQueue): Why[] {
 }
 
 /**
- * The plan's layout: the queues in progress in the first column; each planned queue one column right of the latest of
- * the queues it waits for that are shown (those done are not); a queue only some planned queue waits for (approved
- * but not planned, say) shows too, where it would stand. Within a column the queues follow those they wait for
- * (their average row), then the order they were planned in.
+ * The plan's layout: the queues at work or waiting for the user in the first column; each planned queue one column
+ * right of the latest of the queues it waits for that are shown (those done are not); a queue that has started but
+ * does not work now (paused, stopped, held) stands after the queues it waits for the same way, or first when it waits
+ * for none shown; a queue only some planned queue waits for (approved but not planned, say) shows too, where it would
+ * stand. Within a column the queues follow those they wait for (their average row), then the order they were planned
+ * in.
  */
 export function planLayout(all: readonly PlanQueue[], now = new Date()): PlanLayout {
   const byId = new Map(all.map((q) => [q.id, q]));
@@ -135,13 +164,15 @@ export function planLayout(all: readonly PlanQueue[], now = new Date()): PlanLay
     }
   }
 
+  const active = new Set([...shown].filter((id) => isActive(byId.get(id)!, now)));
   const column = new Map<string, number>();
   const columnOf = (id: string, path: Set<string>): number => {
     const known = column.get(id);
     if (known !== undefined) return known;
     const q = byId.get(id)!;
-    let c = 1;
-    if (isNow(q)) c = 0;
+    // A started queue that does not work now: first unless it waits for a queue shown.
+    let c = isNow(q) ? 0 : 1;
+    if (active.has(id)) c = 0;
     else if (!path.has(id)) {
       path.add(id);
       for (const b of beforeOf(q)) if (shown.has(b.queue)) c = Math.max(c, columnOf(b.queue, path) + 1);
@@ -155,11 +186,14 @@ export function planLayout(all: readonly PlanQueue[], now = new Date()): PlanLay
   const nodes = new Map<string, PlanNode>();
   for (const id of shown) {
     const q = byId.get(id)!;
-    const n = isNow(q);
+    const c = column.get(id)!;
+    const n = isNow(q) && c === 0;
+    const status = queueStatus(q as QueueLike, now);
     const proposal = openPlan(q)?.proposal;
     nodes.set(id, {
-      id, title: q.title, column: column.get(id)!, now: n, planned: isPlanned(q),
-      status: queueStatus(q as QueueLike, now), why: n ? trainWhy(q) : whyOf(q, now), before: n ? [] : beforeOf(q),
+      id, title: q.title, column: c, now: n, planned: isPlanned(q),
+      status, why: n ? trainWhy(q) : whyOf(q, now), before: n ? [] : beforeOf(q),
+      ...(!n && isNow(q) ? { resting: restingOf(q, status) } : {}),
       ...(proposal ? { proposal } : {}), movable: !n, placed: !n && !!openPlan(q),
     });
   }
@@ -173,7 +207,9 @@ export function planLayout(all: readonly PlanQueue[], now = new Date()): PlanLay
       const rows = n.before.map((b) => row.get(b.queue)).filter((r): r is number => r !== undefined);
       return rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : Number.MAX_SAFE_INTEGER;
     };
-    here.sort((a, b) => weight(a) - weight(b) || madeAt(a.id).localeCompare(madeAt(b.id)) || compareIds(a.id, b.id));
+    // In the first column what works or waits for the user comes before what rests there (paused, stopped).
+    const resting = (n: PlanNode) => (c === 0 && !active.has(n.id) ? 1 : 0);
+    here.sort((a, b) => resting(a) - resting(b) || weight(a) - weight(b) || madeAt(a.id).localeCompare(madeAt(b.id)) || compareIds(a.id, b.id));
     here.forEach((n, i) => row.set(n.id, i));
     columns[c] = here;
   }

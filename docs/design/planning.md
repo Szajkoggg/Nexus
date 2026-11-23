@@ -61,10 +61,14 @@ clock, for the schedules and for the engine's own retry and usage waits. The eng
 
 The Queues view shows the plan above the queue lists (`apps/web/src/plan.ts`, `components/Plan.tsx`). Decisions:
 
-- Columns, not a timeline: what is in progress now (at work, waiting for a review or an answer, paused, stopped) is
-  the first column, and every planned queue stands one column right of the latest queue it waits for that is still
-  shown. Done predecessors are not drawn (the card still names them, "done"), so the picture is what is left to happen.
-  Times would come only from estimates (PV4); the order is certain, the times are not.
+- Columns, not a timeline: what works now or waits for the user (running, its checks running, waiting for a review or
+  an answer) is the first column, and every planned queue stands one column right of the latest queue it waits for
+  that is still shown. Done predecessors are not drawn (the card still names them, "done"), so the picture is what is
+  left to happen. Times would come only from estimates (PV4); the order is certain, the times are not.
+- A queue that has run but does not work now (paused, stopped, held at the limit) stands where its predecessors put it,
+  as one that never ran does, with its state on the card ("paused · PA2", "stopped at SB1"); with no predecessor shown
+  it stays in the first column, after those at work. The user's report (2026-11-18, queue PVA): queues paused since a
+  restart or stopped, though planned after others, all stood first, so the first column no longer said what runs.
 - A queue that a planned queue waits for is shown even when it is not in the plan itself ("not in the plan"): it is
   what holds the plan. Approved queues outside the plan are one line under it, since they wait for someone to plan them.
 - A line goes from a queue to the one that waits for it, solid in the accent colour where the user set the

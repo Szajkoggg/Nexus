@@ -2,7 +2,7 @@
 // queue waits, the queues shown because a planned one waits for them, and the approved ones outside the plan.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { estimateWords, isNow, isPlanned, moveTargets, planLayout, planList, whyOf, type PlanQueue } from "../src/plan.ts";
+import { estimateWords, isActive, isNow, isPlanned, moveTargets, planLayout, planList, whyOf, type PlanQueue } from "../src/plan.ts";
 import { t } from "../src/i18n.ts";
 
 const q = (id: string, over: Partial<PlanQueue> = {}): PlanQueue => ({ id, title: `Queue ${id}`, status: "approved", steps: [], questions: [], approved: true, revision: 1, ...over });
@@ -27,13 +27,43 @@ test("columns: now, then each queue one right of the latest it waits for; done o
   assert.deepEqual(mp.before, [{ queue: "RN", by: "user", done: false }, { queue: "DN", by: "orchestrator", done: true }], "the card names both, the done one too");
 });
 
-test("what is now: at work, waiting, paused, stopped, or a run holding its checkout; ended queues are not", () => {
+test("what is in progress: at work, waiting, paused, stopped, or a run holding its checkout; ended queues are not", () => {
   assert.equal(isNow(q("A", { status: "waiting" })), true);
   assert.equal(isNow(q("A", { status: "stopped" })), true);
   assert.equal(isNow(q("A", { status: "approved", run: { state: "usage_wait" } })), true);
   assert.equal(isNow(q("A", { status: "done", run: { state: "running" } })), false);
   assert.equal(isPlanned(q("A", { plan: { used: true, after: [] } })), false, "a used plan plans nothing");
   assert.equal(isPlanned(q("A", { start: { at: "2026-11-14T22:00:00Z" } })), true, "a schedule is in the plan");
+});
+
+test("what works now: a run going, a review, a question or a waiting step; paused, stopped or held at the limit do not", () => {
+  assert.equal(isActive(q("A", { status: "running", run: { state: "running", step: "A1" } })), true);
+  assert.equal(isActive(q("A", { status: "waiting", steps: [{ id: "A1", status: "review" }] })), true, "waits for the user's review");
+  assert.equal(isActive(q("A", { status: "waiting", steps: [{ id: "A1", status: "waiting" }], questions: [{ state: "open", can_continue: false, step: "A1" }] })), true, "waits for an answer");
+  assert.equal(isActive(q("A", { status: "approved", run: { state: "running", step: "A1", held: { reason: "limit" } } })), false, "held at the limit");
+  assert.equal(isActive(q("A", { status: "paused", run: { state: "paused" } })), false);
+  assert.equal(isActive(q("A", { status: "running" })), false, "its steps say running but no run goes (the server restarted)");
+  assert.equal(isActive(q("A", { status: "stopped", stop_step: "A2", steps: [{ id: "A2", status: "failed" }] })), false);
+});
+
+// The user's report (2026-11-18): queues that had run were all in the first column, paused or stopped, though they
+// wait for others in the plan.
+test("a paused or stopped queue that waits for others stands after them; one that waits for none stays first", () => {
+  const l = planLayout([
+    q("RN", { status: "running", run: { state: "running", step: "RN2" }, current_step: "RN2" }),
+    q("PA", { status: "paused", run: { state: "paused", step: "PA2" }, current_step: "PA2", plan: after(["RN", "user"]) }),
+    q("ST", { status: "stopped", stop_step: "ST1", steps: [{ id: "ST1", status: "failed" }], plan: after(["PA", "orchestrator"]) }),
+    q("FR", { status: "paused", run: { state: "paused", step: "FR1" }, current_step: "FR1" }),
+  ]);
+  assert.deepEqual(ids(l.columns), [["RN", "FR"], ["PA"], ["ST"]]);
+  assert.deepEqual(l.edges, [{ from: "RN", to: "PA", by: "user" }, { from: "PA", to: "ST", by: "orchestrator" }]);
+  const node = (id: string) => planList(l).find((n) => n.id === id)!;
+  assert.deepEqual([node("RN").now, node("FR").now, node("PA").now, node("ST").now], [true, true, false, false]);
+  assert.deepEqual(node("PA").resting, { tone: "paused", label: "paused · PA2" }, "its state shows on the card");
+  assert.deepEqual(node("ST").resting, { tone: "stopped", label: "stopped at ST1" });
+  assert.equal(node("FR").resting, undefined, "first, its honest status says it");
+  assert.equal(node("PA").movable, true, "it can be moved in the plan like a planned one");
+  assert.deepEqual(node("PA").before, [{ queue: "RN", by: "user", done: false }]);
 });
 
 test("a queue a planned one waits for shows too, even outside the plan; approved queues outside it are listed apart", () => {
