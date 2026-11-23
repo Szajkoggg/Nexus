@@ -27,6 +27,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { openSync, unlinkSync, writeFileSync, writeSync, closeSync, futimesSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   fullTestLockFile, fullTestStale, fullTestStaleMs, processAlive as alive, readFullTestHolder as readHolder,
@@ -53,6 +54,16 @@ interface LockOptions {
   lease?: boolean;
   /** Ends the wait (the run's starter is gone): acquire resolves with undefined, and nothing runs. */
   signal?: AbortSignal;
+}
+
+/**
+ * The run's environment with the compile cache on (queue TI2): the test files, and every node process they start
+ * (servers, fake runtimes, the nexus CLI), read the sources compiled from the system's temporary folder rather than
+ * compiling them again; a full run took 666 s with it against 815 to 865 s without (TI1). The folder is the one the
+ * nexus CLI uses by itself; a NODE_COMPILE_CACHE already set is kept.
+ */
+function withCompileCache(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...env, NODE_COMPILE_CACHE: env.NODE_COMPILE_CACHE || join(tmpdir(), "node-compile-cache") };
 }
 
 /** The lock taken: `release()` removes it, if it is still this run's. */
@@ -278,7 +289,7 @@ function watchdog(wrapper: number, parent: number, file: string, pollMs = 1000):
     if (m.signal) { child?.kill(m.signal); return; }
     if (!m.args || child || ending) return;
     token = m.token;
-    child = spawn(process.execPath, m.args, { stdio: "inherit", windowsHide: true, detached: process.platform !== "win32" });
+    child = spawn(process.execPath, m.args, { env: withCompileCache(process.env), stdio: "inherit", windowsHide: true, detached: process.platform !== "win32" });
     child.on("error", () => finish(1));
     child.on("exit", (code, signal) => finish(ending ? 1 : code ?? (signal ? 1 : 0)));
   });
