@@ -386,3 +386,12 @@ caught or not, through an in-process inspector paused on every exception; and a 
 Running the suite through the model by default did not make it slower: 734 s before, 634 s and 661 s after (the
 first before the preload looked at the files on disk), one `npm test` each on the same machine under its other load
 (`ℹ duration_ms`); the difference is within what that load moves a run by.
+
+## The agents' texts against the CLI (queue ACF)
+
+Every text an agent is given is pinned by a golden file and its `nexus` commands are checked against the CLI: a new
+briefing, notice, packet or help topic gets its rendering in `apps/server/test/golden` (`prompts.test.ts` fails on a
+notice function it does not render), and `packages/cli/test/instruction-commands.test.ts` then checks each command in
+the goldens, the help topics and AGENTS.md for an existing command and subcommand, flags of that command the parser
+knows, and the options the command cannot go without (its `REQUIRED` table, kept by hand beside main.ts's checks); a
+text that shows only part of a command on purpose marks it with a standalone `…`.

@@ -66,6 +66,22 @@ type TurnTag = { queue?: string; step?: string; fallback?: TurnRecord["fallback"
 const tokenCounts = (t: TurnTokens | undefined): TokenCounts | undefined =>
   t && { input: t.input, output: t.output, cache_read: t.cacheRead, cache_creation: t.cacheCreation };
 
+/** What a process's turns answer (sent through AgentHost.send), for a restart that cuts the turn off (cutOff). */
+interface Asked {
+  /** The texts sent into the running turn, or the one they started. */
+  turn: string[];
+  /** Those waiting as the turn after it. */
+  next: string[];
+  /** Those of `turn` sent into it while it ran. */
+  into: string[];
+  /**
+   * How many at the head of `turn` came from the last turn's `into`: a turn of the runtime's own may still answer
+   * them after that turn ended (AgentProcess.settling); dropped once the moment is over without one (queue CI12).
+   */
+  late: number;
+}
+const noAsked = (): Asked => ({ turn: [], next: [], into: [], late: 0 });
+
 /** A session's running process, with what the role keeps beside it (`E`). */
 export type Hosted<E extends object = object> = { readonly session: string; readonly proc: AgentProcess } & E;
 
@@ -105,11 +121,8 @@ export class AgentHost<E extends object = object> {
   private readonly ended = new WeakSet<AgentProcess>();
   /** Processes to end when their running turn ends. */
   private readonly afterTurn = new WeakSet<AgentProcess>();
-  /**
-   * What each process's turns answer (sent through `send`): the texts sent into the running turn (or the one they
-   * started), and those waiting as the turn after it. For a restart that cuts the turn off (cutOff).
-   */
-  private readonly asked = new WeakMap<AgentProcess, { turn: string[]; next: string[] }>();
+  /** What each process's turns answer (Asked). */
+  private readonly asked = new WeakMap<AgentProcess, Asked>();
 
   constructor(store: ProjectStore, record: RoleRecord, options: AgentHostOptions = {}) {
     this.store = store;
@@ -206,6 +219,9 @@ export class AgentHost<E extends object = object> {
     proc.on("settled", () => {
       // A restart held for the moment a turn of the runtime's own could still start (turnEnd below): none came.
       if (this.afterTurn.has(proc) && proc.state === "idle") endHeld();
+      // No turn of the runtime's own came: the messages sent into the last turn were read in it.
+      const a = this.asked.get(proc);
+      if (a?.late) { a.turn.splice(0, a.late); a.late = 0; }
       on.settled?.();
     });
     proc.on("facts", (f) => {
@@ -217,7 +233,11 @@ export class AgentHost<E extends object = object> {
       const a = this.asked.get(proc);
       // A turn sent to follow this one (send's afterTurn: a hand-over asked during it) starts now in this process.
       const queued = !!a?.next.length;
-      if (a) this.asked.set(proc, { turn: a.next, next: [] });
+      // A message sent into the turn just as it ended (before Nexus read its end) was not read in it: the runtime runs
+      // it as a turn of its own, which the settling waits for. That turn answers it, and a hand-over that cuts it off
+      // quotes it (cutOff); without such a turn (settled) they were read in this one, and are dropped.
+      const late = a && proc.settling ? a.into : [];
+      if (a) this.asked.set(proc, { ...noAsked(), turn: [...late, ...a.next], late: late.length });
       begin(false);
       this.recordTurn(session, open!, model, end);
       const last = { started_at: open!.started, ended_at: now() };
@@ -308,11 +328,14 @@ export class AgentHost<E extends object = object> {
    * what a restart that cuts the turn off quotes (cutOff). Empty: the turn answers nothing worth quoting.
    */
   send(l: Hosted<E>, text: string, o: { afterTurn?: boolean; quote?: readonly string[] } = {}): void {
-    const later = l.proc.state === "working" && !!o.afterTurn;
-    const a = this.asked.get(l.proc) ?? { turn: [], next: [] };
-    (later ? a.next : a.turn).push(...(o.quote ?? [text]));
+    const working = l.proc.state === "working";
+    const into = working && !o.afterTurn;
+    const a = this.asked.get(l.proc) ?? noAsked();
+    const quote = o.quote ?? [text];
+    (working && o.afterTurn ? a.next : a.turn).push(...quote);
+    if (into) a.into.push(...quote);
     this.asked.set(l.proc, a);
-    l.proc.send(text, l.proc.state === "working" && !later ? "next" : undefined);
+    l.proc.send(text, into ? "next" : undefined);
   }
 
   /**

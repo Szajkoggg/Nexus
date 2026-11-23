@@ -21,14 +21,14 @@ FORMATS (--kind, guessed from the file name when left out)
   link    an http(s) URL
   nexus review add copies each file into the queue's folder (.nexus/queues/<queue>/review/<step>/), and the item
   names the copy: the dashboard serves it there, and it outlasts the working tree. A link stays a link. Write the
-  files anywhere outside the working tree, for example in the system's temporary folder (<temp>/nexus-review/<step>/:
-  $TEMP in Git Bash, $env:TEMP in PowerShell), never into the working tree (untracked files there block the cleanup
+  files anywhere outside the working tree, for example in the system's temporary folder (<temp>/nexus-review/<queue>/<step>/, where scripts/capture.ts
+  writes too: $TEMP in Git Bash, $env:TEMP in PowerShell), never into the working tree (untracked files there block the cleanup
   of a worktree) and never under .nexus yourself (the command is the writer there). A file whose name is taken by
   another file in that folder is copied as <name>-2, -3, …; the same file added again is not copied twice.
   The label (--label) is a caption only: say in a few words what the picture shows.
 
 VIEW KEYS (--key): what a picture shows, so that only like is compared with like
-  A key names the view's subject and its state in lowercase words joined by hyphens, then @ and the window's
+  A key names the view's subject and its state in lowercase words joined by hyphens (digits, and dots inside a number such as 1.5, are fine), then @ and the window's
   width in CSS pixels:
     waiting-tab@492   settings-header-tools@1280   step-sheet-open-question@390   cliff-lit-noon@1920
   Same subject, other state: another key (step-sheet-open-question@390 is not step-sheet-done@390).
@@ -75,8 +75,8 @@ THE PROCESS
   2. Before changing anything (or from the step's base commit), take each view's before; or name its mockup.
   3. Do the work. Take each view's after with the same key, window and data.
   4. Add the befores and mockups first, then the afters:
-       nexus review add <step> <temp>/nexus-review/<step>/waiting-tab@492.before.png --key waiting-tab@492 --role before --label "Waiting tab, before"
-       nexus review add <step> <temp>/nexus-review/<step>/waiting-tab@492.png --key waiting-tab@492 --role after --label "Waiting tab with the reasons"
+       nexus review add <step> <temp>/nexus-review/<queue>/<step>/waiting-tab@492.before.png --key waiting-tab@492 --role before --label "Waiting tab, before"
+       nexus review add <step> <temp>/nexus-review/<queue>/<step>/waiting-tab@492.png --key waiting-tab@492 --role after --label "Waiting tab with the reasons"
      A new screen: --role result. Two alternatives: --role variant-a, then --role variant-b.
   5. In the step summary say what is compared with what, and which views were taken by hand or left out, and why.
 
@@ -191,7 +191,7 @@ When an action is refused:
 Every commit belongs to exactly one step: the user keeps or discards a stopped step's commits, and, where the
 project's push_accepted setting is on (off by default), Nexus pushes the commit an accepted step was reviewed at.
 You never push. So:
-  - Commit what the step did before nexus step done, and name it: nexus step done <step> --commit <sha>
+  - Commit what the step did before nexus step done, and name it: nexus step done <step> --summary "..." --commit <sha>
     (the last commit, when the step made several).
   - Leave the working tree clean at the step's end, as at a stop: no uncommitted changes to tracked files. What is
     not part of the step (scratch files) stays untracked, outside version control (for example under tmp/), or is

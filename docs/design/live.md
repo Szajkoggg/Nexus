@@ -279,7 +279,7 @@ them.
 - **A check of the held state**: each state delta could carry a hash of the full state it leads to, and a development
   build compare it with the held state's, so a drift between the diff and the apply shows at once rather than as a
   wrong view. The SD2 test covers the rules; this would cover what the tests do not reach.
-- **Identity in place of text**: a derivation per queue that reuses an unchanged queue's view (docs/design/model.md,
+- **Identity in place of text**: a derivation per queue that reuses an unchanged queue's view (docs/design/model-built.md,
   "Beyond the decision") would let the diff compare by identity instead of serializing every part on every change.
 - **Coalescing for a slow socket** instead of closing it: the pending deltas merged into one (later members replace
   earlier ones), so a slow link gets one delta rather than a full read.

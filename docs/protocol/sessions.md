@@ -45,7 +45,7 @@ re-reads the system time once a minute), so the server, a `nexus` call and git m
 | `message.read` | `message` | An inbox message was received |
 | `context.summary` | `queue?`, `step?`, `text`, `topics: []`, `files: []` | What a successor or continuation needs to know; written at the end of each step |
 | `queue.report` | `queue`, `path`, `summary`, `source_hash?`, `findings?` | The worker's report of the whole queue, written when it ends (done or stopped). `path` is the copy in the queue's folder (`.nexus/queues/<queue>/report.md`), which `nexus report` writes. The CLI records `source_hash` (`sha256:<64 lowercase hex digits>`) from the exact registered bytes, without text normalization; older events may omit it. `findings`: a maintenance queue's number of findings (`--findings`, a whole number from 0; see ["Recurring queues"](planning.md#recurring-queues)) |
-| `change.proposed` | `queue`, `patch`, `reason` | A proposed change to a queue definition (needs a new approval) |
+| `change.proposed` | `queue`, `patch`, `reason` | Not written by anything today, and it changes nothing in the derived state: a revision of a queue goes through `queue.drafted` |
 | `queue.drafted` | `queue`, `definition` | Orchestrator only: a new or changed draft queue |
 | `session.request` | `action` (start, resume, pause, stop, cancel_start), `queue`, `use_session?`, `runtime?`, `model?`, `effort?`, `after?`, `next?`, `start_at?`, `reason` | Orchestrator only: asks the engine to act on a queue's run (`use_session` continues an existing session). `start` with `after` (a list of queue ids; one id from an older CLI): put the queue into the plan, it starts when those are done (see ["The plan"](planning.md#the-plan)); with `next: true`: into the plan with none before it; with `start_at` (ISO 8601, or `usage-reset`): start at that time (a schedule, see ["Schedules"](planning.md#schedules)); `cancel_start`: take the queue out of the plan (its predecessors and its schedule) |
 | `plan.proposed` | `queue`, `after` (ids), `reason` | Orchestrator only: proposes to the user a new list of predecessors for the queue that changes dependencies the user set (see ["The plan"](planning.md#the-plan)) |
@@ -60,7 +60,7 @@ re-reads the system time once a minute), so the server, a `nexus` call and git m
 | `review.passed_on` | `queue`, `step`, `round`, `reasons`, `text` | Review helper or `nexus` only: the step goes on to the orchestrator's review, with why and the helper's findings (see ["The review helper"](review.md#the-review-helper)) |
 | `review.rejected` | `queue`, `step`, `text?` | User only (the loader ignores it from any other session, the orchestrator's included): rejects a step waiting for the user's review (see ["Reject"](files.md#server-owned-runtime-files)) |
 | `review.asked_user` | `queue`, `step`, `text` | The orchestrator's: a step waiting for its review goes to the user, with why. Also the server's from the user's session, when the user sets such a step's level to 1 (see ["The user's level"](review.md#review)): then taken for a step in review whoever its level gives it to, and marked `by: user` |
-| `review.provisional` | `queue`, `step`, `text?` | Orchestrator only (the loader ignores the user's too): a step of review level 3 waiting for its review is accepted provisionally, `text` what the user should look at; the run goes on (see ["Provisional acceptances"](review.md#review)) |
+| `review.provisional` | `queue`, `step`, `text?` | Orchestrator only (the loader ignores the user's too): a step of review level 3 (or 2 while away mode is on) waiting for its review is accepted provisionally, `text` what the user should look at; the run goes on (see ["Provisional acceptances"](review.md#review)) |
 | `review.confirmed` | `queue`, `step` | User only: confirms a provisional acceptance |
 | `review.fix_asked` | `queue`, `step`, `text` | User only: Fix it on a provisional acceptance; the orchestrator drafts a revision with a step that fixes it |
 | `status.set` | `queue`, `step?`, `to` (`skipped`, `finished`, `cancelled`, `propose-lift`), `reason`, `continued_in?` (with `skipped`: where the step's work went on) | Orchestrator only: housekeeping; the server checks it and records an entry in the queue's `changes` (see `queue.yaml`). A worker's is ignored by derivation, and the server applies only the orchestrator's own requests |
@@ -97,11 +97,11 @@ each entry it has seen with `message.read`; `nexus status` shows the unread ones
 ```json
 {"v":1,"id":"01JD...","at":"...","type":"message","from":"user","text":"Use the grassland settings for the bench too."}
 {"v":1,"id":"01JD...","at":"...","type":"answer","qid":"01JD...","from":"orchestrator","text":"...","continue":true}
-{"v":1,"id":"01JD...","at":"...","type":"stop","from":"user","text":"Stop after this check."}
 {"v":1,"id":"send-back-01JD...","at":"...","type":"send_back","from":"user","ref":"01JD...","queue":"W","step":"W2","text":"Blue, not red.","round":2}
 {"v":1,"id":"check-failed-01JD...","at":"...","type":"check_failed","from":"nexus","ref":"01JD...","queue":"W","step":"W2","fix":1,"text":"Check \"npm test\" failed twice (exit code 1). ..."}
 ```
 
+The schema and the engine also know an inbox entry of type `stop` (delivered even to a run held at its limit), but nothing writes one today: the dashboard's Stop goes through the server directly.
 `delivered_at` is recorded by the server in `state.json` once the runtime has accepted the message (stdin write,
 `turn/steer` result, or a hook's output).
 

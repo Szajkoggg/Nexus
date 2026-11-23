@@ -1,0 +1,133 @@
+== restartedNotice: nothing asked
+[Nexus] The server restarted during your turn, which was cut off; go on where you left off. The cut-off turn may have done part of it: check before you repeat anything.
+== restartedNotice: two messages asked
+[Nexus] The server restarted while you were answering these messages:
+> Plan the layout.
+>
+> And the colours.
+Answer them again. The cut-off turn may have done part of it: check before you repeat anything.
+== stepNoteNotice: a note
+[Nexus] The user wrote a note on step N1 of queue QN, which waits for your review:
+The list looks crowded.
+Weigh it in your acceptance of the step. If it asks for a fix, send the step back with nexus review send-back QN N1 "what to fix" (keep the user's words); if it raises what you cannot judge, hand the review to the user with nexus review ask-user. Tell the user briefly what you did with it.
+== discardNotice: two commits
+[Nexus] The user chose to discard the work of stopped step N1 of queue QN. The stop stays. Draft a new revision of queue QN whose first pending step reverts exactly the step's own commits, newest first:
+- ccc3333
+- ddd4444
+The revert step: git revert of these commits only (git show each first; resolve a conflict within the step or stop and ask), nothing else; it never cleans, resets or deletes files it cannot attribute to these commits: uncommitted changes in the checkout are not necessarily the step's, so ask the user about them instead. Keep the stopped step in the draft and skip it with nexus queue set once the user has approved. Approving the revision lifts the stop without asking again. Tell the user briefly what you drafted.
+== rejectionNotice: with a reason
+[Nexus] The user rejected step N1 of queue QN. Their reason:
+The colours are wrong.
+The run is paused and nothing was reverted. Propose what follows as queue revisions for the user's approval: a revert as a step, changes to the remaining steps, or a new queue (then the user can stop this one). The rejected step is never run again; the run goes on only after the user approves a new revision, at its first pending step, and nothing of the queue is pushed until then. Tell the user briefly what you propose.
+== rejectionNotice: without
+[Nexus] The user rejected step N1 of queue QN (no reason given). The run is paused and nothing was reverted. Propose what follows as queue revisions for the user's approval: a revert as a step, changes to the remaining steps, or a new queue (then the user can stop this one). The rejected step is never run again; the run goes on only after the user approves a new revision, at its first pending step, and nothing of the queue is pushed until then. Tell the user briefly what you propose.
+== fixAskedNotice: the queue went on
+[Nexus] The user asked a fix of step N1 of queue QN, which you accepted provisionally:
+Make the list calmer.
+The step stays done and its work stays. Draft a revision of queue QN with a step that makes this fix (keep the user's words in its goal), and propose it. The queue went on: its run waits for the approval at its running step's end, and goes on by itself once the user approves. Tell the user briefly what you drafted.
+== fixAskedNotice: the queue is finished
+[Nexus] The user asked a fix of step N1 of queue QN, which you accepted provisionally:
+Make the list calmer.
+The step stays done and its work stays. Draft a revision of queue QN with a step that makes this fix (keep the user's words in its goal), and propose it. The queue is finished: the user approves the revision, and then it is started. Tell the user briefly what you drafted.
+== acceptedNoteNotice: the last step
+[Nexus] The user accepted step N1 of queue QN (its last step) with this note for you:
+Smaller steps next time.
+Take it into account in the plan, and tell the user briefly what you will do with it.
+== questionNotice: with options
+[Nexus] A worker asked a question in queue QN, step N1 (qid q-1; independent work may finish in this turn; further work waits for every question of the step):
+Which layout?
+Options: 1. grid / 2. list
+The worker recommends: grid Answer it if the answer is settled, otherwise escalate it to the user.
+== approvalNotice: no run
+[Nexus] Queue QN revision 1 approved. If the plan puts it next, start it now; otherwise tell the user why not.
+== liftNotice: with the stop's reason
+[Nexus] The user lifted the stop of queue QN with Continue (the stop was: condition: the disk is full); its run goes on. Nothing to start: the run goes on by itself. Tell the user briefly if anything follows from it for the plan.
+== levelToUserNotice: 
+[Nexus] The user set the review level of step N1 of queue QN to 1 while it waited for your review: they review it themselves, and its review is no longer yours. Do not accept, send back or hand over this step. Nothing else to do; tell the user only if it changes the plan.
+== withdrawalNotice: with a reason
+[Nexus] The user withdrew the approval of queue QN revision 1: Not yet. Do not start it. Tell the user briefly what this changes in the plan.
+== reviewNotice: level 2
+[Nexus] Step N1 of queue QN is done and waits for your review: N1 done. 
+
+Round 1. Goal:
+Goal of N1.
+
+Acceptance:
+- N1 is done
+
+Checks reported this round:
+- none
+
+Review material:
+- none
+
+Commits: aaa1111
+
+Decide with one of: nexus review accept QN N1 [--note "..."] (the run goes on); nexus review send-back QN N1 "what to fix"; nexus review ask-user QN N1 "why" (the user decides). Tell the user briefly what you decided.
+== awayOnNotice: 
+[Nexus] The user is away until 18:00. Until then level-2 steps are reviewed as level 3: judge them; accept what has nothing of the user's, accept provisionally (nexus review provisional) what has, or send it back; the queue goes on. Level-1 steps still wait for the user. When a queue waits for the user, you are told which other approved queues can start; start one if the plan allows (never two queues in one checkout).
+== awayEndNotice: at its time
+[Nexus] Away mode ended at its time. Level-2 steps are reviewed as before (what is the user's goes to them, and the queue waits). When the user is back, tell them briefly what ran and what waits in their return batch.
+== awayEndNotice: turned off
+[Nexus] The user turned away mode off. Level-2 steps are reviewed as before (what is the user's goes to them, and the queue waits). When the user is back, tell them briefly what ran and what waits in their return batch.
+== awayStuckNotice: a next queue and a paused one
+[Nexus] Queue QN waits for the user at step N1 (a level-1 review). The user is away. Next in the plan (Nexus starts them by itself): QB "Queue QB" (now: its checkout is busy). Paused queues that could go on: QC "Queue QC" (nexus run QC resume --reason "..."). Start no queue outside the plan while the user is away; say in the chat what happens.
+== awayStuckNotice: nothing in the plan
+[Nexus] Queue QN waits for the user at step N1 (a question). The user is away. Nothing else is in the plan. Start no queue outside the plan while the user is away; say in the chat what happens.
+== planHeldNotice: the user's dependency
+[Nexus] Queue QN waits in the plan, but QB is stopped. Nexus does not start QN until QB is done. If it should not wait for QB, the user made it wait for QB: propose a change with nexus plan propose QN [--after <queue>]... --reason "..."; else tell the user what it waits for.
+== planHeldNotice: the orchestrator's dependency
+[Nexus] Queue QN waits in the plan, but QB is cancelled. Nexus does not start QN until QB is done. If it should not wait for QB, you made it wait for QB: change it with nexus run QN start [--after <queue>]... --reason "..." (or take it out with nexus run QN cancel-start --reason "..."); else tell the user what it waits for.
+== planDecisionNotice: accepted
+[Nexus] The user accepted your proposal: queue QN starts after QB. The plan is changed; go on from it.
+== planDecisionNotice: declined
+[Nexus] The user declined your proposal for queue QN (with no queue before it). The plan stays as the user set it; build around it.
+== planDecisionNotice: handed_back
+[Nexus] The user handed back to you whether queue QN waits for QB. It is your dependency now: keep it, or change it with nexus run <queue> start --after … (say so in the chat).
+== planDecisionNotice: removed
+[Nexus] The user took QB out of the predecessors of queue QN (a dependency the user had set). It is the user's decision: do not put QB back yourself (Nexus refuses it); if QN really needs it, propose it with nexus plan propose QN --after … --reason "...".
+== planDecisionNotice: undone
+[Nexus] The user undid taking QB out of the predecessors of queue QN: it waits for QB again. The plan is as it was; go on from it.
+== tagDecisionNotice: an area accepted
+[Nexus] The user accepted your tag proposal: area engine is on the project's list. Drafts may use it now.
+== tagDecisionNotice: a rename accepted
+[Nexus] The user accepted your tag proposal: engine is renamed to core. Use core from now on; what was tagged engine reads as core.
+== tagDecisionNotice: declined
+[Nexus] The user declined your tag proposal (activity p:terrain). Do not use it; tag the steps with what the lists have, or ask the user what they would have instead.
+== metricNotice: above its threshold
+[Nexus] Step N1 of queue QN: bundle-kb is 612 KB, above its warning threshold of 500 KB (at abcdef1). Weigh it in the step's review, or plan what deals with it (a send-back, a fix in a later step) and tell the user if it matters. If the threshold no longer fits, change it with nexus metric define.
+== fallbackNotice: onto its fallback
+[Nexus] Step N1 of queue QN runs on its fallback, Codex, gpt-6-luna, high effort, instead of Claude Code: Claude's five-hour usage is at 96 %. Nothing to do; Nexus switched by the fallback rules and switches back at a step boundary once that runtime is free. Tell the user if it matters for what they wait for.
+== fallbackNotice: back
+[Nexus] Step N1 of queue QN runs on Claude Code again: Claude's usage window reset. Nothing to do; Nexus switched back by the fallback rules.
+== missedStartNotice: 
+[Nexus] The scheduled start of queue QN at 09:00 was missed: Nexus was not running then. It did not start. Tell the user briefly; propose starting it now or a new time (nexus run <queue> start --at …).
+== mergeWaitNotice: a run released
+[Nexus] Queue QN is not merged back yet: C:/p has uncommitted changes; the run of queue QM, held at its step's end for this merge back, goes on Tell the user briefly what keeps it and what they can do (the user's Merge back in the dashboard goes the same way once it is cleared). Do not touch the base's checkout yourself.
+== checkAcceptedNotice: failing on the base, a fix queue proposed
+[Nexus] The check npm test of step QN/N1 failed, and the failure is accepted: it fails on the queue's base commit base123 too. The step goes to its review. Nexus proposed queue fix-npm-test to find and fix it. Complete queue fix-npm-test (nexus status shows the queue's state; its definition is .nexus/queues/fix-npm-test/queue.yaml; the project's checks, tags such as the area, the texts in the queue's language) with nexus queue draft, and put it into the plan; tell the user in one sentence. The worker's evidence: It fails on main too.
+== checkAcceptedNotice: accepted by the orchestrator, no fix queue
+[Nexus] The check npm test of step QN/N1 failed, and the failure is accepted: you accepted it. The step goes to its review. Nexus could not propose a fix queue for it: draft one yourself from the template check-failure (nexus template show check-failure). The worker's evidence: It fails on main too.
+== checkNotCommandNotice: 
+[Nexus] The check "the list looks calm" of queue QN is not a command (its first word is no program on the PATH nor a file in the repository), so Nexus did not run it at step N1; it neither passed nor failed, and the step went on without it. Convert it with a revision of queue QN (nexus queue draft): a check is a command Nexus runs in the queue's checkout; what it says in words goes into a step's acceptance, or what the user should see into its review.prepare. Tell the user in one sentence.
+== checkDecisionNotice: not runnable on the base
+[Nexus] The worker of QN/N1 says the failing check npm test is not its work's, and Nexus could not run it on the queue's base: the base has no node_modules. Decide: nexus check decide QN N1 accept --reason "…" (the step goes to its review, the failure is recorded and a fix queue is proposed) or nexus check decide QN N1 fix --reason "…" (a check-fix round).
+The worker's evidence: It fails on main too.
+Failing tests: a.test.ts > empty list
+Log: checks/N1-1/npm-test.log (in the queue's folder); it ends: not ok 1 - empty list
+== cleanupWaitNotice: 
+[Nexus] The worktree of queue QN is not cleaned up: a file is locked Tell the user briefly what is left; they look at it and clean up (Clean up on the queue's page). Do not delete anything in the worktree yourself.
+== mergedNotice: 
+[Nexus] Queue QN is merged back: main moved forward to its integrated work (0123456), by a fast-forward. Nothing was pushed. Nothing to do unless the user asks; a queue that waited for it in the plan may start now.
+== pausedNotice: 
+[Nexus] Run of QN paused after step N1. If you paused it to free the checkout for another queue, start that one now; otherwise tell the user.
+== runEndNotice: halted
+[Nexus] The run of queue QN halted at step N1: step N1 failed: no disk. Tell the user briefly, with what you propose.
+== runEndNotice: finished
+[Nexus] Queue QN finished. It has no report. Tell the user briefly, with what you propose next.
+== maintenanceFindingsNotice: 
+[Nexus] Maintenance queue QN (fix_small) finished with 2 findings. Report: <root>/.nexus/queues/QN/report.md Read the report and propose to the user a queue that deals with the findings it did not fix itself (a draft they approve), or say why none is needed.
+== staticAnalysisNotice: 
+[Nexus] This project has no static analysis set up (no linter config or lint script, no analyzers). Nexus reminds of it once a month. In one sentence, recommend the user the template static-analysis (nexus template show static-analysis), which surveys the stack, asks them which tools to use and sets them up with the existing findings as a baseline. If they agree, draft it; if they say no, run nexus static-analysis decline --reason "<their words>" (no reminder for 90 days).
+== serverCrashNotice: 
+[Nexus] The Nexus server stopped at 2026-01-01 09:00 on an uncaught exception: TypeError: x is undefined. It has been started again since; running queues came back as a restart leaves them. Check nexus status for work the stop interrupted, and tell the user in a sentence if anything needs them; the stack is in the server's log and in <NEXUS_HOME>/crash.json.

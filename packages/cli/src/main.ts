@@ -3,7 +3,7 @@
 import { readFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import YAML from "yaml";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
-import { parseArgs } from "node:util";
+import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import { execFileSync } from "node:child_process";
 import {
   Event, isOpenQuestion, runGoing, orchestratorOverview, planLines, stopLines, switchLines, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, stepValuesText, newId, normPath, now, readRegistry, writeRegistry,
@@ -13,7 +13,7 @@ import {
   CHECK_METRIC, isCheckMetric, metricDef, metricDefText, metricRequestIssues, metricValueText,
   lacksStaticAnalysis, projectStaticAnalysis, staticReminderDue,
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateQueueId, unusableTemplate, type MergedTemplates,
-  type PictureRole, type ReviewItem, type Role, type Runtime, type SessionFile,
+  NoteMeta, Role, Runtime, type PictureRole, type ReviewItem, type SessionFile,
   noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, ideaStatuses, reportSourceHash,
   capacityLines, latestCheckSet, readCapacity, reviewStats, reviewStatsText, switchReport, switchReportText, helperAbout, helperText, NEXUS_PASS_ON, PassOnReason,
 } from "@nexus/protocol";
@@ -28,7 +28,7 @@ const HELP = `nexus — report to and manage Nexus (protocol 1)
 Agent commands (session from NEXUS_SESSION or --session):
   nexus status [--all] [--queue <id>]           current queue, step, notes and open questions (without a
                                                 session: the queues at work, then the approved ones not running).
-                                                An orchestrator's: the open queues, the finished ones counted, the
+                                                An orchestrator's or a thinking partner's: the open queues, the finished ones counted, the
                                                 live worker sessions, those of open queues and the 10 latest others
                                                 (cards cut short), what waits for the user, the machine; --all: every
                                                 queue and session, cards whole (to choose an older session to
@@ -44,8 +44,8 @@ Agent commands (session from NEXUS_SESSION or --session):
                     Read nexus help review before preparing review material.
   nexus check <step> <name> --ok|--fail [--summary <text>] [--duration <seconds>]   (how long the check ran; it is
                     the metric check:<name>); refused for a check Nexus runs itself (its step's opening says so)
-  nexus check <step> <name> --unrelated --evidence <text>   a check Nexus ran fails, not because of your work: Nexus
-                    runs it on the queue's base commit (end your turn without nexus step done)
+  nexus check <step> <name> --unrelated --evidence <text>   (worker only) a check Nexus ran fails, not because of your
+                    work: Nexus runs it on the queue's base commit (end your turn without nexus step done)
   nexus check decide <queue> <step> accept|fix --reason <text>   (orchestrator only) a disputed failure Nexus could not
                     run on the base: accept (the step goes to its review) or fix (a check-fix round)
   nexus metric record <name> <value> [--step <step>]   (worker only) a value of one of the project's metrics, for your
@@ -80,8 +80,9 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus answer <qid> <text> [--escalate [--recommend <option>]] [--continue|--wait]     (orchestrator only)
   nexus queue draft <file.yaml|->                                 (orchestrator only) create or change a queue
   nexus queue draft --template <id> [--set name=value]... [--id <queue-id>] [--maintenance survey|fix_small]
-                                      write a draft from a template into .nexus/drafts/<queue-id>.yaml (refused when a
-                                      parameter without a default is missing); complete it, then upload it as above
+                                      (orchestrator only) write a draft from a template into .nexus/drafts/<queue-id>.yaml
+                                      (refused when a parameter without a default is missing); complete it, then upload
+                                      it as above
   nexus recurring set <id> --template <id> [--set name=value]... (--every "<when>" | --after-queues <n>)
                     [--maintenance survey|fix_small] [--reason <text>]
                                       (orchestrator only) a recurring queue: the template made into a queue and started
@@ -108,15 +109,16 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus review pass-on <queue> <step> --why <reasons> --findings <text>   (the step's review helper only) to the
                                       orchestrator; reasons: criterion, deviation, question, limit, doubt, level
   nexus review ask-user <queue> <step> <why>                      (orchestrator only) hand the review to the user
-  nexus review provisional <queue> <step> [--note <text>]        (orchestrator only) level 3: accept provisionally;
-                                      the run goes on, the user confirms it or asks a fix on their return
+  nexus review provisional <queue> <step> [--note <text>]        (orchestrator only) a step at review level 3 (or at
+                                      level 2 while the user is away): accept provisionally; the run goes on, the
+                                      user confirms it or asks a fix on their return
   nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift [--continued-in <refs>] --reason <text>
                                       (orchestrator only) housekeeping: skip a pending, stopped or failed step; close a
                                       halted run of a queue whose steps are all done or skipped; cancel a queue that is
                                       not running; propose that the user lift a stop. Done, approving and lifting are the
                                       user's. --continued-in FL4,FL5 (steps, QX/QX2, queues) with skipped: the step's own
                                       work is done and went on there, or they did it; also on a step skipped already
-  nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>... | --next | --at "YYYY-MM-DD HH:MM" | --at usage-reset]   (orchestrator only; start --after: into the plan, when those queues are done (repeat it for each); --next: into the plan with none before it; --at: at that local time, or when the runtime's usage window resets)
+  nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>]... | --next | --at "YYYY-MM-DD HH:MM" | --at usage-reset]   (orchestrator only; start --after: into the plan, when those queues are done (one --after for each); --next: into the plan with none before it; --at: at that local time, or when the runtime's usage window resets)
   nexus run <queue> cancel-start --reason <text>   (orchestrator only: takes the queue out of the plan; not one the user put in)
   nexus plan propose <queue> [--after <queue>]... --reason <text>   (orchestrator only) propose to the user a new list of
                                       predecessors that changes dependencies the user set; the user accepts or declines
@@ -165,9 +167,30 @@ The server (NEXUS_PORT, default 4317):
                                       only the user switches it (refused from any agent session)
 `;
 
-const { values: o, positionals: args } = parseArgs({
-  allowPositionals: true,
-  options: {
+/**
+ * The command line, parsed; a line parseArgs refuses ends as a usage error ("nexus: ...", exit code 2), never with a
+ * stack trace. A negative number reads as an option to parseArgs, so its message says how to give one.
+ */
+function commandLine<const T extends ParseArgsOptionsConfig>(options: T) {
+  try { return parseArgs({ allowPositionals: true, options }); } catch (e) {
+    console.error(`nexus: ${parseErrorText((e as Error).message)}`);
+    process.exit(2);
+  }
+}
+
+/** parseArgs's message, said for the command line's writer: how to give a negative value, which option is unknown. */
+function parseErrorText(message: string): string {
+  const unknown = /^Unknown option '([^']+)'/.exec(message)?.[1];
+  if (unknown !== undefined && /^-[\d.]/.test(unknown)) {
+    return `${unknown} reads as an option: a negative value goes after -- (nexus metric record delta -- ${unknown}), or an option's as --option=${unknown}`;
+  }
+  const ambiguous = /^Option '([^' ]+)[^']*' argument is ambiguous/.exec(message)?.[1];
+  if (ambiguous !== undefined) return `${ambiguous} has no value, or one starting with -: a negative value goes as ${ambiguous}=-5`;
+  if (unknown !== undefined) return `unknown option ${unknown} (nexus --help)`;
+  return message.replace(/\s*\n\s*/g, " ");
+}
+
+const { values: o, positionals: args } = commandLine({
     session: { type: "string" }, queue: { type: "string" }, step: { type: "string" },
     summary: { type: "string" }, commit: { type: "string" }, reason: { type: "string" }, until: { type: "string" },
     condition: { type: "string" }, pct: { type: "string" }, label: { type: "string" },
@@ -186,13 +209,20 @@ const { values: o, positionals: args } = parseArgs({
     set: { type: "string", multiple: true }, template: { type: "string" }, every: { type: "string" }, "after-queues": { type: "string" },
     maintenance: { type: "string" }, findings: { type: "string" }, why: { type: "string" }, "continued-in": { type: "string" },
     help: { type: "boolean", short: "h" }, full: { type: "boolean" }, all: { type: "boolean" }, reviews: { type: "boolean" }, switches: { type: "boolean" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
-  },
 });
+
+/** What nexus, nexus --help and nexus help print: the commands, then the help topics. */
+const fullHelp = () => `${HELP}\n${topicList()}`;
 
 class UsageError extends Error {}
 /** A recommendation checked against the question's options (its text or number), as the option's text. */
 const recommendation = (options: readonly string[] | undefined, given: string): string => {
   try { return recommendedOption(options, given); } catch (e) { throw new UsageError((e as Error).message); }
+};
+/** A value the protocol knows only some of: refused, naming them, when it is none of them. */
+const oneOf = <T extends string>(option: string, values: readonly T[], given: string): T => {
+  if (!(values as readonly string[]).includes(given)) throw new UsageError(`${option} is one of ${values.join(", ")}, not "${given}"`);
+  return given as T;
 };
 const need = <T>(v: T | undefined, what: string): T => {
   if (v === undefined || v === "") throw new UsageError(`missing ${what}`);
@@ -247,6 +277,7 @@ function emit(st: ProjectStore, s: SessionFile, body: Record<string, unknown>): 
  */
 function checkUnrelated(): void {
   const st = store(); const s = session(st);
+  if (s.role !== "worker") throw new UsageError("only a worker disputes a failed check of its own step (the orchestrator decides a disputed one: nexus check decide)");
   const step = need(args[1], "<step>"); const name = need(args[2], "<name>");
   const evidence = o.evidence?.trim();
   if (!evidence) throw new UsageError("--evidence says what shows the failure is not your work's (for example: it fails on the base too)");
@@ -782,7 +813,7 @@ const commands: Record<string, () => void | Promise<void>> = {
 
   help() {
     const topic = args[1];
-    if (!topic) { console.log(`${HELP}\n${topicList()}`); return; }
+    if (!topic) { console.log(fullHelp()); return; }
     const t = HELP_TOPICS[topic];
     if (!t) throw new UsageError(`no help topic "${topic}" (topics: ${Object.keys(HELP_TOPICS).join(", ")})`);
     console.log(t.text);
@@ -1200,8 +1231,8 @@ const commands: Record<string, () => void | Promise<void>> = {
   attach() {
     const st = store();
     const project = st.readProject();
-    const role = (o.role ?? "worker") as Role;
-    const runtime = (o.runtime ?? "external") as Runtime;
+    const role = oneOf("--role", Role.options, o.role ?? "worker");
+    const runtime = oneOf("--runtime", Runtime.options, o.runtime ?? "external");
     if (o.queue) st.readQueue(o.queue);
     const cwd = normPath(process.cwd());
     const s: SessionFile = {
@@ -1216,7 +1247,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     const st = store();
     const queue = need(args[1], "<queue>"); const step = need(args[2], "<step>");
     checkStep(st, queue, step);
-    const file = st.writeNote(queue, { id: newId(), step, from: (o.from ?? "user") as "user", at: now() }, readText(need(args[3], "<text>")));
+    const file = st.writeNote(queue, { id: newId(), step, from: oneOf("--from", NoteMeta.shape.from.options, o.from ?? "user"), at: now() }, readText(need(args[3], "<text>")));
     console.log(`ok: note ${resolve(file)}`);
   },
 };
@@ -1326,7 +1357,7 @@ function setValues(): Record<string, string> {
  */
 function draftFromTemplate(): void {
   if (args[2] !== undefined) throw new UsageError("nexus queue draft --template <id> [--set name=value]... [--id <queue-id>]: no file with --template");
-  const st = store();
+  const st = store(); orchestrator(st);
   const t = template(templatesHere(), need(o.template, "--template <id>"));
   const given = setValues();
   const ids = new Set(st.queueIds().map((x) => x.toLowerCase()));
@@ -1404,7 +1435,8 @@ function guessKind(p: string): ReviewItem["kind"] {
 
 try {
   const cmd = args[0];
-  if (!cmd || o.help) { console.log(HELP); process.exit(0); }
+  // nexus, nexus --help and nexus help print the same: the commands and the help topics.
+  if (!cmd || o.help) { console.log(fullHelp()); process.exit(0); }
   const run = commands[cmd];
   if (!run) throw new UsageError(`unknown command "${cmd}" (nexus --help)`);
   helperGate(cmd);

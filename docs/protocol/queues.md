@@ -104,7 +104,7 @@ not take (`ultra`); an effort without a runtime is checked when a run starts.
 **A revision changes only what has not started.** A draft may add, change, remove or reorder pending steps (a skipped
 step that never ran counts as pending here). A *started* step is one that has segments (it has been at work) or whose
 status is neither `pending` nor `skipped`, an imported `done` included. A draft is refused when it changes a started
-step's `title`, `goal`, `acceptance`, `review`, `runtime`, `model` or `effort`, drops it (keep it and skip it), or
+step's `title`, `goal`, `acceptance`, `review`, `runtime`, `model`, `effort`, `fallback` or inherited tags, drops it (keep it and skip it), or
 changes the relative order of the started steps (pending steps may move anywhere between them); the refusal names
 each step and what changed, and says that a change to a started step goes to its worker as a message or with
 `nexus review send-back`. Once the queue has a run (a `run.yaml`, or any started step) a draft that changes its
