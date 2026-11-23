@@ -684,10 +684,10 @@ export function criticalPath(l: PlanLayout, estimates: Estimates): CriticalPath 
 }
 
 /** Why a queue waits for the user now: what its button opens. */
-export type RootKind = "review" | "question" | "approval" | "failed" | "stopped" | "paused" | "blocked";
+type RootKind = "review" | "question" | "approval" | "failed" | "stopped" | "paused" | "blocked";
 
 /** A queue that waits for the user now, and the item its button opens (the step, the question, else the queue). */
-export interface BlockRoot { queue: string; kind: RootKind; step?: string; qid?: string }
+interface BlockRoot { queue: string; kind: RootKind; step?: string; qid?: string }
 
 export interface Blocks {
   /** What waits for the user now, in the plan's order. */

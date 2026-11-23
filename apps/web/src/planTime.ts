@@ -19,7 +19,7 @@ export interface TimeQueue extends PlanQueue {
 export type TimeEstimates = Estimates | undefined;
 
 /** Why a bar becomes conditional from some point: a wait for the user, or one Nexus keeps for an unknown time. */
-export interface Cause { queue: string; kind: "review" | "answer" | "approval" | "held" }
+interface Cause { queue: string; kind: "review" | "answer" | "approval" | "held" }
 
 export interface TimeRow {
   id: string;
