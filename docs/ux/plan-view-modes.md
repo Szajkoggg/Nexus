@@ -204,9 +204,10 @@ Two points differ from the mockup, both to keep its own rules:
 
 - The View group is not shown yet: with Columns the only view, it would be a choice of one. It joins the row with
   PVA3's lanes.
-- What blocks' buttons and "holds up …" stand in a list under the Mark row, not on the cards, and a held card says
-  "held by ST2" on its top line: words added inside the cards would make them taller and move the boxes below, which
-  "nothing moves" rules out.
+- What blocks has no buttons or list of its own: the rail's "Waiting for you" already lists what waits for the user,
+  and the user decided (PVA2 review, round 2) not to repeat it. The roots are framed in their colour, and a root's
+  title opens exactly its review or question; a held card says "held · ST2" on its top line, so no card grows and
+  nothing moves.
 
 ## What each step builds
 

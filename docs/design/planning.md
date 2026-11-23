@@ -80,7 +80,8 @@ The Queues view shows the plan above the queue lists (`apps/web/src/plan.ts`, `c
 - Marks (queue PVA, docs/ux/plan-view-modes.md): Critical path and What blocks light part of the plan and dim the
   rest, one at a time, and write nothing (the browser keeps the choice per project: a way of looking, not project
   state). They change frames, dimming and a word on a card's top line, never a card's size, so the boxes stay where
-  they are; what blocks' buttons stand in a list above the plan rather than on the cards for the same reason. The
+  they are. What blocks lists nothing of its own: "Waiting for you" in the rail already lists what waits (the user, PVA2
+  round 2: no duplicate); a root's title opens exactly its review or question. The
   critical path is the longest chain of work by the estimates along the lines (`criticalPath`): not the run order; a
   missing estimate is no time known, so a chain through it is not compared rather than counted as 0 h; a tie goes to
   the chain first in the plan's order; a loop is cut where it closes. What blocks (`whatBlocks`) takes as roots only

@@ -17,7 +17,7 @@ import { t } from "../i18n.ts";
 import {
   UNDO_SHOWN_MS, changeWords, criticalPath, drawPlan, dropChoices, estimateWords, firstUserWait, lineDetails, markLook, markStoreKey, moveTargets,
   planLayout, planList, roundedPath, shownMark, userReviewsOf, whatBlocks,
-  type BlockRoot, type Blocks, type CriticalPath, type FirstWait, type MarkLook, type PlanMark, type ReviewWho, type UserReviews, type PlanLayout,
+  type Blocks, type CriticalPath, type FirstWait, type MarkLook, type PlanMark, type ReviewWho, type UserReviews, type PlanLayout,
   type PlanNode, type Why, type Words,
 } from "../plan.ts";
 import { Button } from "./ui.tsx";
@@ -121,6 +121,12 @@ export function PlanView({ project, queues, who, onOpen }: {
   const [chosen, choose] = useMark(project);
   const mark = shownMark(chosen, { critical: !!cp, blocked: blocks.roots.length > 0 });
   const look = useMemo(() => (mark ? markLook(mark, cp, blocks) : undefined), [mark, cp, blocks]);
+  // Under What blocks a root's title opens exactly what it waits for (its review, its question), else its queue. The
+  // list of what waits is the rail's "Waiting for you": the plan does not repeat it (the user, PVA2 round 2).
+  const openCard = (id: string) => {
+    const r = mark === "blocked" ? blocks.roots.find((x) => x.queue === id) : undefined;
+    onOpen(id, r?.step, r?.qid);
+  };
   // Escape clears the mark (an open line panel or menu takes its Escape first: it closes, the mark stays).
   useEffect(() => {
     if (!mark) return;
@@ -150,11 +156,10 @@ export function PlanView({ project, queues, who, onOpen }: {
         </span>
       </div>
       <Marks mark={mark} choose={choose} cp={cp} blocks={blocks} min={estimates?.min} />
-      {mark === "blocked" && <Roots roots={blocks.roots} held={blocks.held} onOpen={onOpen} />}
       {first && <FirstWaitLine first={first} />}
       {actions.error && <p className="mb-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger" role="alert">{actions.error}</p>}
-      <div className="hidden @3xl:block"><Lanes layout={layout} onOpen={onOpen} actions={actions} /></div>
-      <PhoneList layout={layout} onOpen={onOpen} actions={actions} />
+      <div className="hidden @3xl:block"><Lanes layout={layout} onOpen={openCard} actions={actions} /></div>
+      <PhoneList layout={layout} onOpen={openCard} actions={actions} />
       {actions.last && <UndoBar key={actions.last.change} change={actions.last} actions={actions} />}
       {layout.outside.length > 0 && (
         <div className="mt-4">
@@ -213,25 +218,6 @@ function Marks({ mark, choose, cp, blocks, min }: { mark?: PlanMark; choose: (m:
       {cp ? chip("critical", t("plan.mark.critical"), true) : chip("critical", t("plan.mark.noEstimates"), false, t("plan.mark.noEstimatesTitle", { min: min ?? 5 }))}
       {chip("blocked", t("plan.mark.blocked", { count: blocks.roots.length }), blocks.roots.length > 0, blocks.roots.length ? undefined : t("plan.mark.nothingBlocks"))}
     </div>
-  );
-}
-
-/** What waits for the user now: each with what it holds up and the button that opens the exact review, question or queue. */
-function Roots({ roots, held, onOpen }: { roots: readonly BlockRoot[]; held: ReadonlyMap<string, string[]>; onOpen: (queue: string, step?: string, qid?: string) => void }) {
-  const holds = (id: string) => [...held].filter(([, by]) => by.includes(id)).map(([q]) => q);
-  return (
-    <ul className="mb-3 flex flex-col gap-1.5" data-box="roots">
-      {roots.map((r) => {
-        const h = holds(r.queue);
-        return (
-          <li key={r.queue} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs" data-plan-root={r.queue}>
-            <Button onClick={() => onOpen(r.queue, r.step, r.qid)}>{t(`plan.blocks.open.${r.kind}`, { step: r.step ?? "", queue: r.queue })}</Button>
-            <span className="font-mono text-fg-3">{r.queue}</span>
-            <span className="text-fg-2">{h.length ? t("plan.blocks.holds", { queues: h.join(", ") }) : t("plan.blocks.holdsNothing")}</span>
-          </li>
-        );
-      })}
-    </ul>
   );
 }
 
