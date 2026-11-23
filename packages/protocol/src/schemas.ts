@@ -1381,6 +1381,14 @@ export const RuntimeFile = z.object({
    * step runs in a fresh session. Absent before the first turn ended (and in records written before queue FI).
    */
   last_turn: z.object({ started_at: Time, ended_at: Time }).optional(),
+  /**
+   * The turn under way (queue CK): when it began and the step it works on, from its start until its end is recorded in
+   * turns.jsonl. A server that crashed leaves it; the next server records that turn as `interrupted` and drops it.
+   */
+  turn_open: z.object({
+    started_at: Time, queue: Id.optional(), step: Id.optional(),
+    fallback: z.object({ from: z.string(), reason: z.string() }).optional(),
+  }).optional(),
   updated_at: Time,
 });
 export type RuntimeFile = z.infer<typeof RuntimeFile>;

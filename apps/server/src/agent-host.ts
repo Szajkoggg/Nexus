@@ -58,7 +58,8 @@ export interface HostHandlers {
 
 /** A turn in progress, for its record: when it began, the windows then, what it works on. */
 /** `startedMs`: the monotonic clock at the start, for the turn's duration (a clock step does not change it). */
-interface OpenTurn { started: string; startedMs: number; windows?: TurnRecord["windows_start"]; tag: TurnTag }
+/** A turn under way; `startedMs` (the clock's) only for one this process saw begin: a turn a crash left has no duration. */
+interface OpenTurn { started: string; startedMs?: number; windows?: TurnRecord["windows_start"]; tag: TurnTag }
 /** What a turn works on, for its record: the queue and step, and the fallback the step runs on, if it does. */
 type TurnTag = { queue?: string; step?: string; fallback?: TurnRecord["fallback"] };
 
@@ -206,7 +207,8 @@ export class AgentHost<E extends object = object> {
     const begin = (mark = true) => {
       if (open) return;
       open = { started: now(), startedMs: performance.now(), windows: this.windows(session.runtime), tag: on.tag?.() ?? {} };
-      if (mark) this.write(session.id, { state: "working" });
+      // The runtime record keeps the open turn (queue CK): a server that crashes cannot record its end, the next does.
+      if (mark) this.write(session.id, { state: "working", turn_open: { started_at: open.started, ...open.tag } });
     };
     proc.on("message", (text) => { begin(); on.message?.(text); });
     // Not an error line: a process that exits writes one after its last turn, and that is no new turn.
@@ -242,7 +244,7 @@ export class AgentHost<E extends object = object> {
       this.recordTurn(session, open!, model, end);
       const last = { started_at: open!.started, ended_at: now() };
       open = undefined;
-      this.write(session.id, this.record.countTurns ? { state: "idle", last_turn: last, turns: (this.store.readRuntime(session.id)?.turns ?? 0) + 1 } : { state: "idle", last_turn: last });
+      this.write(session.id, this.record.countTurns ? { state: "idle", last_turn: last, turn_open: undefined, turns: (this.store.readRuntime(session.id)?.turns ?? 0) + 1 } : { state: "idle", last_turn: last, turn_open: undefined });
       // A restart after the turn: not while the runtime may still run a message sent into this turn as a turn of its
       // own (AgentProcess.settling, queue KM): killed now, the process would take that message with it. It ends after
       // that turn, or once the moment is over (settled). Nor while a turn sent to follow this one is queued in the
@@ -256,7 +258,7 @@ export class AgentHost<E extends object = object> {
       // The session's record belongs to the process that runs it now: one started while this one's exit was still
       // being read (AgentProcess.exiting), or after it was let go, has written its own (queue CXD).
       const replaced = this.live.has(session.id) && this.live.get(session.id) !== l;
-      if (!replaced) this.write(session.id, { state: "exited" });
+      if (!replaced) this.write(session.id, { state: "exited", turn_open: undefined });
       this.forget(l);
       on.exit?.(code, this.ended.has(proc));
     });
@@ -407,7 +409,7 @@ export class AgentHost<E extends object = object> {
       const s = this.store.readSession(session.id);
       const at = now();
       appendTurn({
-        v: 1, at, started_at: turn.started, duration_ms: Math.round(performance.now() - turn.startedMs),
+        v: 1, at, started_at: turn.started, duration_ms: turn.startedMs === undefined ? undefined : Math.round(performance.now() - turn.startedMs),
         project: s.project, session: s.id, role: s.role as TurnRecord["role"], runtime: s.runtime as TurnRecord["runtime"],
         model: model ?? s.model ?? undefined, effort: s.effort ?? undefined, ...turn.tag, tags: this.tagsOf(turn.tag),
         outcome: !end ? "interrupted" : end.ok ? "ok" : end.failure ? end.failure.kind : "interrupted",
@@ -418,6 +420,19 @@ export class AgentHost<E extends object = object> {
         windows_start: turn.windows, windows_end: this.windows(s.runtime),
       });
     } catch (e) { console.error(`turns.jsonl: ${(e as Error).message}`); }
+  }
+
+  /**
+   * A turn a crashed server left open (the session's runtime record still has `turn_open`): recorded in turns.jsonl as
+   * `interrupted` (the user's decision of 2026-11-23, queue CK), without a duration (its end is unknown), and dropped
+   * from the record. Called by the next server before it marks the session exited.
+   */
+  closeLeftTurn(session: string): void {
+    const t = this.store.readRuntime(session)?.turn_open;
+    if (!t) return;
+    const { started_at, ...tag } = t;
+    this.recordTurn(this.store.readSession(session), { started: started_at, tag: tag as TurnTag }, this.store.readRuntime(session)?.model, undefined);
+    this.write(session, { turn_open: undefined });
   }
 
   /** The tags of the step a turn works on, as planned now (tags.ts, stepTags); none for a turn without a step. */

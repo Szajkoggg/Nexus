@@ -138,6 +138,14 @@ reply's context tokens and keep `turns` at 0. Every role's usage windows reach `
 with ST1 on 2026-11-14), so the usage display and the usage pause count orchestrator and partner turns too.
 `test/runtime-records.test.ts` keeps each role's `runtime.json` fields against the fakes.
 
+**A turn a crash left open** (the user's decision of 2026-11-23, queue CK, on the LY survey's question 6). The host
+records a turn in `turns.jsonl` when it ends, or when its process exits first (`interrupted`); both live in the
+server's memory, so a server that crashed recorded neither, and the statistics lost the turn. The runtime record now
+keeps the open turn (`turn_open`: its start and step) from the turn's start to its record. The next server's engine,
+which looks at every session's record at its start before anything else starts a process, records such a turn as
+`interrupted` (no duration: its end is unknown) and drops `turn_open` with the record's `exited`. git.yaml's round
+turns already close lazily at the next turn or the step's end, so they were left as they are.
+
 ## The texts agents receive
 
 What Nexus says to agents lives in one module, `apps/server/src/prompts.ts`, as pure functions of their inputs: the

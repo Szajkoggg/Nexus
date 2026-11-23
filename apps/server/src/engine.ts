@@ -1951,6 +1951,8 @@ export class Engine implements Member {
       // alone is not ownership evidence: it may already refer to another program after a restart.
       const jobOwned = process.platform === "win32" && this.store.readSession(s).role === "worker";
       if (!jobOwned && r.pid && isAlive(r.pid)) { try { process.kill(r.pid); } catch { /* gone or not ours */ } }
+      // A turn the old server left open (it crashed): recorded as interrupted (queue CK).
+      this.host.closeLeftTurn(s);
       this.host.write(s, { state: "exited" });
     }
   }
