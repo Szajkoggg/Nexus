@@ -12,12 +12,12 @@
 // The derivation (packages/protocol/src/checks.ts) reads the file: a step whose latest step.done's checks have not
 // passed is `checking`, a fix round, or waiting for the orchestrator's decision. This module is the file's one writer.
 import { execFile } from "node:child_process";
-import { createWriteStream, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
-  NEXUS_SESSION, applyDraft, checkSetOf, fillTemplate, isCommand, lastDone, latestCheckSet, now, readTemplates, reviewRound, stepChecks,
+  NEXUS_SESSION, applyDraft, checkSetOf, commandWord, fillTemplate, isCommand, lastDone, latestCheckSet, now, readTemplates, reviewRound, stepChecks,
   type CheckAttempt, type CheckDispute, type CheckRun, type CheckSet, type ChecksFile, type Event, type InboxEntry, type ProjectState,
   type ProjectStore, type QueueView, type RunFile, type StepView,
 } from "@nexus/protocol";
@@ -68,6 +68,9 @@ export function failedTests(output: string): string[] {
 function unrunnable(code: number | null, output: string): boolean {
   return code === 127 || code === 9009 || /Missing script:|is not recognized as an internal or external command|command not found/i.test(output);
 }
+
+/** npm's word for a script the package does not have: the check cannot run, whatever the worker's code (queue CK). */
+const missingScript = (output: string) => /^.*Missing script:.*$/m.exec(output)?.[0].trim();
 
 const tailOf = (text: string) => text.split(/\r?\n/).slice(-TAIL_LINES).join("\n").slice(-TAIL_CHARS).trim();
 const slug = (name: string) => name.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "check";
@@ -204,7 +207,9 @@ export class CheckRunner {
   // ---------------------------------------------------------------- running a set
 
   private startSet(run: RunFile, q: QueueView, st: StepView, done: StepDone, state: ProjectState): void {
-    const cwd = checkoutOf(this.store, q);
+    const dir = checkoutOf(this.store, q);
+    // The worktree's folder may have gone (removed by hand, a cleanup): no checkout to run in (queue CK).
+    const cwd = dir && existsSync(dir) ? dir : undefined;
     const defs = stepChecks(run.checks, q.checks);
     const round = reviewRound(q, st, done.id) + 1;
     const file = this.read(q.id);
@@ -220,7 +225,10 @@ export class CheckRunner {
     const i = sets.findIndex((s) => s.done === done.id);
     if (i >= 0) sets[i] = set; else sets.push(set);
     this.write(q.id, file);
-    if (!defs.length || !cwd) { this.finishSet(q.id, st.id, done.id, state, []); this.host.ended(q.id); return; }
+    if (!defs.length) { this.finishSet(q.id, st.id, done.id, state, []); this.host.ended(q.id); return; }
+    // Without a checkout no check can run, and the worker cannot make one: the run halts (the user's decision of
+    // 2026-11-23, queue CK).
+    if (!cwd) return this.cannotRun(q.id, st.id, done.id, dir ? `no checkout: the queue's checkout ${dir} does not exist` : "no checkout of the queue is known");
     const a = this.ask(q.id, st.id);
     a.ticket.granted.then((grant) => this.runSet(a, grant, q.id, st.id, done.id, cwd, state), () => {
       this.active.delete(q.id);
@@ -235,22 +243,34 @@ export class CheckRunner {
       this.update(queue, step, done, (s) => { s.state = "running"; s.granted_at = now(); });
       this.host.ended(queue);
       // The worktree setup first, when its inputs changed since it last ran (queue MI, M7): failing twice, the set
-      // fails without its checks, which would fail for it.
+      // stops without its checks, which would fail for it, and the run halts with its output (queue CK): the
+      // worker cannot fix the machine's install.
       if (!(await this.setupFirst(a, queue, step, done, cwd))) {
         if (a.stopped) { this.update(queue, step, done, (s) => { s.state = "interrupted"; s.ended_at = now(); }); return; }
-        return this.finishSet(queue, step, done, state, [SETUP_NAME]);
+        const setup = checkSetOf(this.read(queue), step, done)!.setup!;
+        const last = setup.runs.at(-1);
+        const how = last?.timed_out ? "it ran into its time limit" : `exit code ${last?.exit_code ?? "none"}`;
+        return this.cannotRun(queue, step, done, `the ${SETUP_NAME} (${setup.command}) failed twice: ${how}${last?.tail ? `; its output ends: ${last.tail.slice(-1500)}` : ""}`);
       }
       const set = checkSetOf(this.read(queue), step, done)!;
       const failed: string[] = [];
       for (const [i, c] of set.checks.entries()) {
         if (a.stopped) break;
-        // A check of an older queue written in words is no command (queue EF, P1): recorded as such, not run, and not
-        // failed; the orchestrator is told to convert it.
+        // A check whose first word is no program on the server's PATH (or an older queue's check in words, queue EF)
+        // cannot run, and the worker cannot fix that: recorded, failed, and the run halts (queue CK). The orchestrator
+        // is told to convert a check in words.
         if (!isCommand(c.command, cwd, checkEnv())) {
-          this.update(queue, step, done, (s) => { s.checks[i]!.not_command = true; });
-          continue;
+          this.update(queue, step, done, (s) => { s.checks[i]!.not_command = true; s.checks[i]!.ok = false; });
+          return this.cannotRun(queue, step, done, `check "${c.name}": "${commandWord(c.command) ?? c.command}" is not on the server's PATH (a check written in words, as older queues had them, is no command: convert it)`);
         }
-        if (!(await this.attempt(a, grant, queue, step, done, c, i, cwd, 1))) failed.push(c.name);
+        if (await this.attempt(a, grant, queue, step, done, c, i, cwd, 1)) continue;
+        // npm has no such script: not run again, the run halts (queue CK).
+        const missing = a.stopped ? undefined : missingScript(checkSetOf(this.read(queue), step, done)!.checks[i]!.runs.at(-1)?.tail ?? "");
+        if (missing) {
+          this.update(queue, step, done, (s) => { s.checks[i]!.missing_script = true; s.checks[i]!.ok = false; });
+          return this.cannotRun(queue, step, done, `check "${c.name}": missing script (${missing})`);
+        }
+        failed.push(c.name);
       }
       // Each failed check once more, in the same grant: the code has not changed (P3). One that ran into its time limit
       // is not run again (the user's decision of 2026-11-23, queue CK): another hour would end the same way; only when
@@ -365,6 +385,16 @@ export class CheckRunner {
     await new Promise<void>((r) => out.end(() => r()));
     const ok = code === 0 && !timedOut && !a.stopped;
     return { ok, code: timedOut || a.stopped ? null : code, output: tail, timedOut };
+  }
+
+  /**
+   * The set cannot run for a cause outside the checkout, which the worker cannot fix (the user's decision of
+   * 2026-11-23, queue CK): no fix round; the set is interrupted with the reason, and the run halts with it. A Resume
+   * runs the set again.
+   */
+  private cannotRun(queue: string, step: string, done: string, reason: string): void {
+    this.update(queue, step, done, (s) => { s.state = "interrupted"; s.ended_at = now(); s.unrunnable = reason; });
+    this.host.halt(queue, `step ${step}: the checks cannot run, for a cause outside the checkout the worker cannot fix: ${reason}`);
   }
 
   /** The set's outcome: passed (to review), or a fix round, or the limit (the run halts). */
@@ -590,13 +620,11 @@ function baseCommit(store: ProjectStore, q: Pick<QueueView, "id">): string | und
 
 /** What failed, for the worker: each check's failing tests, the end of its output and its log's full path. */
 function failureText(store: ProjectStore, queue: string, set: CheckSet): string {
-  const failed = [...(set.setup?.ok === false ? [set.setup] : []), ...set.checks.filter((c) => c.ok === false)];
-  return failed.map((c) => {
+  // A failing worktree setup is no fix round: the run halts (queue CK, unrunnable).
+  return set.checks.filter((c) => c.ok === false).map((c) => {
     const last = c.runs.at(-1)!;
     return [
-      c === set.setup
-        ? `The worktree setup (${c.command}) ran first, because ${set.setup.reason}, and failed twice; the checks did not run.`
-        : failedLine(c),
+      failedLine(c),
       last.failed_tests?.length ? `Failing tests:\n${last.failed_tests.map((t) => `- ${t}`).join("\n")}` : "",
       copiesNote(c),
       `Full log: ${join(store.queueDir(queue), last.log)}`,

@@ -60,12 +60,18 @@ test("a check run again after its time limit with a disk snapshot reads passed w
   assert.equal(t("checks.row.snapshotRerun"), "passed (rerun after a disk snapshot)");
 });
 
-test("an older queue's check in words is shown as not a command, not as waiting its turn (queue EF)", () => {
+test("a check that could not run reads failed with why: not on the server's PATH (an older queue's check in words too), a missing script; the step's line says the run halted (queue EF, CK)", () => {
   const set: CheckSet = {
-    done: "d1", round: 1, fix: 0, requested_at: SINCE, state: "passed",
-    checks: [{ name: "All tests green", command: "All tests green", runs: [], not_command: true }],
+    done: "d1", round: 1, fix: 0, requested_at: SINCE, state: "interrupted", unrunnable: "check \"All tests green\": \"All\" is not on the server's PATH",
+    checks: [
+      { name: "All tests green", command: "All tests green", runs: [], not_command: true, ok: false },
+      { name: "npm run e2e", command: "npm run e2e", runs: [{ started_at: SINCE, ended_at: SINCE, exit_code: 1, log: "checks/A2/r1f0-2-e2e.1.log" }], missing_script: true, ok: false },
+    ],
   };
-  assert.deepEqual(checkRows(set, ["All tests green"]), [{ name: "All tests green", state: "notCommand", tests: [] }]);
+  assert.deepEqual(checkRows(set, ["All tests green", "npm run e2e"]).map((r) => [r.name, r.state, t(`checks.row.${r.state}`)]), [
+    ["All tests green", "notOnPath", "failed: not on the server's PATH"], ["npm run e2e", "missingScript", "failed: missing script"],
+  ]);
+  assert.equal(checkLine({ status: "checking", checking: { phase: "queued", since: SINCE, unrunnable: set.unrunnable } }, NOW), "cannot run: the run halted");
 });
 
 test("what queued checks wait behind (queue EF): the slot's holder, a run outside Nexus, those ahead, and the place in line", () => {

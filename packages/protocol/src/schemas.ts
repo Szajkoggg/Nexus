@@ -1471,11 +1471,14 @@ const CheckRun = z.object({
    */
   snapshot_rerun: z.boolean().optional(),
   /**
-   * Not a command (queue EF, P1): its first word is no program on the PATH nor a file in the checkout (commands.ts), as
-   * a check of an older queue written in words. Not run, neither passed nor failed: the set goes on without it, and the
-   * orchestrator is told to convert the queue's check.
+   * Not a command (queue EF, P1): its first word is no program on the server's PATH nor a file in the checkout
+   * (commands.ts), as a check of an older queue written in words. Not run, and failed (`ok: false`): the machine's
+   * cause, which the worker cannot fix, so the set stops (`unrunnable`) and the run halts (the user's decision of
+   * 2026-11-23, queue CK); the orchestrator is told to convert the queue's check.
    */
   not_command: z.boolean().optional(),
+  /** Its npm script does not exist ("Missing script:"): failed after its first run, the set stops as for `not_command`. */
+  missing_script: z.boolean().optional(),
 });
 export type CheckRun = z.infer<typeof CheckRun>;
 
@@ -1521,10 +1524,16 @@ const CheckSet = z.object({
   fix_queue: z.object({ id: z.string(), created: z.boolean() }).optional(),
   /**
    * The worktree setup, run first in the set's grant because its inputs changed since it last ran (queue MI): like a
-   * check (run once more after a failure; failing twice, the set fails and its checks do not run); `reason`: what
-   * changed.
+   * check (run once more after a failure; failing twice, the set stops as `unrunnable` and its checks do not run);
+   * `reason`: what changed.
    */
   setup: CheckRun.extend({ reason: z.string() }).optional(),
+  /**
+   * Why the set could not run, a cause outside the checkout the worker cannot fix (queue CK): no checkout, a check not
+   * on the server's PATH, a missing script, the worktree setup failing twice. The set is `interrupted` and the run
+   * halted with this reason; a Resume runs the set again.
+   */
+  unrunnable: z.string().optional(),
 });
 export type CheckSet = z.infer<typeof CheckSet>;
 

@@ -980,8 +980,8 @@ export function checkAcceptedNotice(q: QueueView, st: StepView, set: CheckSet): 
  */
 export function checkNotCommandNotice(q: QueueView, st: StepView, check: string): Notice {
   return {
-    fact: `The check "${check}" of queue ${q.id} is not a command (its first word is no program on the PATH nor a file in the repository), so Nexus did not run it at step ${st.id}; it neither passed nor failed, and the step went on without it.`,
-    todo: `Convert it with a revision of queue ${q.id} (nexus queue draft): a check is a command Nexus runs in the queue's checkout; what it says in words goes into a step's acceptance, or what the user should see into its review.prepare. Tell the user in one sentence.`,
+    fact: `The check "${check}" of queue ${q.id} is not a command (its first word is no program on the PATH nor a file in the repository), so Nexus did not run it at step ${st.id}: the check failed, and the run halted, as the worker cannot fix it.`,
+    todo: `Convert it with a revision of queue ${q.id} (nexus queue draft), then the run can go on: a check is a command Nexus runs in the queue's checkout; what it says in words goes into a step's acceptance, or what the user should see into its review.prepare. Tell the user in one sentence.`,
   };
 }
 

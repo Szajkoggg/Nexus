@@ -159,9 +159,9 @@ the queue's own, marked "(project)": the run's while it has one that has not fin
 command run once in each new worktree Nexus makes for a queue (`worktree: auto`), so the worktree can build and test
 (its own `node_modules`, for example). When Nexus makes the worktree it records `setup` in the queue's `git.yaml`; the
 engine runs the command through the shell in the worktree before the run's first step opens (no step opens while it
-runs, at most 30 minutes) and records `done_at`. A failure (an exit code other than 0, or the time limit) halts the run
-with the reason, `the worktree setup command (<command>) failed: exit code <n>; its output ends: <output>`, and records
-it under `failed`; when the run goes on (Continue, resume), the project's command as it is then runs again in the same
+runs, at most 30 minutes) and records `done_at`. A failure (an exit code other than 0, or the time limit) is tried
+once more; failing again, it halts the run with the reason, `the worktree setup command (<command>) failed twice: exit
+code <n>; its output ends: <output>` (queue CK), and records it under `failed`; when the run goes on (Continue, resume), the project's command as it is then runs again in the same
 worktree. A worktree the queue names by path, an existing one, and the project's own checkout get no setup. A success
 records the commit it ran on (`sha`); a change of its inputs (`defaults.worktree_setup_inputs`) since then runs it again
 before a check set or after a merge of the base at a step boundary (queue MI): ["The integration step"](git.md#the-integration-step), "Without a

@@ -39,6 +39,8 @@ export function checkWord(step: CheckStep): string | undefined {
 export function checkLine(step: CheckStep, now = new Date()): string | undefined {
   const c = step.checking;
   if (!c || (step.status !== "checking" && step.status !== "waiting")) return undefined;
+  // The set could not run (queue CK): the run halted with the reason.
+  if (c.unrunnable) return t("checks.line.unrunnable");
   const time = formatClock(c.since, now);
   switch (c.phase) {
     case "queued": return t("checks.line.queued", { time });
@@ -48,7 +50,7 @@ export function checkLine(step: CheckStep, now = new Date()): string | undefined
   }
 }
 
-export type CheckRowState = "passed" | "snapshotRerun" | "flaky" | "failed" | "running" | "waiting" | "interrupted" | "notCommand";
+export type CheckRowState = "passed" | "snapshotRerun" | "flaky" | "failed" | "running" | "waiting" | "interrupted" | "notOnPath" | "missingScript";
 
 /** One check of a set as a row: its state now, its time once it ended, the failing tests' names. */
 export interface CheckRow { name: string; state: CheckRowState; duration?: number; tests: readonly string[]; log?: string }
@@ -62,7 +64,9 @@ export function checkRows(set: CheckSet, names: readonly string[]): CheckRow[] {
   return all.map((name) => {
     const c = set.checks.find((x) => x.name === name);
     const last = c?.runs.at(-1);
-    if (c?.not_command) return { name, state: "notCommand", tests: [] };
+    // It could not run (queue CK): failed, said why.
+    if (c?.not_command) return { name, state: "notOnPath", tests: [] };
+    if (c?.missing_script) return { name, state: "missingScript", tests: [] };
     if (!c || !last) return { name, state: "waiting", tests: [] };
     if (!last.ended_at) return { name, state: "running", tests: [] };
     if (last.interrupted) return { name, state: "interrupted", tests: [] };

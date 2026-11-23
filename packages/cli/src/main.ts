@@ -733,7 +733,8 @@ const commands: Record<string, () => void | Promise<void>> = {
         if (tags) console.log(`        tags: ${tags}`);
         // The checks Nexus runs: where they are, and a fix round apart from the review rounds.
         const c = step.checking;
-        if (c) console.log(`        checks by Nexus: ${c.phase === "queued" ? "waiting for the machine" : c.phase === "running" ? `running${c.check ? ` ${c.check}` : ""}` : c.phase === "base" ? `running ${c.check ?? "the disputed check"} on the queue's base commit` : "a disputed failure waits for the orchestrator's decision"} since ${shownTime(c.since)}`);
+        if (c?.unrunnable) console.log(`        checks by Nexus: cannot run (the run halted): ${c.unrunnable.replace(/\s+/g, " ").slice(0, 300)}`);
+        else if (c) console.log(`        checks by Nexus: ${c.phase === "queued" ? "waiting for the machine" : c.phase === "running" ? `running${c.check ? ` ${c.check}` : ""}` : c.phase === "base" ? `running ${c.check ?? "the disputed check"} on the queue's base commit` : "a disputed failure waits for the orchestrator's decision"} since ${shownTime(c.since)}`);
         else if (step.status === "running" && step.check_fix) console.log(`        check-fix round ${step.check_fix} of ${state.project.defaults.check_fix_limit}${step.check_limit ? " (beyond the limit)" : ""}`);
         const checks = checksLine(step.checks);
         if (checks) console.log(`        checks: ${checks}`);

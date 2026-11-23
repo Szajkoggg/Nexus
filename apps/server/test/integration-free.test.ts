@@ -34,19 +34,23 @@ const G = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "com
 
 /**
  * Stand-in checks (and setup): `node check.cjs <name>` logs its name and exits with the next planned code of <name>
- * (`plan`; the last one stays; none planned: 0), after an optional wait ("<ms>ms:<code>").
+ * (`plan`; the last one stays; none planned: 0), after an optional wait ("<ms>ms:<code>"); the run is logged once its
+ * plan is written.
  */
 function standIns() {
   const dir = mkdtempSync(join(TMP, "nexus-free-checks-"));
   const script = join(dir, "check.cjs");
   writeFileSync(script, `const fs = require("fs"), path = require("path");
 const name = process.argv[2];
-fs.appendFileSync(path.join(__dirname, "runs.log"), name + "\\n");
+const log = () => fs.appendFileSync(path.join(__dirname, "runs.log"), name + "\\n");
 const plan = path.join(__dirname, name);
-if (!fs.existsSync(plan)) process.exit(0);
+if (!fs.existsSync(plan)) { log(); process.exit(0); }
 const lines = fs.readFileSync(plan, "utf8").split("\\n").filter(Boolean);
 const next = lines.length > 1 ? lines.shift() : lines[0];
 fs.writeFileSync(plan, lines.join("\\n") + "\\n");
+// Logged once the plan is written: a test that stops the server as soon as it sees the run cannot end it between the
+// plan's truncation and its write, which left the plan empty and every later run failing (queue CK3).
+log();
 const [wait, code] = next.includes("ms:") ? next.split("ms:").map(Number) : [0, Number(next)];
 setTimeout(() => {
   if (code) { console.log("✖ " + name + " breaks (2ms)"); process.exit(code); }
@@ -240,6 +244,26 @@ test("a merge that changes the lockfile runs the worktree setup before the check
     // The first setup, Q1's checks, then the integration's: the setup before its check.
     assert.deepEqual(x.runs(), ["setup", "unit", "setup", "unit"]);
     assert.equal(x.store.readGit("Q")?.setup?.sha, x.git(x.wt(), "rev-parse", "HEAD"), "the setup's commit is the merge's");
+  } finally { hold.done(); x.stop(); }
+});
+
+test("the worktree setup before the checks failing twice halts the run with its output, without a check-fix round (queue CK)", async () => {
+  const hold = holdWork();
+  const x = setup([step("Q1", "slow")]);
+  // The first setup (the new worktree) passes; the one before the integration's checks fails, and once more.
+  x.plan("setup", [0, 1, 1]);
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q1 at work", () => x.queue().steps[0]!.status === "running");
+    x.onMain("package-lock.json", "{ \"lockfileVersion\": 3 }\n");
+    hold.release();
+    await x.until("the run to halt", () => x.queue().run?.state === "halted");
+    const reason = x.queue().run!.reason!;
+    assert.match(reason, /^step Q\.integrate: the checks cannot run, for a cause outside the checkout the worker cannot fix: the worktree setup \(.*check\.cjs" setup\) failed twice: exit code 1; its output ends: .*setup breaks/);
+    const set = x.store.readChecks("Q")?.steps["Q.integrate"]?.sets[0];
+    assert.deepEqual([set?.state, set?.setup?.ok, set?.setup?.runs.length, set?.checks.every((c) => !c.runs.length)], ["interrupted", false, 2, true], "tried once more; the checks did not run");
+    assert.deepEqual(x.runs(), ["setup", "unit", "setup", "setup"]);
+    assert.equal(x.received().filter((r) => r.text.startsWith("[Nexus] The checks Nexus ran")).length, 0, "no check-fix round");
   } finally { hold.done(); x.stop(); }
 });
 

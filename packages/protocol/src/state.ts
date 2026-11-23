@@ -179,7 +179,8 @@ export interface StepView extends StepDef {
    * While `checking` (or `waiting` for the orchestrator's decision on a disputed failure): `queued` for the machine,
    * `running` (which `check`), `base` (a disputed check run on the queue's base commit), `decision`; since when.
    */
-  checking?: { phase: "queued" | "running" | "base" | "decision"; since: string; check?: string };
+  /** `unrunnable`: the set could not run (no checkout, not on the PATH, a missing script, the setup), and the run halted. */
+  checking?: { phase: "queued" | "running" | "base" | "decision"; since: string; check?: string; unrunnable?: string };
   /** The check-fix round at work, or the last one (1 for the first), counted apart from the review rounds. */
   check_fix?: number;
   /** With `check_fix`: the project's `defaults.check_fix_limit`, so a view can say "check-fix round 1 of 3". */
