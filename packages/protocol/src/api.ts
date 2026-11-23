@@ -60,6 +60,24 @@ export interface CommitDetail {
 /** GET /api/models/:runtime: one model the runtime offers, with the efforts it takes. */
 export interface ModelInfo { value: string; label: string; description?: string; efforts?: string[] }
 
+/** Where a conversation's model or effort comes from: its own, the project's conversation settings, the runtime's default. */
+export type SettingSource = "own" | "project" | "runtime";
+
+/**
+ * A conversation's model and effort in its head (GET /api/projects/:id/conversations/:cid and the live stream's
+ * `session` message; docs/protocol/conversations.md): `running`, those its running process was started with (null
+ * without a process; a null value: the runtime's default); `next`, those its next turn runs on, with their sources;
+ * `changes`, whether they differ (the running process ends after its turn, the next turn runs on `next`);
+ * `inherited`, what each value would be without its own (the project's conversation settings on its runtime, else the
+ * runtime's default, null when unknown), so that the dashboard can name the default a choice goes back to.
+ */
+export interface ConversationSettings {
+  running: { model: string | null; effort: string | null } | null;
+  next: { model: string | null; effort: string | null; model_from: SettingSource; effort_from: SettingSource };
+  changes: boolean;
+  inherited: { model: string | null; effort: string | null; model_from: Exclude<SettingSource, "own">; effort_from: Exclude<SettingSource, "own"> };
+}
+
 /**
  * GET /api/projects/:id/removal: whether the project may be removed from Nexus now, and what goes with it or stays
  * (docs/protocol/files.md, "Removing a project"). Neither removal touches the project's own files.

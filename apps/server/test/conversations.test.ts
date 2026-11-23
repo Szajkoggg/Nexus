@@ -310,6 +310,8 @@ test("a message sent as a partner's turn ends, with its settings changed meanwhi
   // The changed notes folder makes the process stale: it is restarted after its turn, but not while that message may
   // still run (AgentProcess.settling): killed at the result, the process would take the message with it.
   // The late turn takes a moment (FAKE-SLOW), as Claude Code's does: the kill came before its reply.
+  // A message after the change waits for that process's end and runs in a new one, on the changed settings (queue CM):
+  // sent into it, it ran on the old ones.
   process.env.FAKE_LATE_NEXT = "1";
   process.env.FAKE_CHAT_SLOW_MS = "300";
   const x = setup();
@@ -319,15 +321,13 @@ test("a message sent as a partner's turn ends, with its settings changed meanwhi
     x.conversations.say(c.id, "first");
     await x.until("the first reply", () => replies(c.id) === 1);
     delete process.env.FAKE_LATE_NEXT; // for the next process
-    updateSettings(x.store, { conversations: { notes_dir: "Dev/Late" } });
     x.conversations.say(c.id, "FAKE-SLOW: second");
-    await x.until("the second message answered", () => replies(c.id) === 2);
-    assert.equal(x.store.readChat(c.id).entries.filter((e) => e.from === "partner" && e.kind === "message").at(-1)!.text, "slow reply");
-    assert.equal(x.args().length, 1, "answered by the process it was sent to");
-    await x.until("the old process ended", () => x.conversations.idle() && x.conversations.view(c.id).state === "exited");
+    updateSettings(x.store, { conversations: { notes_dir: "Dev/Late" } });
     x.conversations.say(c.id, "third");
+    await x.until("the second message answered", () => replies(c.id) >= 2);
+    assert.equal(x.store.readChat(c.id).entries.filter((e) => e.from === "partner" && e.kind === "message")[1]!.text, "slow reply");
     await x.until("the third reply", () => replies(c.id) === 3);
-    assert.equal(x.args().length, 2, "a new process from the message after");
+    assert.equal(x.args().length, 2, "the second answered by the process it was sent to, the third by a new one");
     assert.ok((x.args()[1]!.argv as string[]).includes("Edit(Dev/Late/**)"), "on the changed settings");
   } finally { delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_CHAT_SLOW_MS; x.stop(); }
 });

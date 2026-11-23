@@ -1,0 +1,89 @@
+# A conversation's model and effort (queue CM3), on the demo project of scripts/capture/seed-conversation-settings.ts,
+# after CM1's mockups: the editor open on a chat's own pair; a pair saved while a reply runs (running and next reply);
+# the editor of an empty idea chat opened with "Chat about this" (queue IC). The instance needs the fixture's model
+# list and a reply that keeps working (Git Bash):
+#   FAKE_CODEX_MODELS='[{"model":"gpt-6","efforts":["low","medium","high","xhigh"]},{"model":"gpt-6-luna","efforts":["low","medium"]}]' \
+#   FAKE_CHAT_SLOW_ALL=1 FAKE_CHAT_SLOW_MS=600000 node scripts/capture.ts scripts/capture/examples/conversation-settings.yaml --step <queue>/<step> --no-before
+# The views share one instance's data, and a pending view sends a message and saves a pair: the first pending view is
+# right, the later two then find that pair already saved. Take conversation-settings-pending@492 and @390 each in a run
+# of its own (a copy of this list with only that view), as CM3 did.
+seed: scripts/capture/seed-conversation-settings.ts
+views:
+  - key: conversation-settings@1440
+    route: "#/demo"
+    label: "Saját modell és effort, a szerkesztő nyitva"
+    actions: &open
+      - click: Ideas
+      - wait: 600
+      - click: Conversation controls
+      - wait: 1200
+      - click: Model & effort
+      - wait: 600
+  - key: conversation-settings@492
+    route: "#/demo"
+    label: "Saját modell és effort, a szerkesztő nyitva"
+    actions: *open
+  - key: conversation-settings@390
+    route: "#/demo"
+    label: "Saját modell és effort, a szerkesztő nyitva"
+    actions: *open
+  - key: conversation-settings-pending@1440
+    route: "#/demo"
+    label: "Futó válasz mellett mentett pár: Running és Next reply"
+    actions:
+      - click: Ideas
+      - wait: 600
+      - click: Reply in progress
+      - wait: 1200
+      - type: { into: "footer textarea", text: "How should we show a change made while a reply is running?" }
+      - click: Send
+      - wait: 2500
+      - click: Model & effort
+      - wait: 400
+      - type: { into: "section[aria-label='Model & effort'] label:nth-of-type(1) select", text: "gpt-6-luna" }
+      - type: { into: "section[aria-label='Model & effort'] label:nth-of-type(2) select", text: "" }
+      - click: Save
+      - wait: 1500
+  - key: conversation-settings-pending@492
+    route: "#/demo"
+    label: "Futó válasz mellett mentett pár: Running és Next reply"
+    actions: &pendingPhone
+      - click: Ideas
+      - wait: 600
+      - click: Reply in progress
+      - wait: 1200
+      - type: { into: "footer textarea", text: "How should we show a change made while a reply is running?" }
+      - click: { selector: "footer button[aria-label='Send']" }
+      - wait: 2500
+      - click: Model & effort
+      - wait: 400
+      - type: { into: "section[aria-label='Model & effort'] label:nth-of-type(1) select", text: "gpt-6-luna" }
+      - type: { into: "section[aria-label='Model & effort'] label:nth-of-type(2) select", text: "" }
+      - click: Save
+      - wait: 1500
+  - key: conversation-settings-pending@390
+    route: "#/demo"
+    label: "Futó válasz mellett mentett pár: Running és Next reply"
+    actions: *pendingPhone
+  - key: conversation-about-idea-settings@1440
+    route: "#/demo"
+    label: "Üres ötlet-chat (Chat about this): örökölt értékek, a szerkesztő nyitva"
+    actions: &idea
+      - click: Ideas
+      - wait: 600
+      - click: Overview
+      - wait: 800
+      - click: Chat improvements
+      - wait: 800
+      - click: Chat about this
+      - wait: 2000
+      - click: Model & effort
+      - wait: 600
+  - key: conversation-about-idea-settings@492
+    route: "#/demo"
+    label: "Üres ötlet-chat (Chat about this): örökölt értékek, a szerkesztő nyitva"
+    actions: *idea
+  - key: conversation-about-idea-settings@390
+    route: "#/demo"
+    label: "Üres ötlet-chat (Chat about this): örökölt értékek, a szerkesztő nyitva"
+    actions: *idea

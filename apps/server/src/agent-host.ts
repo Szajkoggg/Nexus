@@ -231,6 +231,8 @@ export class AgentHost<E extends object = object> {
     });
     proc.on("turnEnd", (end) => {
       const a = this.asked.get(proc);
+      // A turn sent to follow this one (send's afterTurn: a hand-over asked during it) starts now in this process.
+      const queued = !!a?.next.length;
       // A message sent into the turn just as it ended (before Nexus read its end) was not read in it: the runtime runs
       // it as a turn of its own, which the settling waits for. That turn answers it, and a hand-over that cuts it off
       // quotes it (cutOff); without such a turn (settled) they were read in this one, and are dropped.
@@ -243,8 +245,9 @@ export class AgentHost<E extends object = object> {
       this.write(session.id, this.record.countTurns ? { state: "idle", last_turn: last, turns: (this.store.readRuntime(session.id)?.turns ?? 0) + 1 } : { state: "idle", last_turn: last });
       // A restart after the turn: not while the runtime may still run a message sent into this turn as a turn of its
       // own (AgentProcess.settling, queue KM): killed now, the process would take that message with it. It ends after
-      // that turn, or once the moment is over (settled).
-      if (this.afterTurn.has(proc) && !proc.settling) endHeld();
+      // that turn, or once the moment is over (settled). Nor while a turn sent to follow this one is queued in the
+      // process: killed now, it would take that turn with it; the process ends after it (queue CM).
+      if (this.afterTurn.has(proc) && !proc.settling && !queued) endHeld();
       on.turnEnd?.(end);
     });
     proc.on("exit", (code) => {
@@ -276,6 +279,13 @@ export class AgentHost<E extends object = object> {
     const l = this.running(session);
     const was = l && this.launched.get(l.proc);
     return !!was && launchKey(was, ignore) !== launchKey(launch(true), ignore);
+  }
+
+  /** The model and effort the session's running process was started with (none set: the runtime's default). */
+  launchedWith(session: string): { model?: string; effort?: string } | undefined {
+    const l = this.running(session);
+    const how = l && this.launched.get(l.proc);
+    return how && { model: how.options.model, effort: how.options.effort };
   }
 
   /**
@@ -333,12 +343,14 @@ export class AgentHost<E extends object = object> {
    * and its session's runtime record keeps what the turn answered (`interrupted`), for the next server to go on with
    * (interruption, resumed). `extra` adds what the role keeps of the turn. Returns the sessions cut off.
    */
-  cutOff(extra: (l: Hosted<E>) => { handoff?: boolean } = () => ({})): string[] {
+  cutOff(extra: (l: Hosted<E>) => { handoff?: boolean; asked?: readonly string[] } = () => ({})): string[] {
     const cut: string[] = [];
     for (const l of this.live.values()) {
       if (l.proc.state !== "working") continue;
       const a = this.asked.get(l.proc);
-      this.write(l.session, { interrupted: { at: now(), asked: [...(a?.turn ?? []), ...(a?.next ?? [])], ...extra(l) } });
+      // `asked` of the role's: what it holds back for the session's next process (a conversation's waiting input).
+      const { asked: more = [], ...rest } = extra(l);
+      this.write(l.session, { interrupted: { at: now(), asked: [...(a?.turn ?? []), ...(a?.next ?? []), ...more], ...rest } });
       l.proc.stop();
       cut.push(l.session);
     }

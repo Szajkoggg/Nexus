@@ -124,6 +124,30 @@ test("restartAfterTurn ends a working process when its turn ends, an idle one no
   assert.deepEqual(proc().calls, ["kill"]);
 });
 
+test("restartAfterTurn: a turn sent to follow the running one (afterTurn) still runs; the process ends after it (queue CM)", () => {
+  const { host, s, start, proc } = setup(ROLE_RECORDS.conversation);
+  const l = start();
+  host.send(l, "the reply's question");
+  host.send(l, "the hand-over's instruction", { afterTurn: true });
+  host.restartAfterTurn(s.id);
+  proc().turn();
+  assert.deepEqual(proc().calls, ["send", "send"], "not killed with the hand-over's turn queued in it");
+  assert.equal(host.get(s.id), l);
+  proc().state = "working"; // the queued turn runs
+  proc().turn();
+  assert.deepEqual(proc().calls, ["send", "send", "kill"], "ended after it");
+  assert.equal(host.get(s.id), undefined);
+});
+
+test("launchedWith: the model and effort the running process was started with", () => {
+  const { host, s, store } = setup(ROLE_RECORDS.conversation);
+  assert.equal(host.launchedWith(s.id), undefined, "no process");
+  host.start(s, (resume) => ({ runtime: "claude", options: { cwd: store.dir, uuid: "uuid-1", resume, model: "m", effort: "high", permissionMode: "dontAsk", allowedTools: [], env: {} } }), {}, () => ({}));
+  assert.deepEqual(host.launchedWith(s.id), { model: "m", effort: "high" });
+  host.retire(s.id);
+  assert.equal(host.launchedWith(s.id), undefined);
+});
+
 test("close ends the process after its turn and shutdown kills them all, both as ended by Nexus", () => {
   const { host, s, events, start, proc } = setup(ROLE_RECORDS.worker);
   start();
