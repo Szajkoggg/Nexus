@@ -173,17 +173,21 @@ The server (NEXUS_PORT, default 4317):
  */
 function commandLine<const T extends ParseArgsOptionsConfig>(options: T) {
   try { return parseArgs({ allowPositionals: true, options }); } catch (e) {
-    const message = (e as Error).message;
-    const unknown = /^Unknown option '([^']+)'/.exec(message)?.[1];
-    const ambiguous = /^Option '([^' ]+)[^']*' argument is ambiguous/.exec(message)?.[1];
-    const text = unknown !== undefined && /^-[\d.]/.test(unknown)
-      ? `${unknown} reads as an option: a negative value goes after -- (nexus metric record delta -- ${unknown}), or an option's as --option=${unknown}`
-      : ambiguous !== undefined
-        ? `${ambiguous} has no value, or one starting with -: a negative value goes as ${ambiguous}=-5`
-        : unknown !== undefined ? `unknown option ${unknown} (nexus --help)` : message.replace(/\s*\n\s*/g, " ");
-    console.error(`nexus: ${text}`);
+    console.error(`nexus: ${parseErrorText((e as Error).message)}`);
     process.exit(2);
   }
+}
+
+/** parseArgs's message, said for the command line's writer: how to give a negative value, which option is unknown. */
+function parseErrorText(message: string): string {
+  const unknown = /^Unknown option '([^']+)'/.exec(message)?.[1];
+  if (unknown !== undefined && /^-[\d.]/.test(unknown)) {
+    return `${unknown} reads as an option: a negative value goes after -- (nexus metric record delta -- ${unknown}), or an option's as --option=${unknown}`;
+  }
+  const ambiguous = /^Option '([^' ]+)[^']*' argument is ambiguous/.exec(message)?.[1];
+  if (ambiguous !== undefined) return `${ambiguous} has no value, or one starting with -: a negative value goes as ${ambiguous}=-5`;
+  if (unknown !== undefined) return `unknown option ${unknown} (nexus --help)`;
+  return message.replace(/\s*\n\s*/g, " ");
 }
 
 const { values: o, positionals: args } = commandLine({
