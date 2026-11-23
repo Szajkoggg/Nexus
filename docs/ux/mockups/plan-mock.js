@@ -10,10 +10,10 @@
 // Both: the whole title on the card (it wraps; never cut), what the queue waits for, its "after" chips as today.
 // ?theme=paper|honey; ?tip=<queue> shows the bubble with a queue's full title and its dependencies, as on hover.
 // scripts/layout-faults.ts measures the result: [data-plan-card] and [data-box] are boxes, [data-edge] lines.
-// The features (23-plan-features.html) hook in through PLAN_FEATURE (plan-features.js, loaded first): setup() changes the
-// plan before it is laid out, bands (lanes) and left (their labels' room) change variant A's layout, card() and edge()
-// change a card or a line, desktop() and phone() add to a drawn plan, render() draws the plan another way, page() the
-// page around it.
+// The features (23-plan-features.html; 26-plan-modes.html with plan-modes.js) hook in through PLAN_FEATURE (loaded
+// first): setup() changes the plan before it is laid out, face() draws a card's inside, bands (lanes) and left (their
+// labels' room) change variant A's layout, card() and edge() change a card or a line, desktop() and phone() add to a
+// drawn plan, render() draws the plan another way, page() the page around it.
 
 const QUEUES = [
   { id: "MX", title: "Small fixes from the user's notes of 14 November", now: ["running", "running · MX1"], est: "3.5 h" },
@@ -73,18 +73,26 @@ const svgEl = (tag, attrs, parent) => {
   return e;
 };
 
-/** A queue's card: id, estimate and After… on top; the whole title; its state or what it waits for; the chips. */
+/** A queue's "after" chips: who set each dependency, done or not. */
+function chips(q) {
+  return el("div", { class: "chips" }, ...q.after.map(([p, by, done]) => el("span", { class: `chip${by === "user" ? " user" : ""}${done ? " done" : ""}` },
+    `after ${p}${by === "user" ? " · set by you" : ""}${done ? " · done" : ""}`, ...(by === "user" ? [el("b", {}, "↩")] : []))));
+}
+
+/**
+ * A queue's card: id, estimate and After… on top; the whole title; its state or what it waits for; the chips. A
+ * feature's face() draws the card's inside another way (26-plan-modes.html: as the built dashboard draws it).
+ */
 function card(q) {
-  const kids = [
+  const kids = F.face?.(q) ?? [
     el("div", { class: "top" }, el("span", { class: "mono id" }, q.id), el("span", { class: "est", title: "estimate" }, `est. ${q.est}`),
       ...(q.now ? [] : [el("span", { class: "after" }, "After…")])),
     el("div", { class: "title" }, q.title),
   ];
-  if (q.now) kids.push(el("div", { class: `st tone-${q.now[0]}` }, q.now[1]));
-  if (q.why) kids.push(el("div", { class: `why tone-${q.why[0]}` }, q.why[1]));
-  if (q.after?.length) {
-    kids.push(el("div", { class: "chips" }, ...q.after.map(([p, by, done]) => el("span", { class: `chip${by === "user" ? " user" : ""}${done ? " done" : ""}` },
-      `after ${p}${by === "user" ? " · set by you" : ""}${done ? " · done" : ""}`, ...(by === "user" ? [el("b", {}, "↩")] : [])))));
+  if (!F.face) {
+    if (q.now) kids.push(el("div", { class: `st tone-${q.now[0]}` }, q.now[1]));
+    if (q.why) kids.push(el("div", { class: `why tone-${q.why[0]}` }, q.why[1]));
+    if (q.after?.length) kids.push(chips(q));
   }
   const c = el("div", { class: `pc${q.now ? " now" : ""}`, "data-plan-card": q.id }, ...kids);
   F.card?.(q, c);

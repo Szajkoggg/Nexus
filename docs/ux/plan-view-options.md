@@ -13,6 +13,10 @@ seed `scripts/capture/seed-plan-nexus.ts` writes the same plan for the dashboard
 
 **The user's choice (PL1 review, 2026-11-15): layout A**, at 1440 px and at 390 px.
 
+PB built layout A, a line's details, dragging and Undo. The four features it left (critical path, what blocks, lanes by
+area, time axis) are fitted to the built view and its data in [plan-view-modes.md](plan-view-modes.md) (queue PVA),
+with the mockup `mockups/26-plan-modes.html`.
+
 ## The two layouts
 
 | | A: today's columns, lines routed around | B: layered graph (dagre-like) |

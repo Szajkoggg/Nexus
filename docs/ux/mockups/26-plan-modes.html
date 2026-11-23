@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup 26: the plan view's modes, fitted to the built dashboard</title>
+<!-- Queue PVA, step PVA1 (docs/ux/plan-view-modes.md). PL's four features (23-plan-features.html) fitted to the plan
+     view as PB, PVA0 and PVAR built it, with Nexus's own plan as scripts/capture/seed-plan-nexus.ts seeds it and a fixed
+     clock (21:10): ?m=base|critical|blocked|lanes|time|unknown at 1440, 492 and 390 px (plan-modes.js says what each
+     shows). ?theme=paper|honey. Drawn by plan-modes.js and plan-mock.js; measured by scripts/layout-faults.ts. -->
+<link rel="stylesheet" href="plan-mock.css">
+<link rel="stylesheet" href="plan-modes.css">
+<script src="plan-modes.js"></script>
+<script src="plan-mock.js"></script>
+</head>
+<body>
+<div class="ptop"><span class="pick">Nexus <span class="badge" style="margin:0">2</span> <span class="fg3">▾</span></span><span class="run">● MX running</span><span class="grow"></span><span class="fg3">⚙</span></div>
+<div class="app">
+  <aside class="side">
+    <div class="brand">Nexus <span class="live">live</span></div>
+    <h6>PROJECTS</h6>
+    <div class="proj"><span class="av">N</span>Nexus<span class="badge">2</span></div>
+    <div class="nav">Stats<span class="fg3">all projects</span></div>
+    <div class="foot"><span>Away…</span><span class="row">notify off<span class="grow"></span>settings</span></div>
+  </aside>
+
+  <div class="mid">
+    <div class="midtop"><span class="tabs"><span>● Orchestrator</span><span>Ideas</span><span>Stats</span></span><b>Nexus</b><span class="fg3">· queues</span></div>
+    <main class="page">
+      <div class="tools"><span class="btn">New queue from template</span></div>
+      <section aria-label="The plan">
+        <div class="plan-head">
+          <h2>The plan</h2><span class="hint"></span>
+          <span class="legend">
+            <span><svg width="22" height="6" aria-hidden="true"><line x1="0" y1="3" x2="22" y2="3" stroke="var(--accent)" stroke-width="2"/></svg>set by you</span>
+            <span><svg width="22" height="6" aria-hidden="true"><line x1="0" y1="3" x2="22" y2="3" stroke="var(--fg-3)" stroke-width="1.5" stroke-dasharray="4 3"/></svg>set by the orchestrator</span>
+          </span>
+        </div>
+        <div class="plan" id="plan"></div>
+        <div class="plist" id="plist"></div>
+      </section>
+      <section class="below desk-only">
+        <h2>In progress <span class="fg3">3</span></h2>
+        <div class="item"><span class="mono fg3">MX</span> <b>Small fixes from the user's notes of 14 November</b> <span class="tone-running">· running · MX1</span></div>
+      </section>
+    </main>
+  </div>
+
+  <aside class="rail">
+    <div class="item">
+      <div class="row"><b>Good evening</b><span class="grow"></span><span class="fg3" style="font-size:12px">Mark as seen</span></div>
+      <div class="fg3" style="font-size:12px">since you last looked, 18:40 · all projects</div>
+      <div class="tiles">
+        <div class="tile"><b>3</b>steps finished · 1 queue done</div><div class="tile"><b>0</b>queues stopped</div>
+        <div class="tile"><b>2</b>waiting for you · 1 review, 1 approval</div><div class="tile"><b>1</b>running now · MX1</div>
+      </div>
+    </div>
+    <h6>WAITING FOR YOU · 2</h6>
+    <div class="item"><span class="pill approval">Needs approval</span> <span class="mono fg3" style="font-size:12px">CH</span><div style="margin-top:4px">Chat context: what the orchestrator keeps between chats</div></div>
+    <div class="item"><span class="pill review">Review</span> <span class="mono fg3" style="font-size:12px">ST2/ST21</span><div style="margin-top:4px">The project page shows step durations by tag.</div></div>
+    <div class="go">All queues of Nexus</div>
+  </aside>
+</div>
+<nav class="pbar">
+  <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v11H9l-5 4z"/></svg>Orchestrator</div>
+  <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13l2-8h12l2 8v6H4z"/><path d="M4 13h5l1 2h4l1-2h5"/></svg>Waiting</div>
+  <div class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 6h14M5 12h14M5 18h9"/></svg>Queues</div>
+  <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9V16h7v-2.1A6 6 0 0 0 12 3z"/></svg>Ideas</div>
+  <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Stats</div>
+</nav>
+</body>
+</html>
