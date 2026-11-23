@@ -730,6 +730,13 @@ names another lock file, `NEXUS_TEST_LOCK_STALE_MS` another age at which a lock 
 same lock: while a full run started outside Nexus holds it, Nexus starts no heavy operation of its own, and `nexus
 status` says so (the machine's line, "The capacity coordinator" in docs/protocol/checks.md).
 
+Each full run also measures the machine once it holds the lock: how long node, PowerShell, an `Add-Type` and git take
+to start (about a second). When the run ends it prints them with the run's time (a line `npm test: machine: ...`) and
+appends them as one JSON line to `nexus-test-machine.jsonl` in the system's temporary folder (fields `at`, `node_ms`,
+`powershell_ms`, `git_ms`, `addtype_ms`, `probe_ms`, `run_s`). When full runs grow slower, that file tells whether
+the machine's process starts grew slower with them (the machine) or not (the code). `NEXUS_TEST_MACHINE_LOG` names
+another file; `off` turns the probe off.
+
 The checks Nexus runs and everything a worker starts (its runtime, the tests and builds it runs) run below normal
 priority: in Task Manager they show "Below normal", and on a busy machine the Nexus server and your own programs go
 first. A full `npm test` you start yourself in a terminal runs at normal priority, as before.

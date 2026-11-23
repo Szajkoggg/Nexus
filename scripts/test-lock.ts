@@ -16,6 +16,9 @@
 //   for; a hung holder or a reused pid is handled by the staleness above, not by a time after which waiting gives up.
 //   The Nexus server's capacity coordinator reads the same lock: packages/protocol/src/full-test-lock.ts holds the
 //   rules both go by.
+// - Once it holds the lock, it times how long node, PowerShell, Add-Type and git take to start, and when the run ends
+//   appends them with the run's time to nexus-test-machine.jsonl in the temporary folder and prints them (queue TI4,
+//   scripts/machine-probe.ts): whether a later slowdown is the machine's or the code's.
 // - The lock is removed when the run ends (only if it is still this run's).
 // - The run ends with whoever started it (queue TF): a watchdog process watches the run's starter (this script's
 //   parent, and the shells and npm above it) and this script. The watchdog owns the runner. A known starter gone or
@@ -33,6 +36,7 @@ import {
   fullTestLockFile, fullTestStale, fullTestStaleMs, processAlive as alive, readFullTestHolder as readHolder,
   type FullTestHolder as Holder,
 } from "@nexus/protocol/full-test-lock";
+import { machineLogFile, probeMachine, recordMachine } from "./machine-probe.ts";
 
 export { alive };
 
@@ -343,10 +347,16 @@ async function runLocked(args: string[], o: LockOptions = {}): Promise<number> {
     const result = await Promise.race([acquired.then((value) => ({ lock: value })), ended.then((code) => ({ code }))]);
     if ("code" in result) { void acquired.then((value) => value?.release()); return result.code; }
     lock = result.lock;
+    // The machine's state, under the lock so that no other full run disturbs it (TI4, scripts/machine-probe.ts).
+    const log = lock ? machineLogFile() : undefined;
+    const probe = log ? await probeMachine() : undefined;
     // Never without the lock: undefined only when the wait was ended, and then nothing runs.
     if (!lock || !guard.connected) { send({ stop: true }); return await ended; }
+    const at = new Date().toISOString(), start = performance.now();
     send({ args, token: lock.token });
-    return await ended;
+    const code = await ended;
+    if (log && probe) recordMachine(log, { at, ...probe, run_s: Math.round((performance.now() - start) / 1000) }, say);
+    return code;
   } finally {
     lock?.release();
     process.off("disconnect", parentGone); process.off("SIGINT", onInt); process.off("SIGTERM", onTerm);

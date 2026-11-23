@@ -26,7 +26,8 @@ function tinyTest(): string {
 function node(args: string[], env: Record<string, string>): Promise<{ code: number | null; out: string; ms: number }> {
   const started = performance.now();
   return new Promise((resolve) => {
-    const env2: NodeJS.ProcessEnv = { ...process.env, ...env };
+    // The machine probe only where a test asks for it: it adds a second, and the machine's own log is not the tests'.
+    const env2: NodeJS.ProcessEnv = { ...process.env, NEXUS_TEST_MACHINE_LOG: "off", ...env };
     // Not a test of this run's own: node --test inside a test file would skip its files.
     delete env2.NEXUS_DIR; delete env2.NEXUS_SESSION; delete env2.NEXUS_HANDOVER; delete env2.NODE_TEST_CONTEXT;
     const child = spawn(process.execPath, args, { env: env2, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
@@ -158,7 +159,7 @@ async function longRun(file: string, gitBash?: string, noQuery = false): Promise
     "});",
     "",
   ].join("\n"));
-  const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_TEST_LOCK: file, NEXUS_TEST_LOCK_WATCHED: watchedFile };
+  const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_TEST_LOCK: file, NEXUS_TEST_LOCK_WATCHED: watchedFile, NEXUS_TEST_MACHINE_LOG: "off" };
   if (noQuery) env.NEXUS_TEST_LOCK_QUERY = "off";
   // Not a test of this run's own: node --test inside a test file would skip its files.
   delete env.NEXUS_DIR; delete env.NEXUS_SESSION; delete env.NEXUS_HANDOVER; delete env.NODE_TEST_CONTEXT;
@@ -301,7 +302,7 @@ test("lifetime IPC loss while waiting exits without releasing the other holder's
   const file = lockFile();
   const held = await acquire({ file, say: () => {} });
   const watchedFile = join(dirname(file), "watched.json");
-  const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_TEST_LOCK: file, NEXUS_TEST_LOCK_QUERY: "off", NEXUS_TEST_LOCK_WATCHED: watchedFile };
+  const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_TEST_LOCK: file, NEXUS_TEST_LOCK_QUERY: "off", NEXUS_TEST_LOCK_WATCHED: watchedFile, NEXUS_TEST_MACHINE_LOG: "off" };
   delete env.NODE_TEST_CONTEXT;
   const child = spawn(process.execPath, [join(scripts, "test-lock.ts"), "--test", tinyTest()], { env, stdio: ["ignore", "ignore", "pipe", "ipc"], windowsHide: true });
   let output = "";
@@ -366,6 +367,25 @@ test("the script runs node --test under the lock and removes it after; held by a
   const other = lockFile();
   assert.equal((await node([join(scripts, "test-lock.ts"), "--test", failing], { NEXUS_TEST_LOCK: other })).code, 1);
   assert.ok(!existsSync(other));
+});
+
+test("a run measures the machine under the lock and records it with the run's time: one JSON line, and in its output", async () => {
+  const file = lockFile();
+  const log = join(dirname(file), "machine.jsonl");
+  const run = await node([join(scripts, "test-lock.ts"), "--test", tinyTest()], { NEXUS_TEST_LOCK: file, NEXUS_TEST_MACHINE_LOG: log });
+  assert.equal(run.code, 0, run.out);
+  const lines = readFileSync(log, "utf8").trim().split(/\r?\n/);
+  assert.equal(lines.length, 1);
+  const line = JSON.parse(lines[0]!) as Record<string, unknown>;
+  assert.deepEqual(Object.keys(line), ["at", "node_ms", "powershell_ms", "git_ms", "addtype_ms", "probe_ms", "run_s"]);
+  assert.ok(!Number.isNaN(Date.parse(line.at as string)));
+  const windows = process.platform === "win32";
+  for (const key of ["node_ms", "git_ms", ...(windows ? ["powershell_ms", "addtype_ms"] : [])]) {
+    assert.equal(typeof line[key], "number", `${key} measured: ${lines[0]}`);
+  }
+  assert.ok((line.probe_ms as number) >= (line.node_ms as number) + (line.git_ms as number));
+  assert.equal(typeof line.run_s, "number");
+  assert.match(run.out, /npm test: machine: node \d+ ms, PowerShell (\d+ ms|-), git \d+ ms, Add-Type (\d+ ms|-) \(probe \d+ ms\); run \d+ s; in .*machine\.jsonl/);
 });
 
 test("test:files never waits for the lock", async () => {

@@ -420,3 +420,25 @@ other, with a TEMP of its own (so what a run leaves can be counted):
   run) are still left: a later queue's.
 - The full run: 822 s before, 666 s after (-19%); the tests' summed time 8143 s to 6407 s; tests over 5 s 502 to
   449, over 10 s 335 to 262; the same 1622 tests, all passing.
+
+## The machine's state beside every full run (queue TI4)
+
+TI1 found that a full run grew from 618 s to 1070 s in three days (CI81) while the code explained none of it: the
+tests that start processes had slowed by half, the pure CPU tests not at all, and a restart of the machine took most
+of it back. Its cause could not be shown afterwards, since nothing had measured the machine at the time. So every
+full run now does (`scripts/machine-probe.ts`, called by `scripts/test-lock.ts`):
+
+- **What**: the start of `node -e ""`, of `powershell.exe -NoProfile` to its first line, an `Add-Type` of a small C#
+  class inside that PowerShell (timed there; a fresh class name each run), and `git --version`. These are the process
+  starts the tests are made of (TI1: 2531 CLI processes, 988 job hosts and 9729 git commands a run), and the
+  compile the job host did for every start before TI3. One after another, not at once, so they do not slow each
+  other; each has 10 s at most, and one that cannot run is null.
+- **When**: after the lock is taken, before the test runner starts: no other full run disturbs it, and it is not
+  counted in `run_s` (the runner's time). Measured: 0.5 s on an idle machine, 1.4 s beside a busy loop per CPU,
+  6 to 7 s beside three per CPU (then it shows what the run is up against).
+- **Where**: one JSON line per run in `nexus-test-machine.jsonl` in the system's temporary folder, written when the
+  run ends, and the same values in one line of the run's output, so a check's log carries them too. Not a Nexus
+  metric: a check run cannot record one, and the Stats are the user's.
+- **Reading it**: a run slower than its neighbours with slower process starts is the machine's; one with the usual
+  starts is the code's (or the tests'). The lock's own tests turn the probe off (`NEXUS_TEST_MACHINE_LOG=off`), but
+  one, which points it to a file of its own.
