@@ -158,13 +158,15 @@ test("a Windows volume shadow copy made while a check failed is kept with its ru
 
 /** A time limit a stand-in's quick run stays inside on a loaded machine (8 s did not, under the load tool), and a planned wait runs past (queue CK). */
 const LIMIT_MS = 25_000;
+/** How long such a run may take: the usual wait, and the check's limit twice (a run ended at it, and one more within it). */
+const LIMITED_RUN_MS = LONGER.run + 2 * LIMIT_MS;
 
 test("a check that runs into its time limit is not run again: the worker gets a check-fix round naming the limit (queue CK)", async () => {
   const x = withChecks(["done"], ["unit"], { checkLimitMs: LIMIT_MS, capacity: capacity(true) });
   x.plan("unit", ["60000ms:0", 0]);
   try {
     x.engine.start("Q", { runtime: "claude" });
-    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LIMITED_RUN_MS);
     const [first, second] = x.sets();
     const c = first!.checks[0]!;
     assert.deepEqual([first!.state, c.ok, c.flaky, c.runs.length, c.runs[0]!.timed_out, c.runs[0]!.exit_code], ["failed", false, undefined, 1, true, null], "one run, ended at the limit");
@@ -182,7 +184,7 @@ test("a check that runs into its time limit while Windows made a shadow copy run
   x.plan("unit", ["60000ms:0", 0]);
   try {
     x.engine.start("Q", { runtime: "claude" });
-    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LIMITED_RUN_MS);
     assert.equal(x.sets().length, 1, "no fix round");
     const [set] = x.sets();
     const c = set!.checks[0]!;
