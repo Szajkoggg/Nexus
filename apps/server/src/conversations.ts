@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, Effort, ProjectStore, type ConversationWeb, effortIssue, ideaContext, ideaHash, languageName, loadProjectState, newId, normPath, now, type SessionFile,
+  ActionError, Effort, ProjectStore, type ConversationSettings, type ConversationWeb, type SettingSource, effortIssue, ideaContext, ideaHash, languageName, loadProjectState, newId, normPath, now, type SessionFile,
 } from "@nexus/protocol";
 import { findStep, sinceThen, stepSeed } from "./step-seed.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
@@ -22,6 +22,7 @@ import { partnerBriefing, restartedNotice } from "./prompts.ts";
 import { RESTARTED, STOPPED, chatView } from "./chats.ts";
 import { guardSettings, webFetchDenyRules } from "./web-guard.ts";
 import { shellRules } from "./shell-rules.ts";
+import { modelEffortIssue } from "./models.ts";
 import { byConversationOrder } from "@nexus/protocol/live";
 
 // `nexus help` (decided 2026-11-15, queue OP): how Nexus works, its topics; it reads only. A Codex partner runs it in
@@ -66,6 +67,12 @@ const IDLE_MS = 15 * 60_000; // an idle partner's process ends; the next message
  */
 type Extra = { timer?: NodeJS.Timeout; handoff?: boolean; handoffNext?: boolean; compacting?: boolean; compacted?: boolean };
 type Live = Hosted<Extra>;
+/**
+ * Input for a conversation's next process, held while its old one finishes (its model, effort or other settings
+ * changed during a turn: ensure): a message (`quote`: what its turn answers, as for AgentHost.send) or the hand-over's
+ * instruction.
+ */
+type Waiting = { text: string; quote?: readonly string[]; handoff?: boolean };
 
 export class Conversations {
   private readonly store: ProjectStore;
@@ -75,6 +82,8 @@ export class Conversations {
   private readonly compacts: (runtime: "claude" | "codex") => boolean;
   /** Set by shutdown: no idle timer is armed after it. */
   private stopped = false;
+  /** By session: the input waiting for its old process to end (Waiting); the new process gets it in order. */
+  private readonly waiting = new Map<string, Waiting[]>();
 
   /** `host`: how the partners' processes are made (tests give a stand-in). */
   constructor(store: ProjectStore, orchestrator: Orchestrator, changed: () => void, host: AgentHostOptions = {}) {
@@ -113,11 +122,35 @@ export class Conversations {
   head(id: string) {
     const s = this.session(id);
     return {
-      session: s, state: this.host.get(id)?.proc.state ?? "exited", runtime: this.store.readRuntime(id) ?? null,
+      // Input waiting for the old process's end (waiting) is a reply on its way.
+      session: s, state: this.waiting.has(id) ? "working" : this.host.get(id)?.proc.state ?? "exited", runtime: this.store.readRuntime(id) ?? null,
       model: s.model ?? null, effort: s.effort ?? null, notes_dir: this.store.readProject().conversations.notes_dir ?? null,
+      settings: this.settingsOf(s),
       // Whether its runtime compacts on request: the dashboard offers Compact only then.
       compact: this.canCompact(s),
       idea_context_error: this.ideaContextError(s),
+    };
+  }
+
+  /**
+   * The model and effort of the conversation's running process (null without one; a null value: the runtime's
+   * default), and those its next turn runs on, each with where it comes from: its own, the project's conversation
+   * settings (when it runs on their runtime) or the runtime's default. `changes`: the next turn runs on other values
+   * than the running process, which ends after its turn (queue CM; docs/design/chat.md, "Model and effort of a
+   * conversation").
+   */
+  private settingsOf(s: SessionFile): ConversationSettings {
+    // Without its own value: the project's (when it runs on their runtime), else the runtime's default.
+    const inherited = this.resolved({ ...s, model: undefined, effort: undefined });
+    const fallback = (v: unknown): Exclude<SettingSource, "own"> => (v !== undefined ? "project" : "runtime");
+    const from = (own: unknown, v: unknown): SettingSource => (own !== undefined ? "own" : fallback(v));
+    const v = this.resolved(s);
+    const next = { model: v.model ?? null, effort: v.effort ?? null, model_from: from(s.model, inherited.model), effort_from: from(s.effort, inherited.effort) };
+    const was = this.host.launchedWith(s.id);
+    const running = was ? { model: was.model ?? null, effort: was.effort ?? null } : null;
+    return {
+      running, next, changes: !!running && (running.model !== next.model || running.effort !== next.effort),
+      inherited: { model: inherited.model ?? null, effort: inherited.effort ?? null, model_from: fallback(inherited.model), effort_from: fallback(inherited.effort) },
     };
   }
 
@@ -135,7 +168,9 @@ export class Conversations {
     if (!this.canCompact(s)) throw cannot();
     if (!this.store.readChat(id).entries.some((c) => c.from === "partner" && c.kind === "message")) throw new ActionError("the conversation has nothing to compact yet", 409);
     if (this.host.running(id)?.proc.state === "working") throw answering();
+    // None: its old process is finishing a turn (settling) before the changed settings apply.
     const l = this.ensure(s);
+    if (!l) throw answering();
     if (!l.proc.compact) throw cannot();
     clearTimeout(l.timer);
     l.compacting = true;
@@ -165,7 +200,8 @@ export class Conversations {
     // conversation settings, also when they change later (from its next message on).
     const effort = parseEffort(body.effort);
     const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : undefined;
-    const issue = effortIssue(runtime, effort ?? (runtime === c.runtime ? c.effort : undefined));
+    const same = runtime === c.runtime;
+    const issue = pairIssue(runtime, model ?? (same ? c.model : undefined), effort ?? (same ? c.effort : undefined));
     if (issue) throw new ActionError(issue);
     const title = typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, 120)
       : idea ? `${idea.snapshot.title}${idea.scope.date ? ` / ${idea.scope.date}` : ""}`
@@ -196,18 +232,28 @@ export class Conversations {
     return { queue, step, title: found.st.title };
   }
 
+  /**
+   * A model or effort given (null or "": the inherited one again) becomes the conversation's own; both are checked as
+   * the pair the next turn runs on, and written together or not at all. Saving starts no turn and cuts none short:
+   * the next turn runs on the new values (ensure), in the same native session (queue CM; docs/design/chat.md, "Model
+   * and effort of a conversation").
+   */
   update(id: string, body: { title?: unknown; model?: unknown; effort?: unknown; archived?: unknown }): void {
     const s = this.session(id);
     const next = { ...s };
     if (typeof body.title === "string" && body.title.trim()) next.title = body.title.trim().slice(0, 120);
+    if (body.model !== undefined && body.model !== null && typeof body.model !== "string") throw new ActionError("model is a model's name, or null for the inherited one");
     if (body.model !== undefined) next.model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : undefined;
     if (body.effort !== undefined) next.effort = parseEffort(body.effort);
     if (typeof body.archived === "boolean") next.archived = body.archived;
-    const issue = next.runtime === "external" ? undefined : effortIssue(next.runtime, next.effort);
-    if (issue) throw new ActionError(issue);
+    if (next.runtime !== "external" && (next.model !== s.model || next.effort !== s.effort)) {
+      const v = this.resolved(next);
+      const issue = pairIssue(next.runtime, v.model, v.effort);
+      if (issue) throw new ActionError(issue);
+    }
     this.store.writeSession(next);
-    // A new model or effort applies from the next message: the process restarts (the conversation goes on).
-    if (next.model !== s.model || next.effort !== s.effort) this.retire(id);
+    // The process is left as it is: the next message finds it started on other values (ensure), and a new one runs
+    // that turn, after a working one's turn. No turn starts here, none is cut short.
     this.changed();
   }
 
@@ -274,26 +320,68 @@ ${text}`;
     const s = this.session(id);
     if (s.about?.idea) throw new ActionError("Use the idea handoff preview to choose exact dates; an idea chat is not handed over as a conversation-wide summary", 409);
     this.store.appendChat(id, { at: now(), from: "nexus", text: "Summarizing this conversation for the orchestrator…" });
-    const l = this.ensure(s);
-    // While the partner is still at a turn (its reply on the way), the instruction waits for that turn's end and runs
-    // as a turn of its own: put into the running turn, that turn's reply (not a summary) went over as the summary
-    // (queue FU4). Idle, it starts the turn at once.
-    clearTimeout(l.timer);
-    if (l.proc.state === "working") l.handoffNext = true; else l.handoff = true;
     const p = this.store.readProject();
     const covers = p.conversations.notes_dir ? ` ${HANDOFF_COVERS}` : "";
-    this.host.send(l, `[Nexus] The user hands this conversation to the orchestrator, who plans and runs work in queues. Write a summary for it, in ${languageName(p.languages.working)}: what was decided (only what the user decided), the open questions, the work you propose (as steps with what each should achieve), and the files where the notes are. ${HANDOFF_SCOPE}${covers} Reply with the summary only.`, { afterTurn: true });
+    this.put(s, { text: `[Nexus] The user hands this conversation to the orchestrator, who plans and runs work in queues. Write a summary for it, in ${languageName(p.languages.working)}: what was decided (only what the user decided), the open questions, the work you propose (as steps with what each should achieve), and the files where the notes are. ${HANDOFF_SCOPE}${covers} Reply with the summary only.`, handoff: true });
     this.changed();
   }
 
-  idle(): boolean { return this.host.idle(); }
+  /**
+   * Gives `w` to the conversation's process (ensure), or holds it for the next one while the old one finishes a turn
+   * on other settings (waiting). A hand-over's instruction asked while the partner is still at a turn waits for that
+   * turn's end and runs as a turn of its own: put into the running turn, that turn's reply (not a summary) went over
+   * as the summary (queue FU4). Idle, it starts the turn at once.
+   */
+  private put(s: SessionFile, w: Waiting): void {
+    const l = this.ensure(s);
+    if (!l) { this.waiting.set(s.id, [...(this.waiting.get(s.id) ?? []), w]); return; }
+    clearTimeout(l.timer);
+    if (w.handoff) { if (l.proc.state === "working") l.handoffNext = true; else l.handoff = true; }
+    this.host.send(l, w.text, { ...(w.quote ? { quote: w.quote } : {}), ...(w.handoff ? { afterTurn: true } : {}) });
+  }
+
+  /**
+   * The old process ended (its exit was read): what waited for it goes to a new one, on the conversation's settings
+   * now. Not after shutdown: the hand-over to the next server carried it (cutOff).
+   */
+  private flush(id: string): void {
+    const items = this.waiting.get(id);
+    if (!items || this.stopped) return;
+    this.waiting.delete(id);
+    try {
+      const s = this.session(id);
+      for (const w of items) this.put(s, w);
+    } catch (e) {
+      this.store.appendChat(id, { at: now(), from: "nexus", kind: "error", text: `Could not go on with the changed settings: ${(e as Error).message}` });
+    }
+  }
+
+  /** No partner is at a turn or settling, and no input waits for a new process (waiting). */
+  idle(): boolean { return this.host.idle() && this.waiting.size === 0; }
 
   /**
    * Before the hand-over to the next server (an update): the partners' turns still running are cut off, and each
    * session's record keeps what its turn answered, and whether it was the hand-over's (AgentHost.cutOff). The next
    * server goes on with them (resumeCutOff).
    */
-  cutOff(): void { this.host.cutOff((l) => (l.handoff || l.handoffNext ? { handoff: true } : {})); }
+  cutOff(): void {
+    // Input waiting for a new process (waiting) goes with the record too: the next server answers it.
+    const held = (id: string) => {
+      const w = this.waiting.get(id) ?? [];
+      return { asked: w.flatMap((x) => x.quote ?? [x.text]), handoff: w.some((x) => x.handoff) };
+    };
+    const cut = this.host.cutOff((l) => {
+      const h = held(l.session);
+      return { asked: h.asked, ...(l.handoff || l.handoffNext || h.handoff ? { handoff: true } : {}) };
+    });
+    // One whose old process is no longer at a turn (it ends, or settles): its record keeps the waiting input alone.
+    for (const id of this.waiting.keys()) {
+      if (cut.includes(id)) continue;
+      const h = held(id);
+      this.host.write(id, { interrupted: { at: now(), asked: h.asked, ...(h.handoff ? { handoff: true } : {}) } });
+    }
+    this.waiting.clear();
+  }
 
   /**
    * After a restart that cut off partners' turns (cutOff): each conversation goes on in its session, told what it was
@@ -305,11 +393,9 @@ ${text}`;
       if (!cut) continue;
       try {
         this.store.appendChat(s.id, { at: now(), from: "nexus", text: RESTARTED });
-        const l = this.ensure(s);
-        clearTimeout(l.timer);
-        if (cut.handoff) l.handoff = true;
         const idea = this.ideaMessage(s, restartedNotice(cut.asked));
-        this.host.send(l, idea?.text ?? restartedNotice(cut.asked), { quote: cut.asked });
+        // A hand-over's turn is the hand-over's again: the partner is idle, so the notice starts that turn.
+        this.put(s, { text: idea?.text ?? restartedNotice(cut.asked), quote: cut.asked, ...(cut.handoff ? { handoff: true } : {}) });
         if (idea) this.store.writeSession({ ...this.store.readSession(s.id), about: { idea: idea.scope } });
       } catch (e) {
         this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `Could not go on after the restart: ${(e as Error).message}` });
@@ -335,9 +421,7 @@ ${text}`;
 
   /** `quote`: what the turn answers, should a restart cut it off (the user's words, without the step's context). */
   private deliver(s: SessionFile, text: string, quote: readonly string[]): void {
-    const l = this.ensure(s);
-    clearTimeout(l.timer);
-    this.host.send(l, text, { quote });
+    this.put(s, { text, quote });
     this.changed();
   }
 
@@ -346,14 +430,19 @@ ${text}`;
     this.host.retire(id);
   }
 
+  /** Its own model and effort, else the project's conversation settings when it runs on their runtime; unchecked. */
+  private resolved(s: SessionFile): { model?: string; effort?: Effort } {
+    const c = this.store.readProject().conversations;
+    const same = s.runtime === c.runtime;
+    return { model: s.model ?? (same ? c.model : undefined), effort: s.effort ?? (same ? c.effort : undefined) };
+  }
+
   /**
    * The model and effort the conversation runs on: its own, else the project's (effective) conversation settings when
    * it runs on their runtime. An effort its runtime does not take is refused with the reason.
    */
   private values(s: SessionFile): { model?: string; effort?: Effort } {
-    const c = this.store.readProject().conversations;
-    const same = s.runtime === c.runtime;
-    const v = { model: s.model ?? (same ? c.model : undefined), effort: s.effort ?? (same ? c.effort : undefined) };
+    const v = this.resolved(s);
     const issue = s.runtime === "external" ? undefined : effortIssue(s.runtime, v.effort);
     if (issue) throw new ActionError(`this conversation would run at effort ${v.effort}: ${issue}`, 409);
     return v;
@@ -391,17 +480,27 @@ ${text}`;
     };
   }
 
-  private ensure(s: SessionFile): Live {
+  /**
+   * The process the conversation's input goes to now, or none: its old process finishes a turn on other settings,
+   * and the input waits for the new one (put, waiting; flushed at the old one's exit).
+   */
+  private ensure(s: SessionFile): Live | undefined {
+    // Input already waits for the old process's end: what comes after it waits too, in order.
+    if (this.waiting.has(s.id)) return undefined;
     // One that has exited, its last output still being read, takes nothing more: a new process, as after its exit.
     const existing = this.host.reachable(s.id);
-    // Settings it was started with changed since (the conversation settings it follows, the notes folder): a new
-    // process from this message on (a working one ends after its turn), resuming the conversation.
+    // Settings it was started with changed since (its own model or effort, the conversation settings it follows, the
+    // notes folder): a new process from this message on, resuming the conversation.
     if (existing && !this.host.stale(s.id, this.launcher(s))) return existing;
     if (existing) {
-      if (existing.proc.state === "working") { this.host.restartAfterTurn(s.id); return existing; }
-      // Settling (AgentProcess.settling): a message sent into its last turn may still run as a turn of its own, which
-      // ending it now would lose. This message goes to it too; the next one, once it is over, finds it stale.
-      if (existing.proc.settling) return existing;
+      // At a turn, or settling (AgentProcess.settling: a message sent into its last turn may still run as a turn of
+      // its own, which ending it now would lose): it ends after that, and this input runs as the next turn, on the new
+      // settings (queue CM). Sent into it, it ran on the old ones; started beside it, two processes answered at once.
+      if (existing.proc.state === "working" || existing.proc.settling) {
+        clearTimeout(existing.timer);
+        this.host.restartAfterTurn(s.id);
+        return undefined;
+      }
       this.retire(s.id);
     }
     return this.host.start(s, this.launcher(s), {}, (l) => {
@@ -447,10 +546,18 @@ ${text}`;
           }
           this.changed();
         },
-        exit: () => { clearTimeout(l.timer); this.changed(); },
+        exit: () => { clearTimeout(l.timer); this.flush(s.id); this.changed(); },
       };
     });
   }
+}
+
+/**
+ * Why the runtime cannot run this model at this effort: the runtime's own effort levels (effortIssue), then the
+ * model's, where the runtime named them (modelEffortIssue). Undefined when nothing tells against the pair.
+ */
+function pairIssue(runtime: "claude" | "codex", model: string | undefined, effort: Effort | undefined): string | undefined {
+  return effortIssue(runtime, effort) ?? modelEffortIssue(runtime, model, effort);
 }
 
 function parseEffort(v: unknown): Effort | undefined {

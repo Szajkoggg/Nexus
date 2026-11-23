@@ -5,6 +5,7 @@ import type { GlobalSettings, ProjectFile, TagsFile } from "@nexus/protocol";
 import type { ModelInfo } from "@nexus/protocol/api";
 import { LANGUAGES } from "@nexus/protocol/languages";
 import { TAG_KINDS } from "@nexus/protocol/tags";
+import { effortLevels } from "../efforts.ts";
 import { fallbackLine, parseFallback } from "../fallback.ts";
 import { act, HttpError, projectUrl, request, useQuery, type Version } from "../api.ts";
 import { Button, ReadError, Section } from "./ui.tsx";
@@ -19,8 +20,6 @@ import { FIX_LIMIT, SEND_BACKS, STOPS, conditionList, savedConditions, settingsP
 import { usePage } from "../page.ts";
 import { RUNTIME_OPTIONS } from "../runtimes.ts";
 import { NotifySettingsRows } from "./NotifySettings.tsx";
-
-const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 /** The offered languages as choices: the English name, and the language's own name where it differs. */
 const LANGUAGE_CHOICES: [string, string][] = LANGUAGES.map((l) => [l.code, l.native === l.name ? l.name : `${l.name} (${l.native})`]);
@@ -811,8 +810,8 @@ function ServerSection({ info }: { info: ServerInfo | undefined; }) {
  * A model, chosen from the list the runtime itself gives (Claude Code's and Codex's own model lists). "Other…" takes
  * a full model name for the rare case; a saved name not in the list is shown as it is.
  */
-export function ModelSelect({ runtime, value, onChange, defaultLabel = t("run.default"), className = "", disabled }: {
-  runtime: "claude" | "codex"; value: string; onChange: (v: string) => void; defaultLabel?: string; className?: string; disabled?: boolean;
+export function ModelSelect({ runtime, value, onChange, defaultLabel = t("run.default"), className = "", disabled, id }: {
+  runtime: "claude" | "codex"; value: string; onChange: (v: string) => void; defaultLabel?: string; className?: string; disabled?: boolean; id?: string;
 }) {
   const models = useQuery<ModelInfo[]>(`/api/models/${runtime}`, runtime).data;
   const [typing, setTyping] = useState(false);
@@ -828,7 +827,7 @@ export function ModelSelect({ runtime, value, onChange, defaultLabel = t("run.de
     );
   }
   return (
-    <select value={value} disabled={disabled} className={style}
+    <select id={id} value={value} disabled={disabled} className={style}
       onChange={(e) => { if (e.target.value === "\u0000other") { setTyping(true); onChange(""); } else onChange(e.target.value); }}>
       <option value="">{defaultLabel}</option>
       {options.map(([v, l, d]) => <option key={v} value={v} title={d}>{l}{d ? ` · ${d}` : ""}</option>)}
@@ -842,24 +841,25 @@ export function ModelSelect({ runtime, value, onChange, defaultLabel = t("run.de
  * The effort levels a model takes, from the runtime's own model list: the chosen model's, or, for the runtime's
  * default model, every level some model takes.
  */
-export function useEfforts(runtime: "claude" | "codex", model: string): string[] {
+function useEfforts(runtime: "claude" | "codex", model: string): string[] {
   const models = useQuery<ModelInfo[]>(`/api/models/${runtime}`, runtime).data;
-  const fallback = runtime === "claude" ? [...CLAUDE_EFFORTS] : ["low", "medium", "high", "xhigh"];
-  if (!models?.length) return fallback;
-  const chosen = models.find((m) => m.value === model)?.efforts;
-  if (chosen?.length) return chosen;
-  const all = new Set(models.flatMap((m) => m.efforts ?? []));
-  const order = ["low", "medium", "high", "xhigh", "max", "ultra"];
-  return all.size ? order.filter((e) => all.has(e)) : fallback;
+  const chosen = models?.find((m) => m.value === model)?.efforts;
+  return chosen?.length ? chosen : effortLevels(runtime, models);
 }
 
-export function EffortSelect({ runtime, model, value, onChange, defaultLabel = t("run.default"), className = "", disabled }: {
+/**
+ * An effort, from the levels the model takes (useEfforts), or from `offered` where the caller worked them out (a
+ * conversation's inherited model: conversationSettings.ts). A saved level not offered stays shown, marked.
+ */
+export function EffortSelect({ runtime, model, value, onChange, defaultLabel = t("run.default"), className = "", disabled, offered, id }: {
   runtime: "claude" | "codex"; model: string; value: string; onChange: (v: string) => void; defaultLabel?: string; className?: string; disabled?: boolean;
+  offered?: string[]; id?: string;
 }) {
-  const efforts = useEfforts(runtime, model);
+  const known = useEfforts(runtime, model);
+  const efforts = offered ?? known;
   const options = value && !efforts.includes(value) ? [...efforts, value] : efforts;
   return (
-    <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}
+    <select id={id} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}
       className={`rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg disabled:opacity-50 ${className}`}>
       <option value="">{defaultLabel}</option>
       {options.map((x) => <option key={x} value={x}>{efforts.includes(x) ? x : t("settings.effort.notOffered", { effort: x })}</option>)}

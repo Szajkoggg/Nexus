@@ -16,6 +16,15 @@ compact a long conversation: it replaces what the partner holds of the conversat
 room to go on in the same conversation. The chat keeps every message and says when it was compacted; details the
 summary leaves out are no longer in the partner's context. It waits for the partner's turn to end.
 
+**A conversation's model and effort.** Open the conversation (Ideas → Conversations → the conversation, or **Chat
+about this** on a step or on a note in the Overview), then **Model & effort** under its title. The line shows the model
+and effort its next reply uses, "(default)" where it follows the project's Ideas settings (Settings → "Ideas
+(conversations)") or the runtime's own. Choose a **Model** and an **Effort**, or **Use defaults**, and **Save**: the
+pair is saved together and only for this conversation, and you can choose it before the first message. It applies from
+the next reply, in the same conversation with its history; a reply already running is not cut short and finishes on
+its pair (the line then shows **Running** and **Next reply**), and a message you send meanwhile waits for it. Efforts
+the chosen model does not take are refused before saving, with the ones it takes.
+
 **What became of the ideas.** The Ideas panel's switch at the top (**Conversations** | **Overview**) shows the notes
 the partners keep, grouped by area and the project's sub-groups (each note's `**Area:**` line; a note without one is
 under Unsorted). Each dated decision separates its disposition, linked work and your implementation assessment.

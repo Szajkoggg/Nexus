@@ -124,6 +124,30 @@ test("restartAfterTurn ends a working process when its turn ends, an idle one no
   assert.deepEqual(proc().calls, ["kill"]);
 });
 
+test("restartAfterTurn: a turn sent to follow the running one (afterTurn) still runs; the process ends after it (queue CM)", () => {
+  const { host, s, start, proc } = setup(ROLE_RECORDS.conversation);
+  const l = start();
+  host.send(l, "the reply's question");
+  host.send(l, "the hand-over's instruction", { afterTurn: true });
+  host.restartAfterTurn(s.id);
+  proc().turn();
+  assert.deepEqual(proc().calls, ["send", "send"], "not killed with the hand-over's turn queued in it");
+  assert.equal(host.get(s.id), l);
+  proc().state = "working"; // the queued turn runs
+  proc().turn();
+  assert.deepEqual(proc().calls, ["send", "send", "kill"], "ended after it");
+  assert.equal(host.get(s.id), undefined);
+});
+
+test("launchedWith: the model and effort the running process was started with", () => {
+  const { host, s, store } = setup(ROLE_RECORDS.conversation);
+  assert.equal(host.launchedWith(s.id), undefined, "no process");
+  host.start(s, (resume) => ({ runtime: "claude", options: { cwd: store.dir, uuid: "uuid-1", resume, model: "m", effort: "high", permissionMode: "dontAsk", allowedTools: [], env: {} } }), {}, () => ({}));
+  assert.deepEqual(host.launchedWith(s.id), { model: "m", effort: "high" });
+  host.retire(s.id);
+  assert.equal(host.launchedWith(s.id), undefined);
+});
+
 test("close ends the process after its turn and shutdown kills them all, both as ended by Nexus", () => {
   const { host, s, events, start, proc } = setup(ROLE_RECORDS.worker);
   start();
@@ -179,4 +203,35 @@ test("idle: not while a process settles, when a turn of the runtime's own may st
   proc().settling = false;
   proc().emit("settled");
   assert.equal(host.idle(), true);
+});
+
+test("cutOff quotes a message sent into a turn that the runtime runs as a late turn of its own (queue CI12)", () => {
+  const { store, s, host, start, proc } = setup(ROLE_RECORDS.conversation);
+  const l = start();
+  host.send(l, "first");
+  host.send(l, "sent into it", { quote: ["the message"] });
+  // The turn ends before the runtime read that message: it settles, and runs the message as a turn of its own.
+  proc().settling = true;
+  proc().turn();
+  proc().settling = false;
+  proc().state = "working";
+  proc().emit("activity", { kind: "turn_start", text: "turn started" });
+  assert.deepEqual(host.cutOff(), [s.id]);
+  assert.deepEqual(store.readRuntime(s.id)?.interrupted?.asked, ["the message"], "the late turn answers the message sent into the turn before");
+});
+
+test("a message read in the turn it was sent into is not quoted by the next one: not when no late turn came (settled), nor when the turn did not settle (queue CI12)", () => {
+  for (const settles of [true, false]) {
+    const { store, s, host, start, proc } = setup(ROLE_RECORDS.conversation);
+    const l = start();
+    host.send(l, "first");
+    host.send(l, "read in it");
+    host.send(l, "after it", { afterTurn: true });
+    proc().settling = settles;
+    proc().turn();
+    if (settles) { proc().settling = false; proc().emit("settled"); }
+    proc().state = "working"; // the turn after it, from the message queued for it
+    host.cutOff();
+    assert.deepEqual(store.readRuntime(s.id)?.interrupted?.asked, ["after it"], settles ? "settled" : "no settling");
+  }
 });

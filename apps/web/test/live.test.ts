@@ -181,6 +181,14 @@ test("the chats: lines and pins of their session, the head; the orchestrator's n
   assert.equal(applyConversation(conv, head("o1", "working")), undefined);
 });
 
+test("a conversation's head brings its model and effort: the running pair and the next turn's (queue CM)", () => {
+  const before = { running: { model: null, effort: "medium" }, next: { model: null, effort: "medium", model_from: "runtime", effort_from: "project" }, changes: false };
+  const saved = { running: { model: null, effort: "medium" }, next: { model: "fake-b", effort: "high", model_from: "own", effort_from: "own" }, changes: true };
+  const conv = { chat: [], pins: [], session: { id: "c1" }, state: "working", settings: before };
+  const m = { type: "session", project: "p", seq: 2, session: "c1", head: { session: { id: "c1" }, state: "working", settings: saved } } as ProjectMessage;
+  assert.deepEqual(applyConversation(conv, m), { ...conv, settings: saved }, "the saved pair shows beside the running one, live");
+});
+
 test("the conversation list: an item replaced or added, the archived last, the latest first", () => {
   const list = [{ id: "a", last_at: "2" }, { id: "b", last_at: "1" }, { id: "z", last_at: "9", archived: true }];
   const item = (id: string, last_at: string) => ({ type: "session", project: "p", seq: 1, session: id, head: {}, conversation: { id, last_at } }) as ProjectMessage;

@@ -64,8 +64,9 @@
 // file with Node inside the agent's process tree (its job on Windows) and replies with its output; a "[Nexus] A worker
 // asked … (qid X;" notice is answered with "fake answer"; with FAKE_REVIEW_ACCEPT set, a notice of a step waiting for its review is
 // answered with `nexus review accept`. "FAKE-LONG" is answered with longReply("Reply"); a hand-over with
-// longReply("SUMMARY"). "FAKE-SLOW" in a chat message: the turn works for FAKE_CHAT_SLOW_MS (default 4000), then
-// replies "slow reply"; a stop (interrupt) ends it early. "FAKE-HOLD": waits for FAKE_RELEASE (as a slow worker does),
+// longReply("SUMMARY"). "FAKE-SLOW" in a chat message (with FAKE_CHAT_SLOW_ALL set, any chat message not steered
+// otherwise: a capture's reply in progress): the turn works for FAKE_CHAT_SLOW_MS (default 4000), then replies
+// "slow reply"; a stop (interrupt) ends it early. "FAKE-HOLD": waits for FAKE_RELEASE (as a slow worker does),
 // so a test can change usage during a chat turn. "FAKE-EXIT-HELD" (Codex's fake only): replies "exit reply", then
 // exits with its stdout held open (exitHeld below). "FAKE-HISTORY": the reply lists every message the agent took in so
 // far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer).
@@ -534,7 +535,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     await work("chat");
     return "held reply";
   }
-  if (text.includes("FAKE-SLOW")) {
+  if (text.includes("FAKE-SLOW") || process.env.FAKE_CHAT_SLOW_ALL) {
     tool("sleep (FAKE-SLOW)");
     return (await interruptible(Number(process.env.FAKE_CHAT_SLOW_MS ?? 4000))) ? { interrupted: true } : "slow reply";
   }
