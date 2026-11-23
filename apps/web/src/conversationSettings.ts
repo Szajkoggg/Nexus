@@ -1,6 +1,7 @@
 // A conversation's own model and effort (queue CM; docs/ux/conversation-settings.md): what the editor under a chat's
 // header shows and sends. The server checks the pair again before it writes (apps/server/src/conversations.ts, update).
 import type { ConversationSettings, ModelInfo } from "@nexus/protocol";
+import { effortLevels } from "./efforts.ts";
 import { t } from "./i18n.ts";
 
 /** The editor's draft: each field its own value, or "" for the inherited one. */
@@ -45,9 +46,6 @@ export function defaultLabel(value: string | null): string {
   return value === null ? t("chat.settings.runtimeDefault") : t("chat.settings.defaultOf", { value });
 }
 
-const ORDER = ["low", "medium", "high", "xhigh", "max", "ultra"];
-const FALLBACK: Record<"claude" | "codex", string[]> = { claude: ["low", "medium", "high", "xhigh", "max"], codex: ["low", "medium", "high", "xhigh"] };
-
 /**
  * The efforts the editor offers for the draft and whether its pair holds: filtered by the model the draft would run
  * (its own, else the inherited one) where the runtime's own list names that model's levels. Where it does not (the
@@ -58,8 +56,7 @@ export function effortCheck(runtime: "claude" | "codex", models: readonly ModelI
   { efforts: string[]; issue?: string; note?: string } {
   const model = d.model || inherited.model;
   const effort = d.effort || inherited.effort;
-  const all = new Set((models ?? []).flatMap((m) => m.efforts ?? []));
-  const levels = all.size ? ORDER.filter((e) => all.has(e)) : FALLBACK[runtime];
+  const levels = effortLevels(runtime, models);
   if (!model) return { efforts: levels, note: t("chat.settings.modelUnknown") };
   const m = models?.find((x) => x.value === model);
   if (!m?.efforts?.length) return { efforts: levels, ...(models ? { note: t("chat.settings.effortsUnknown", { model }) } : {}) };

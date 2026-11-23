@@ -5,6 +5,7 @@ import type { GlobalSettings, ProjectFile, TagsFile } from "@nexus/protocol";
 import type { ModelInfo } from "@nexus/protocol/api";
 import { LANGUAGES } from "@nexus/protocol/languages";
 import { TAG_KINDS } from "@nexus/protocol/tags";
+import { effortLevels } from "../efforts.ts";
 import { fallbackLine, parseFallback } from "../fallback.ts";
 import { act, HttpError, projectUrl, request, useQuery, type Version } from "../api.ts";
 import { Button, ReadError, Section } from "./ui.tsx";
@@ -19,8 +20,6 @@ import { FIX_LIMIT, SEND_BACKS, STOPS, conditionList, savedConditions, settingsP
 import { usePage } from "../page.ts";
 import { RUNTIME_OPTIONS } from "../runtimes.ts";
 import { NotifySettingsRows } from "./NotifySettings.tsx";
-
-const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 /** The offered languages as choices: the English name, and the language's own name where it differs. */
 const LANGUAGE_CHOICES: [string, string][] = LANGUAGES.map((l) => [l.code, l.native === l.name ? l.name : `${l.name} (${l.native})`]);
@@ -844,13 +843,8 @@ export function ModelSelect({ runtime, value, onChange, defaultLabel = t("run.de
  */
 function useEfforts(runtime: "claude" | "codex", model: string): string[] {
   const models = useQuery<ModelInfo[]>(`/api/models/${runtime}`, runtime).data;
-  const fallback = runtime === "claude" ? [...CLAUDE_EFFORTS] : ["low", "medium", "high", "xhigh"];
-  if (!models?.length) return fallback;
-  const chosen = models.find((m) => m.value === model)?.efforts;
-  if (chosen?.length) return chosen;
-  const all = new Set(models.flatMap((m) => m.efforts ?? []));
-  const order = ["low", "medium", "high", "xhigh", "max", "ultra"];
-  return all.size ? order.filter((e) => all.has(e)) : fallback;
+  const chosen = models?.find((m) => m.value === model)?.efforts;
+  return chosen?.length ? chosen : effortLevels(runtime, models);
 }
 
 /**
