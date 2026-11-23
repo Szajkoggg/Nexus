@@ -11,7 +11,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HELP_TOPICS } from "../src/help.ts";
-import { check, flags, head, helpText, readHelp, tokens, type Cli } from "./cli-usage.ts";
+import { LITERAL, check, flags, head, helpText, readHelp, tokens, type Cli } from "./cli-usage.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "../../..");
@@ -104,8 +104,6 @@ function requiredFor(cmd: string): typeof REQUIRED {
     return h[0] === name && rest.every((p) => (p.startsWith("--") ? used.has(p) : words.has(p)));
   });
 }
-
-const LITERAL = /^[a-z][a-z0-9-]*(\|[a-z][a-z0-9-]*)*$/;
 
 /**
  * Whether the command is given to be run, not only named: it has a word after its literal ones (an id, a placeholder)

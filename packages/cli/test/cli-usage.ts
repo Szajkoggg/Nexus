@@ -61,7 +61,7 @@ export function splitTopLevel(s: string): string[] {
 }
 
 /** A word of a usage or a line (`run`, `start|pause`); anything else (`<step>`, `W3`, `"..."`) stands for a value. */
-const LITERAL = /^[a-z][a-z0-9-]*(\|[a-z][a-z0-9-]*)*$/;
+export const LITERAL = /^[a-z][a-z0-9-]*(\|[a-z][a-z0-9-]*)*$/;
 const isPlaceholder = (t: string) => !LITERAL.test(t);
 
 /**
