@@ -47,6 +47,11 @@
   "model": "fake-model",
   "pid": "<pid>",
   "state": "working",
+  "turn_open": {
+    "queue": "Q",
+    "started_at": "2026-01-01T09:10:00.000Z",
+    "step": "Q1"
+  },
   "turns": 0,
   "updated_at": "2026-01-01T09:10:00.000Z"
 }
@@ -75,6 +80,11 @@
   "model": "fake-model",
   "pid": "<pid>",
   "state": "working",
+  "turn_open": {
+    "queue": "Q",
+    "started_at": "2026-01-01T09:10:00.000Z",
+    "step": "Q1"
+  },
   "turns": 0,
   "updated_at": "2026-01-01T09:10:00.000Z"
 }
@@ -393,6 +403,11 @@
   "model": "fake-model",
   "pid": "<pid>",
   "state": "working",
+  "turn_open": {
+    "queue": "Q",
+    "started_at": "2026-01-01T10:51:00.000Z",
+    "step": "Q4"
+  },
   "turns": 5,
   "updated_at": "2026-01-01T10:51:00.000Z"
 }
