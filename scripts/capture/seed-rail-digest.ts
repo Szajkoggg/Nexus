@@ -11,6 +11,7 @@
 // It uses only what the protocol has had since queue FU1 (the fake's bglong), so it also seeds the code of a base
 // commit from then on.
 import { mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { ProjectStore, appendTurn, approveQueue, newId, writeRegistry, type Event, type SessionFile, type TurnRecord } from "@nexus/protocol";
 
@@ -23,7 +24,7 @@ const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
 const st = ProjectStore.init(root, { id: "demo", name: "Demo app", root });
 writeRegistry({ protocol: 1, projects: [{ id: "demo", root }] });
 const session = (id: string, role: SessionFile["role"], title: string, queue?: string): SessionFile => {
-  const s: SessionFile = { protocol: 1, id, project: "demo", role, runtime: "claude", title, cwd: root, launched_by: "nexus", created_at: ago(300), ...(queue ? { queue } : {}) };
+  const s: SessionFile = { protocol: 1, id, project: "demo", role, runtime: "claude", native_id: randomUUID(), title, cwd: root, launched_by: "nexus", created_at: ago(300), ...(queue ? { queue } : {}) };
   st.writeSession(s);
   return s;
 };
