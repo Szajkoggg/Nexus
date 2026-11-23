@@ -2,13 +2,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, appendFileSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { until, LONGER } from "./wait.ts";
 import { setup, restart } from "./engine-setup.ts";
 import { spawnRuntimeChild } from "../src/worker-process.ts";
+import { tempDir } from "./temp-dirs.ts";
 
 const encode = (s: string) => Buffer.from(s, "utf8").toString("base64");
 function alive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch { return false; } }
@@ -87,4 +88,92 @@ setTimeout(() => { console.log(JSON.stringify({exiting: Date.now()})); process.e
   const took = heard - end!.exiting;
   assert.ok(took < EXIT_NOTICE_MS, `the exit was heard ${took} ms after the runtime ended; the bound is ${EXIT_NOTICE_MS} ms`);
   assert.ok(!alive(family!.root) && !alive(family!.child), "the runtime and its child are gone when the exit is heard");
+});
+
+
+// The job host's C# from a machine-wide cache (queue TI, TI3): compiled by the first host, loaded from its bytes by the
+// next ones, compiled again when the source changes, and compiled in memory as before when the cached file is unusable.
+const HOST_SOURCES = ["worker-job.ps1", "worker-job.cs"] as const;
+const UP = "up false\n";
+
+/** A copy of the host's two files, so that a test may change the source without touching the repository's. */
+function hostCopy(): string {
+  const dir = tempDir("nexus-job-src-");
+  for (const f of HOST_SOURCES) copyFileSync(fileURLToPath(new URL(`../src/${f}`, import.meta.url)), join(dir, f));
+  return dir;
+}
+
+/**
+ * Starts a host from `dir` with its cache in `cache`; its runtime prints one line (whether it sees the trace variable)
+ * and ends. How the host got its type, what the runtime printed, the host's stderr and exit code.
+ */
+async function startHost(dir: string, cache: string): Promise<{ how: string; out: string; errors: string; code: number | null }> {
+  const host = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", join(dir, "worker-job.ps1")], {
+    cwd: dir, stdio: "pipe", windowsHide: true, env: { ...process.env, NEXUS_JOB_CACHE: cache, NEXUS_JOB_CACHE_TRACE: "1" },
+  });
+  let out = "", errors = "";
+  host.stdin.on("error", () => {});
+  host.stdout.on("data", (chunk: Buffer) => { out += chunk.toString(); });
+  host.stderr.on("data", (chunk: Buffer) => { errors += chunk.toString(); });
+  const closed = new Promise<number | null>((resolve) => host.once("close", resolve));
+  // The input stays open: its end would end the job, perhaps before the runtime printed.
+  host.stdin.write(`${encode(process.execPath)}\n${encode(`-e "console.log('up', !!process.env.NEXUS_JOB_CACHE_TRACE)"`)}\n`);
+  const code = await closed;
+  const printed = out.split("\n").filter((l) => l.startsWith("O ")).map((l) => Buffer.from(l.slice(2).trim(), "base64").toString("utf8")).join("");
+  return { code, errors, out: printed.replace(/\r/g, ""), how: /worker job cache: (cached|stored|fallback)\b/.exec(errors)?.[1] ?? "none" };
+}
+
+const assemblies = (cache: string) => readdirSync(cache).filter((f) => f.endsWith(".dll"));
+const temporaries = (cache: string) => readdirSync(cache).filter((f) => f.endsWith(".tmp"));
+
+test("the job host compiles its C# once into the cache, loads it from there next time, and again after a change", { skip: process.platform !== "win32" }, async () => {
+  const dir = hostCopy(), cache = tempDir("nexus-job-cache-");
+  const first = await startHost(dir, cache);
+  assert.equal(first.how, "stored", first.errors);
+  assert.equal(first.out, UP, "the runtime ran, without the trace variable");
+  const [dll] = assemblies(cache);
+  assert.ok(dll, "the compiled assembly is in the cache");
+  const written = statSync(join(cache, dll)).mtimeMs;
+  const second = await startHost(dir, cache);
+  assert.equal(second.how, "cached", second.errors);
+  assert.equal(second.out, UP);
+  assert.deepEqual(assemblies(cache), [dll], "no second assembly");
+  assert.equal(statSync(join(cache, dll)).mtimeMs, written, "the cached file was not written again");
+  assert.deepEqual(temporaries(cache), [], "no temporary file left");
+
+  // A changed source has another hash: compiled again, into a file of its own.
+  appendFileSync(join(dir, "worker-job.cs"), "\n// changed\n");
+  const changed = await startHost(dir, cache);
+  assert.equal(changed.how, "stored", changed.errors);
+  assert.equal(changed.out, UP);
+  assert.equal(assemblies(cache).length, 2);
+});
+
+test("an unusable cached assembly falls back to compiling, logged, and the next host stores a sound one", { skip: process.platform !== "win32" }, async () => {
+  const dir = hostCopy(), cache = tempDir("nexus-job-cache-");
+  assert.equal((await startHost(dir, cache)).how, "stored");
+  const [dll] = assemblies(cache);
+  writeFileSync(join(cache, dll!), "not an assembly");
+  const broken = await startHost(dir, cache);
+  assert.equal(broken.how, "fallback", broken.errors);
+  assert.match(broken.errors, /could not load .*worker-job-[0-9a-f]{16}\.dll, compiling instead/);
+  assert.equal(broken.out, UP, "the runtime still ran");
+  assert.match(readFileSync(join(cache, "worker-job.log"), "utf8"), /could not load/);
+  const next = await startHost(dir, cache);
+  assert.equal(next.how, "stored", next.errors);
+  assert.equal(next.out, UP);
+  assert.equal((await startHost(dir, cache)).how, "cached");
+});
+
+test("job hosts starting at once with an empty cache all start, and leave one sound assembly", { skip: process.platform !== "win32" }, async () => {
+  const dir = hostCopy(), cache = tempDir("nexus-job-cache-");
+  const hosts = await Promise.all([1, 2, 3, 4].map(() => startHost(dir, cache)));
+  for (const h of hosts) {
+    assert.equal(h.code, 0, h.errors);
+    assert.equal(h.out, UP, h.errors);
+    assert.ok(h.how === "stored" || h.how === "cached", h.errors);
+  }
+  assert.equal(assemblies(cache).length, 1);
+  assert.deepEqual(temporaries(cache), [], "no temporary file left");
+  assert.equal((await startHost(dir, cache)).how, "cached", "the stored assembly loads");
 });

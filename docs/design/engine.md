@@ -42,6 +42,20 @@ parent exits. This is why snapshots of parent PIDs were rejected: a parent can s
 Breakaway is not enabled. The non-inheritable job handle has kill-on-close; losing the server's pipe or the helper
 also ends the tree. Failure to create or join the job fails the launch instead of silently starting an unowned worker.
 
+**The C# is compiled once per machine (queue TI, TI3).** Add-Type compiled `worker-job.cs` at every host start: 0.2 s
+idle, 3 to 7 s on a busy machine. The host now compiles it once into a machine-wide folder (`%LOCALAPPDATA%/Nexus/job-host`,
+not NEXUS_HOME, which every test has its own of), as `worker-job-<first 16 hex digits of the source's SHA-256>.dll`, and
+the next hosts load it. A compiled DLL cannot be loaded from its file on the user's machine (Smart App Control refuses
+it, 0x800711C7, measured in TI1), so the host reads its bytes and loads them (`Assembly.Load(byte[])`). A host compiles into a
+private temporary file in the folder and renames it to the hashed name; when another host was first, the rename fails
+and its file is kept, so hosts starting at once never write into one file. A changed source has another hash and is
+compiled again; old files are left (a few tens of kilobytes each). Any failure of the cache (an unreadable folder, a file
+that does not load) falls back to compiling in memory as before, deletes the bad file so the next host stores a sound
+one, and is logged on the host's stderr and in `worker-job.log` in the folder. Measured from spawn to the runtime
+started in the job (the `R` frame), the two hosts alternating: idle 632 to 317 ms (medians of 20), with 12 busy loops on
+12 logical processors 1089 to 779 ms, with 36 busy loops 4766 to 2762 ms (medians of 10). What is left is PowerShell's
+own start. Tests: `apps/server/test/worker-job.test.ts`, with the cache in a folder of their own (`NEXUS_JOB_CACHE`).
+
 At a step boundary, the helper enumerates job members except itself and the runtime, opens each as a process handle,
 verifies its membership on that same handle, terminates it and waits for exit. A reused PID outside the job is
 never terminated. Enumeration repeats until only the two roots remain; failure or a timeout halts the queue and
