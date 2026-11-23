@@ -395,7 +395,9 @@ while an update waits, with `--now` too: the user's messages (`POST …/orchestr
 dashboard and from `nexus run`; the orchestrator's notices wait as before. At the hand-over, after it stops taking
 requests, the predecessor stops (interrupts) every chat turn still running and records it in the session's
 `runtime.json` as `interrupted`: `at`, `asked` (what the turn answered: the user's messages sent into it, without a
-step's context, or the notice that started it; empty for a turn the runtime began by itself) and `handoff` (a
+step's context, or the notice that started it; for a turn Claude Code began by itself after the one a message was sent
+into, as it does with a message that reached it as that turn ended, that message; empty for any other turn the runtime
+began by itself) and `handoff` (a
 conversation's hand-over turn). Every server, once active (a successor, or a predecessor that took the port back after a
 rollback), goes on with each such turn in the same session (the runtime resumes it): the chat gets the line "Nexus
 restarted while answering; it goes on." (from `nexus`), and the agent the message "[Nexus] The server restarted while

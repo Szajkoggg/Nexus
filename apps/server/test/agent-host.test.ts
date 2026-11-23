@@ -180,3 +180,34 @@ test("idle: not while a process settles, when a turn of the runtime's own may st
   proc().emit("settled");
   assert.equal(host.idle(), true);
 });
+
+test("cutOff quotes a message sent into a turn that the runtime runs as a late turn of its own (queue CI12)", () => {
+  const { store, s, host, start, proc } = setup(ROLE_RECORDS.conversation);
+  const l = start();
+  host.send(l, "first");
+  host.send(l, "sent into it", { quote: ["the message"] });
+  // The turn ends before the runtime read that message: it settles, and runs the message as a turn of its own.
+  proc().settling = true;
+  proc().turn();
+  proc().settling = false;
+  proc().state = "working";
+  proc().emit("activity", { kind: "turn_start", text: "turn started" });
+  assert.deepEqual(host.cutOff(), [s.id]);
+  assert.deepEqual(store.readRuntime(s.id)?.interrupted?.asked, ["the message"], "the late turn answers the message sent into the turn before");
+});
+
+test("a message read in the turn it was sent into is not quoted by the next one: not when no late turn came (settled), nor when the turn did not settle (queue CI12)", () => {
+  for (const settles of [true, false]) {
+    const { store, s, host, start, proc } = setup(ROLE_RECORDS.conversation);
+    const l = start();
+    host.send(l, "first");
+    host.send(l, "read in it");
+    host.send(l, "after it", { afterTurn: true });
+    proc().settling = settles;
+    proc().turn();
+    if (settles) { proc().settling = false; proc().emit("settled"); }
+    proc().state = "working"; // the turn after it, from the message queued for it
+    host.cutOff();
+    assert.deepEqual(store.readRuntime(s.id)?.interrupted?.asked, ["after it"], settles ? "settled" : "no settling");
+  }
+});
