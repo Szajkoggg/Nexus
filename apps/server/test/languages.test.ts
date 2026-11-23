@@ -18,7 +18,7 @@ import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import { WORKER_BRIEFING, workerBriefing } from "../src/prompts.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -48,7 +48,7 @@ function worker(steps: (Partial<StepDef> & { fake: string })[]) {
     steps: steps.map(({ fake, ...s }, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${fake}`, acceptance: [], ...s })),
   });
   approveQueue(b.store, "Q");
-  const engine: Engine = new Engine(b.store, () => { routeAnswers(b.store); acceptReviews(b.store); engine.onChange(loadProjectState(b.store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
+  const engine: Engine = new Engine(b.store, () => { routeAnswers(b.store); acceptReviews(b.store); engine.onChange(loadProjectState(b.store)); }, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
   const queue = () => loadProjectState(b.store).queues.find((q) => q.id === "Q")!;
   const done = () => { engine.shutdown(); work.done(); };
   return { ...b, engine, queue, release: work.release, done };
@@ -136,7 +136,7 @@ test("with the defaults the worker gets today's texts: no language line", async 
 
 test("the orchestrator's briefing names the reader's language for its replies and queue text, and follows a change from its next message", async () => {
   const b = base();
-  const engine = new Engine(b.store, () => {});
+  const engine = new Engine(b.store, () => {}, QUICK_ENGINE);
   const orchestrator = new Orchestrator(b.store, engine, () => {});
   const replies = () => orchestrator.view().chat.filter((c) => c.from === "orchestrator" && c.kind !== "tool").length;
   try {
@@ -161,7 +161,7 @@ test("the orchestrator's briefing names the reader's language for its replies an
 
 test("without a reader's language the orchestrator's queue text is in the working language, as before", async () => {
   const b = base();
-  const engine = new Engine(b.store, () => {});
+  const engine = new Engine(b.store, () => {}, QUICK_ENGINE);
   const orchestrator = new Orchestrator(b.store, engine, () => {});
   try {
     updateSettings(b.store, { languages: { working: "es" } });
@@ -175,7 +175,7 @@ test("without a reader's language the orchestrator's queue text is in the workin
 
 test("a thinking partner replies in the reader's language and writes files in the working language, from its next message after a change", async () => {
   const b = base();
-  const engine = new Engine(b.store, () => {});
+  const engine = new Engine(b.store, () => {}, QUICK_ENGINE);
   const orchestrator = new Orchestrator(b.store, engine, () => {});
   const conversations = new Conversations(b.store, orchestrator, () => {});
   const replies = (id: string) => b.store.readChat(id).entries.filter((e) => e.from === "partner").length;

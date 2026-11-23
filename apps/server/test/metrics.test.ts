@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { LONGER, WAIT_MS, until as waitUntil } from "./wait.ts";
+import { QUICK_ENGINE, LONGER, WAIT_MS, until as waitUntil } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
@@ -36,7 +36,7 @@ function setup() {
   });
   approveQueue(store, "Q");
   const tick = () => { routeAnswers(store); const s = loadProjectState(store); orchestrator.onChange(s); engine.onChange(s); };
-  const engine: Engine = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100 });
+  const engine: Engine = new Engine(store, tick, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
   const orchestrator = new Orchestrator(store, engine, tick);
   const timer = setInterval(tick, 150);
   const chat = () => orchestrator.view().chat.map((c) => c.text);

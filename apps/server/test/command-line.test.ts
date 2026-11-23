@@ -11,7 +11,7 @@ import { ProjectStore, approveQueue, loadProjectState, routeAnswers } from "@nex
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
-import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 const FAKE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 process.env.NEXUS_CLAUDE = FAKE;
@@ -32,7 +32,7 @@ test("the orchestrator's, a thinking partner's and a worker's command lines stay
     steps: [{ id: "Q1", title: "Step 1", goal: "FAKE: done", acceptance: [] }] });
   approveQueue(store, "Q");
   let orchestrator: Orchestrator;
-  const engine: Engine = new Engine(store, () => tick());
+  const engine: Engine = new Engine(store, () => tick(), QUICK_ENGINE);
   orchestrator = new Orchestrator(store, engine, () => tick());
   const conversations = new Conversations(store, orchestrator, () => {});
   function tick() { routeAnswers(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }

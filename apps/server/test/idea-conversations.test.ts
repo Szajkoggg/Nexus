@@ -9,7 +9,7 @@ import { ProjectStore, changeIdeaStatus, ideaStatuses, loadProjectState, preview
 import { Conversations } from "../src/conversations.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Engine } from "../src/engine.ts";
-import { until, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, until, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -22,7 +22,7 @@ function setup(runtime: "claude" | "codex") {
   const store = ProjectStore.init(root, { id: "p", name: "P", root, orchestrator: { runtime, notify: false } });
   store.updateProject((p) => ({ ...p, conversations: { ...p.conversations, runtime, notes_dir: "notes" } }));
   mkdirSync(join(root, "notes")); const note = join(root, "notes/a.md"); writeFileSync(note, TEXT);
-  const engine = new Engine(store, () => {}), orchestrator = new Orchestrator(store, engine, () => {});
+  const engine = new Engine(store, () => {}, QUICK_ENGINE), orchestrator = new Orchestrator(store, engine, () => {});
   const conversations = new Conversations(store, orchestrator, () => {});
   const received = () => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n") : []).map((l) => JSON.parse(l) as { text: string });
   const stop = async () => {

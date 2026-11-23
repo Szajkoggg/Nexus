@@ -14,7 +14,7 @@ import { CodexSession, webSearchText } from "../src/codex.ts";
 import type { AgentEvents, AgentProcess } from "../src/agent.ts";
 import type { AgentHostOptions } from "../src/agent-host.ts";
 import { longReply } from "./fake-behaviour.ts";
-import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -27,7 +27,7 @@ function setup(notes?: string, host: AgentHostOptions = {}) {
   delete process.env.FAKE_LOG;
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   if (notes) updateSettings(store, { conversations: { notes_dir: notes } });
-  const engine = new Engine(store, () => {});
+  const engine = new Engine(store, () => {}, QUICK_ENGINE);
   const orchestrator = new Orchestrator(store, engine, () => {});
   const conversations = new Conversations(store, orchestrator, () => {}, host);
   const args = () => (existsSync(process.env.FAKE_ARGS!) ? readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>) : []);
@@ -155,7 +155,7 @@ test("a turn's end that comes after the shutdown arms no idle timer: a stopped N
     kill(): void { this.state = "exited"; }
   }
   const stands: Stand[] = [];
-  const engine = new Engine(store, () => {});
+  const engine = new Engine(store, () => {}, QUICK_ENGINE);
   const orchestrator = new Orchestrator(store, engine, () => {});
   const conversations = new Conversations(store, orchestrator, () => {}, { spawn: () => { const p = new Stand(); stands.push(p); return p; } });
   const timeouts = () => process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;

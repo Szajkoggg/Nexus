@@ -19,7 +19,7 @@ import { Engine } from "../src/engine.ts";
 import { Lifecycle } from "../src/lifecycle.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { serverEnv, spawnServer } from "./helpers.ts";
-import { until, LONGER, untilAsync } from "./wait.ts";
+import { QUICK_ENGINE, until, LONGER, untilAsync } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const REPO = join(here, "..", "..", "..");
@@ -158,7 +158,7 @@ test("a failed update tells the orchestrator that ran it why, and what still run
 
   const p = project(base, "p");
   const session = addOrchestrator(p.store);
-  const engine = new Engine(p.store, () => {});
+  const engine = new Engine(p.store, () => {}, QUICK_ENGINE);
   // Wired as main.ts wires it: the orchestrator reads the lifecycle's notice; a settled update runs its notices.
   let lifecycle!: Lifecycle;
   const orchestrator = new Orchestrator(p.store, engine, () => {}, { update: () => lifecycle.notice() });

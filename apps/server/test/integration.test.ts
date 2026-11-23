@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { INTEGRATION_CONDITION, ProjectStore, applyDraft, approveQueue, loadProjectState, routeAnswers, updateSettings, type StepDef } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { LONGER, holdWork, until as waitUntil } from "./wait.ts";
+import { QUICK_ENGINE, LONGER, holdWork, until as waitUntil } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -41,7 +41,7 @@ function setup(steps: StepDef[], o: { coding?: boolean; resolve?: boolean } = {}
   approveQueue(store, "Q");
   const engines: Engine[] = [];
   const engine = (): Engine => {
-    const e: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); e.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
+    const e: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); e.onChange(loadProjectState(store)); }, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
     engines.push(e);
     return e;
   };

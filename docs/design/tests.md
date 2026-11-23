@@ -395,3 +395,28 @@ notice function it does not render), and `packages/cli/test/instruction-commands
 the goldens, the help topics and AGENTS.md for an existing command and subcommand, flags of that command the parser
 knows, and the options the command cannot go without (its `REQUIRED` table, kept by hand beside main.ts's checks); a
 text that shows only part of a command on purpose marks it with a standalone `…`.
+
+## The compile cache, quick engine waits everywhere, and the tests' temporary folders (queue TI2)
+
+Measured by TI1 (a survey of the slowest tests) and done in TI2, each full run measured under the lock, one after the
+other, with a TEMP of its own (so what a run leaves can be counted):
+
+- **The compile cache is on** for every node process of a full run and of `npm run test:files`: `scripts/test-lock.ts`
+  and `scripts/test-files.mjs` set `NODE_COMPILE_CACHE` (the folder `node-compile-cache` in the system's temporary
+  folder, Node's own default; one already set is kept) for the test runner, and so for every server, fake runtime and
+  CLI the tests start. The nexus CLI turns it on itself (`packages/cli/bin/nexus.js`, `module.enableCompileCache()`
+  before main.ts is imported, so main.ts is loaded dynamically), so every agent's call is faster too: `nexus help`
+  took 308 ms and takes 188 ms (median of 15). FX's finding above ("Node's compile cache does not change it") no
+  longer holds on Node 26, where the cache covers the TypeScript sources. `NODE_DISABLE_COMPILE_CACHE` turns it off.
+- **Every engine of the tests uses QUICK_ENGINE**: the 54 files and helpers that built an engine with the server's
+  waits (300 ms settle after every turn, 1500 ms before a new engine resumes held runs) spread it into their options,
+  before their own, so a test that sets `startupMs` or `turnSettleMs` itself keeps its value. No test was about the
+  defaults themselves.
+- **The helpers' temporary folders are removed** when the test file's process ends (`apps/server/test/temp-dirs.ts`,
+  `tempDir(prefix)`: engine-setup, coordinator-world, deploy-plan-setup, holdWork, plan.test.ts, deploy-plan.test.ts),
+  with the project's worktrees folder beside a root; not at the test's end, since a fake or an engine may still write
+  into it, and a later test of the file may read an earlier one's (a restart on the same files). Protocol tests remove
+  theirs with `after`. Other helpers' folders (nexus-checks-, nexus-closing-, nexus-merger- and others, about 1000 a
+  run) are still left: a later queue's.
+- The full run: 822 s before, 666 s after (-19%); the tests' summed time 8143 s to 6407 s; tests over 5 s 502 to
+  449, over 10 s 335 to 262; the same 1622 tests, all passing.

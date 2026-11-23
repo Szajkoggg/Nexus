@@ -1,12 +1,12 @@
 // The shared setup of the engine tests (engine*.test.ts), against the fake runtimes (test/fake-claude.ts,
 // test/fake-codex.ts): no model, no tokens. Split from engine.test.ts so its parts run side by side (queue TS2).
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers, type StepDef } from "@nexus/protocol";
 import { Engine, type EngineOptions } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { tempDir } from "./temp-dirs.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil } from "./wait.ts";
 
 export const here = dirname(fileURLToPath(import.meta.url));
@@ -18,7 +18,7 @@ export const WINDOW = { claude: 1000, codex: 2000 } as const;
 export const FAST: EngineOptions = { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE };
 
 export function setup(behaviours: string[], options: EngineOptions = FAST) {
-  const root = mkdtempSync(join(tmpdir(), "nexus-engine-"));
+  const root = tempDir("nexus-engine-");
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_LOG = join(root, "fake.log");
   const store = ProjectStore.init(root, { id: "p", name: "P", root });

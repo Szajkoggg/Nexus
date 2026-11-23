@@ -16,7 +16,7 @@ import {
 } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -40,7 +40,7 @@ function setup(steps: Step[], o: { level?: 1 | 2 } = {}) {
     steps: steps.map(({ fake, ...s }, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${fake}`, acceptance: [], ...s })),
   });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
   const timer = setInterval(() => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, 150);
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const sessions = () => loadProjectState(store).sessions.filter((s) => s.role === "worker");

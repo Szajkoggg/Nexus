@@ -12,7 +12,7 @@ import { Conversations } from "../src/conversations.ts";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -26,7 +26,7 @@ function setup(behaviours: string[] = ["done"]) {
   const steps: StepDef[] = behaviours.map((b, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${b}`, acceptance: [] }));
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => tick(), { retryBaseMs: 60_000, usageMarginMs: 100 });
+  const engine: Engine = new Engine(store, () => tick(), { ...QUICK_ENGINE, retryBaseMs: 60_000, usageMarginMs: 100 });
   const orchestrator = new Orchestrator(store, engine, () => tick());
   const conversations = new Conversations(store, orchestrator, () => tick());
   function tick() { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }

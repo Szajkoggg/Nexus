@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, applyDraft, approveQueue, confirmProvisional, loadProjectState, newId, routeAnswers, sendBack } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -22,7 +22,7 @@ function setup() {
   delete process.env.FAKE_REVIEW_ACCEPT;
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   let orchestrator: Orchestrator;
-  const engine: Engine = new Engine(store, () => tick());
+  const engine: Engine = new Engine(store, () => tick(), QUICK_ENGINE);
   orchestrator = new Orchestrator(store, engine, () => tick());
   function tick() { routeAnswers(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);

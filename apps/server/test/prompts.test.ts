@@ -31,6 +31,7 @@ import { Conversations } from "../src/conversations.ts";
 import type { DeployChanges } from "../src/deploy.ts";
 import type { UpdateNotice } from "../src/lifecycle.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { QUICK_ENGINE } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const T0 = Date.parse("2026-01-01T09:00:00.000Z");
@@ -111,7 +112,7 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
   addNote(store, "Q", "A1", "Mind the second page.");
 
   const tr = new Transcript("worker");
-  const engine = new Engine(store, () => {}, { spawn: tr.spawn });
+  const engine = new Engine(store, () => {}, { ...QUICK_ENGINE, spawn: tr.spawn });
   t.after(() => engine.shutdown());
   const change = () => { acceptReviews(store); engine.onChange(loadProjectState(store)); };
   const worker = () => store.readRun("Q")!.session;

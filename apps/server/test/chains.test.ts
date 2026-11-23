@@ -10,7 +10,7 @@ import { ProjectStore, applyDraft, approveQueue, loadProjectState, newId, routeA
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -29,7 +29,7 @@ function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean 
   let orchestrator: Orchestrator | undefined;
   // Stands in for the server's file watcher (and for the server's restart, with `restart`).
   const tick = () => { routeAnswers(store); acceptReviews(store); const s = loadProjectState(store); orchestrator?.onChange(s); engines.at(-1)!.onChange(s); };
-  const newEngine = () => { const e = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100 }); engines.push(e); return e; };
+  const newEngine = () => { const e = new Engine(store, tick, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 }); engines.push(e); return e; };
   let engine = newEngine();
   if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick);
   const timer = setInterval(tick, 150);

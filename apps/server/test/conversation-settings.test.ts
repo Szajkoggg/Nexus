@@ -21,7 +21,7 @@ import type { AgentProcess } from "../src/agent.ts";
 import type { AgentHostOptions, Launch } from "../src/agent-host.ts";
 import { longReply } from "./fake-behaviour.ts";
 import { spawnServer } from "./helpers.ts";
-import { WAIT_MS, LONGER, serverUp, until, until as waitUntil } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, LONGER, serverUp, until, until as waitUntil } from "./wait.ts";
 
 const freePort = () => new Promise<number>((resolve) => {
   const s = createServer();
@@ -55,7 +55,7 @@ function setup(o: { runtime?: Runtime; notes?: string; host?: AgentHostOptions }
     return p;
   };
   const sampler = setInterval(look, 2);
-  const engine = new Engine(store, () => {});
+  const engine = new Engine(store, () => {}, QUICK_ENGINE);
   const orchestrator = new Orchestrator(store, engine, () => {});
   let conversations = new Conversations(store, orchestrator, () => {}, { spawn, ...o.host });
   const args = () => (existsSync(process.env.FAKE_ARGS!) ? readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>) : []);

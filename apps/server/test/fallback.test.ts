@@ -14,7 +14,7 @@ import { ProjectStore, approveQueue, ensureUserSession, loadProjectState, newId,
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -43,7 +43,7 @@ function setup(steps: Step[], o: { orchestrator?: boolean; level?: 1 | 2 | 3 } =
     }
   };
   const tick = () => { routeAnswers(store); acceptReviews(store); acceptOwn(); const s = loadProjectState(store); orchestrator?.onChange(s); engine.onChange(s); };
-  const engine: Engine = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100 });
+  const engine: Engine = new Engine(store, tick, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
   if (o.orchestrator) orchestrator = new Orchestrator(store, engine, tick);
   const timer = setInterval(tick, 150);
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;

@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, now, writeRegistry } from "@nexus/protocol";
 import { deployPlanFile, judgePlan, readPlanFile } from "../src/deploy-plan.ts";
 import { serverEnv, spawnServer } from "./helpers.ts";
+import { tempDir } from "./temp-dirs.ts";
 import { until, LONGER, sleep } from "./wait.ts";
 import { handedOver, here, setup, successor } from "./deploy-plan-setup.ts";
 
@@ -231,7 +232,7 @@ test("a target already in deploys now", async () => {
 // ---------------------------------------------------------------- through the CLI and a real server
 
 test("nexus server update --after plans through the server, status shows the plan, it stays across a restart, cancel-plan ends it", async () => {
-  const base = mkdtempSync(join(tmpdir(), "nexus-plan-cli-"));
+  const base = tempDir("nexus-plan-cli-");
   const home = join(base, "home");
   process.env.NEXUS_HOME = home;
   const root = join(base, "p");

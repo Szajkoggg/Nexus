@@ -15,7 +15,7 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { crashFile, readCrash, recordCrash } from "../src/crash.ts";
 import { MAIN, serverEnv, spawnServer } from "./helpers.ts";
-import { LONGER, serverUp, until } from "./wait.ts";
+import { QUICK_ENGINE, LONGER, serverUp, until } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -96,7 +96,7 @@ test("every project's orchestrator that ran before the crash is told once, acros
   store.writeProject({ ...p, orchestrator: { runtime: "claude", notify: true, session: session.id } });
   recordCrash(new Error("boom in a handler"));
   assert.ok(existsSync(crashFile()));
-  const engine = new Engine(store, () => {});
+  const engine = new Engine(store, () => {}, QUICK_ENGINE);
   const make = () => new Orchestrator(store, engine, () => {}, { crash: readCrash });
   let orchestrator = make();
   const told = () => (existsSync(fake) ? readFileSync(fake, "utf8").trim().split("\n").filter(Boolean) : [])

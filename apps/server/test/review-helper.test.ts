@@ -13,7 +13,7 @@ import { ProjectStore, applyDraft, approveQueue, helperAbout, loadProjectState, 
 import { audited } from "../src/review-helper.ts";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { LONGER, WAIT_MS, until as waitUntil } from "./wait.ts";
+import { QUICK_ENGINE, LONGER, WAIT_MS, until as waitUntil } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 // The orchestrator's fake accepts a step whose review notice it gets (and answers a worker's question).
@@ -26,7 +26,7 @@ function setup(o: { limit?: number; helper?: Record<string, unknown> } = {}) {
   process.env.FAKE_ARGS = join(root, "fake-args.log");
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   updateSettings(store, { defaults: { review_send_back_limit: o.limit ?? 2 }, review_helper: { model: "claude-haiku-5-5", effort: "low", ...o.helper } });
-  const engine: Engine = new Engine(store, () => tick());
+  const engine: Engine = new Engine(store, () => tick(), QUICK_ENGINE);
   const orchestrator: Orchestrator = new Orchestrator(store, engine, () => tick(), {}, { helpers: {} });
   function tick() { routeAnswers(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);

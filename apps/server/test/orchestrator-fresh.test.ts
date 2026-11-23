@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, answerAsUser, loadProjectState, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { WAIT_MS, until as waitUntil, untilAsync, sleep } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, untilAsync, sleep } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -23,7 +23,7 @@ function setup() {
   process.env.FAKE_LOG = join(root, "fake.log");
   process.env.FAKE_CONTEXT_FILL_FILE = join(root, "fill");
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
-  const engine: Engine = new Engine(store, () => tick());
+  const engine: Engine = new Engine(store, () => tick(), QUICK_ENGINE);
   const orchestrator = new Orchestrator(store, engine, () => tick());
   // Stands in for the server's file watcher.
   function tick() { routeAnswers(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }

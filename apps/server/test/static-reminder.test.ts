@@ -11,7 +11,7 @@ import { ProjectStore, loadProjectState, newId, now, routeAnswers, type Event } 
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { TestClock } from "./test-clock.ts";
-import { until as waitUntil, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, until as waitUntil, LONGER } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const DAY = 24 * 3600_000;
@@ -28,7 +28,7 @@ function setup(files: Record<string, string>) {
   const clock = new TestClock();
   let orchestrator: Orchestrator | undefined;
   const tick = () => { routeAnswers(store); const s = loadProjectState(store); orchestrator?.onChange(s); engine.onChange(s); };
-  const engine = new Engine(store, tick, { retryBaseMs: 30, startupMs: 20, clock });
+  const engine = new Engine(store, tick, { ...QUICK_ENGINE, retryBaseMs: 30, startupMs: 20, clock });
   orchestrator = new Orchestrator(store, engine, tick);
   const timer = setInterval(tick, 100);
   const reminders = () => orchestrator!.view().chat.filter((c) => c.from === "nexus" && REMINDER.test(c.text)).length;

@@ -16,7 +16,7 @@ import { Engine } from "../src/engine.ts";
 import { cleanUp } from "../src/mergeback.ts";
 import { spawnServer } from "./helpers.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { serverUp, WAIT_MS, POLL_MS, LONGER, sleep } from "./wait.ts";
+import { QUICK_ENGINE, serverUp, WAIT_MS, POLL_MS, LONGER, sleep } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -47,7 +47,7 @@ function setup() {
 test("a protected worker's review files are copied into the queue's folder; the worktree stays clean and is cleaned up", async () => {
   const { temp, root, store } = setup();
   assert.equal(store.readProject().defaults.protect_nexus, true);
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); });
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, QUICK_ENGINE);
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   try {
     engine.start("Q", { runtime: "claude" });

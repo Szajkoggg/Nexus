@@ -4,8 +4,7 @@
 // stand-in successor (fake-successor.ts). Split from deploy-plan.test.ts so the files run side by side (queue PD2).
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, newId, now, routeAnswers, setStepLevel, type StepDef } from "@nexus/protocol";
@@ -14,7 +13,8 @@ import { Lifecycle } from "../src/lifecycle.ts";
 import { DeployPlanner, readPlanFile } from "../src/deploy-plan.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { until } from "./wait.ts";
+import { tempDir } from "./temp-dirs.ts";
+import { QUICK_ENGINE, until } from "./wait.ts";
 
 export const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -48,7 +48,7 @@ export interface Options {
  * around it. Everything the server would do outside (push notifications, the process's exit) is recorded.
  */
 export function setup(behaviours: string[], o: Options = {}) {
-  const base = mkdtempSync(join(tmpdir(), "nexus-plan-"));
+  const base = tempDir("nexus-plan-");
   process.env.NEXUS_HOME = join(base, "home");
   process.env.FAKE_LOG = join(base, "fake.log");
   process.env.FAKE_SUCCESSOR = o.successor ?? "ready";
@@ -89,7 +89,7 @@ export function setup(behaviours: string[], o: Options = {}) {
     orchestrator?.onChange(loadProjectState(store));
     engine.onChange(loadProjectState(store));
   };
-  let engine: Engine = new Engine(store, tick, { boundary: (q, step, state) => planner.atBoundary("p", q, step, state) });
+  let engine: Engine = new Engine(store, tick, { ...QUICK_ENGINE, boundary: (q, step, state) => planner.atBoundary("p", q, step, state) });
   const parts = () => [
     { id: "p", idle: () => engine.idle(), drain: (n: boolean) => { drains.push(queue().steps.map((s) => s.status)); return engine.drainForUpdate(n); }, cancel: () => engine.cancelDrain(), shutdown: () => engine.shutdown(), hurry: () => engine.hurryDrain() },
     // Another project whose step still runs: the drain waits for it.
@@ -103,7 +103,7 @@ export function setup(behaviours: string[], o: Options = {}) {
     release: async () => { engine.shutdown(); await until("the agent to exit", () => !engine.alive()); },
     // As main.ts: new engines (and orchestrators) recover the held runs, and the planner reads its file again.
     reacquire: async () => {
-      engine = new Engine(store, tick, { boundary: (q, step, state) => planner.atBoundary("p", q, step, state) });
+      engine = new Engine(store, tick, { ...QUICK_ENGINE, boundary: (q, step, state) => planner.atBoundary("p", q, step, state) });
       if (orchestrator) { orchestrator.shutdown(); orchestrator = newOrchestrator(); }
       planner.recover();
     },
@@ -142,7 +142,7 @@ export function successor(t: ReturnType<typeof setup>) {
   const lifecycle = new Lifecycle(() => [{ id: "p", idle: () => engine.idle(), drain: (n) => engine.drainForUpdate(n), cancel: () => engine.cancelDrain(), shutdown: () => engine.shutdown() }], () => {}, { npm: async () => {}, exit: () => {} });
   const planner = new DeployPlanner({ lifecycle, state: () => loadProjectState(t.store), projects: () => ["p"], root: t.checkout, release: (_p, q, reason) => engine.releaseHold(q, reason) });
   const tick = () => { routeAnswers(t.store); acceptReviews(t.store); t.review(); planner.check("p", loadProjectState(t.store)); engine.onChange(loadProjectState(t.store)); };
-  engine = new Engine(t.store, tick, { boundary: (q, step, state) => planner.atBoundary("p", q, step, state) });
+  engine = new Engine(t.store, tick, { ...QUICK_ENGINE, boundary: (q, step, state) => planner.atBoundary("p", q, step, state) });
   planner.recover();
   const timer = setInterval(tick, 150);
   return { engine, lifecycle, planner, tick, stop: () => { clearInterval(timer); engine.shutdown(); planner.shutdown(); } };

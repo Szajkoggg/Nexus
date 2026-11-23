@@ -12,7 +12,7 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { leftBehind, recordStepEnd, recordStepStart, recordTurn, UNCOMMITTED_NOTE } from "../src/gitinfo.ts";
 import { decideStoppedWork, readStoppedWork } from "../src/stopwork.ts";
-import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"];
@@ -34,7 +34,7 @@ function setup(goals: string[]) {
     steps: goals.map((g, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${g}`, acceptance: [] })) });
   approveQueue(store, "Q");
   let orchestrator: Orchestrator;
-  const engine: Engine = new Engine(store, () => tick());
+  const engine: Engine = new Engine(store, () => tick(), QUICK_ENGINE);
   orchestrator = new Orchestrator(store, engine, () => tick());
   function tick() { routeAnswers(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);

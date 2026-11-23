@@ -4,7 +4,7 @@
 // order they ended, the range leaving a panel without points rather than dropping it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -23,8 +23,10 @@ function config(scale: number, tests: boolean, base: number): ServerSpeedConfig 
 const run = (at: string, base: number, configs = [config(1, false, base), config(1, true, base + 1), config(4, false, base + 2)]): ServerSpeedRun =>
   ({ v: 1, at, commit: "abc1234", machine: { cores: 16, node: "v24.0.0" }, configs });
 
-test("runs appended are read back in order; a damaged line and an unfinished one are skipped", () => {
-  const file = join(mkdtempSync(join(tmpdir(), "nexus-speed-")), "benchmarks", "server-speed.jsonl");
+test("runs appended are read back in order; a damaged line and an unfinished one are skipped", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "nexus-speed-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "benchmarks", "server-speed.jsonl");
   appendServerSpeed(run("2026-11-20T10:00:00.000Z", 10), file);
   appendFileSync(file, "{\"v\":1,\"at\":\"2026-11-20T11:00:00.000Z\"}\nnot json\n");
   appendServerSpeed(run("2026-11-21T10:00:00.000Z", 20), file);
@@ -36,8 +38,10 @@ test("runs appended are read back in order; a damaged line and an unfinished one
   assert.ok(readFileSync(file, "utf8").split("\n")[0]!.startsWith("{\"v\":1,"));
 });
 
-test("a run that does not match the schema is refused before it is written", () => {
-  const file = join(mkdtempSync(join(tmpdir(), "nexus-speed-")), "server-speed.jsonl");
+test("a run that does not match the schema is refused before it is written", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "nexus-speed-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "server-speed.jsonl");
   assert.throws(() => appendServerSpeed({ ...run("2026-11-20T10:00:00.000Z", 1), configs: [{ scale: 0 } as ServerSpeedConfig] }, file));
   assert.deepEqual(readServerSpeed(file).entries, []);
 });

@@ -21,7 +21,7 @@ import { performance } from "node:perf_hooks";
 import { ProjectStore, approveQueue, loadProjectState, resetClock, routeAnswers, writeUsage, type StepDef } from "@nexus/protocol";
 import { Engine, type Clock } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -84,7 +84,7 @@ for (const runtime of ["claude", "codex"] as const) {
       clearTimeout: (h) => clearTimeout(h as NodeJS.Timeout),
     };
     const engineOn = (): Engine => {
-      const e: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); e.onChange(loadProjectState(store)); }, { clock });
+      const e: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); e.onChange(loadProjectState(store)); }, { ...QUICK_ENGINE, clock });
       return e;
     };
 

@@ -15,7 +15,7 @@ import { Engine } from "../src/engine.ts";
 import { branchState, checkoutStatus, headOnce, recordBase, recordStepEnd, recordStepStart, recordTurn, stepCommits } from "../src/gitinfo.ts";
 import { perf } from "../src/perf.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { until, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, until, LONGER } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"];
@@ -48,7 +48,7 @@ test("the engine records HEAD when a step opens and when its outcome's turn ends
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], approvals: [], history: [],
     steps: [1, 2].map((i) => ({ id: `Q${i}`, title: `Step ${i}`, goal: "FAKE: commit", acceptance: [] })) });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); });
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, QUICK_ENGINE);
   const queue = () => loadProjectState(store).queues[0]!;
   try {
     const start = git(root, ["rev-parse", "HEAD"]);
@@ -91,7 +91,7 @@ test("a step's round of commits begins before its worker hears of the step, and 
   }
   let stand: Stand | undefined;
   const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); },
-    { spawn: () => (stand = new Stand()) });
+    { ...QUICK_ENGINE, spawn: () => (stand = new Stand()) });
   const event = (body: Record<string, unknown>) => store.appendEvent({ v: 1, id: newId(), at: new Date().toISOString(), session: store.readRun("Q")!.session, queue: "Q", ...body } as Event);
   try {
     const start = git(root, ["rev-parse", "HEAD"]);

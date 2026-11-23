@@ -3,8 +3,6 @@
 // around the user's dependencies, proposes changes to them, and is told the user's answers.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -15,13 +13,14 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { TestClock } from "./test-clock.ts";
-import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { tempDir } from "./temp-dirs.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
 /** Queues by id, each a list of fake behaviours (fake-behaviour.ts); all approved. `orchestrator`: one is set up too. */
 function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean } = {}) {
-  const root = mkdtempSync(join(tmpdir(), "nexus-plan-"));
+  const root = tempDir("nexus-plan-");
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_LOG = join(root, "fake.log");
   const store = ProjectStore.init(root, { id: "p", name: "P", root, orchestrator: { notify: !!opts.orchestrator } });
@@ -35,7 +34,7 @@ function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean 
   const clock = new TestClock();
   let orchestrator: Orchestrator | undefined;
   const tick = () => { routeAnswers(store); acceptReviews(store); const s = loadProjectState(store); orchestrator?.onChange(s); engines.at(-1)!.onChange(s); };
-  const newEngine = () => { const e = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100, undoMs: UNDO_MS, clock }); engines.push(e); return e; };
+  const newEngine = () => { const e = new Engine(store, tick, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100, undoMs: UNDO_MS, clock }); engines.push(e); return e; };
   let engine = newEngine();
   if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick);
   const timer = setInterval(tick, 150);

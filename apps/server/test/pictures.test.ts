@@ -13,7 +13,7 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import { input, uploadedPictures } from "../src/codex.ts";
-import { WAIT_MS, until as waitUntil } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -31,7 +31,7 @@ function setup() {
   mkdirSync(uploads, { recursive: true });
   const picture = join(uploads, "20261114-120000-abcdef0123.png").replaceAll("\\", "/");
   writeFileSync(picture, PNG);
-  const engine = new Engine(store, () => {});
+  const engine = new Engine(store, () => {}, QUICK_ENGINE);
   const orchestrator = new Orchestrator(store, engine, () => {});
   const conversations = new Conversations(store, orchestrator, () => {});
   const lines = (file: string) => (existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>) : []);

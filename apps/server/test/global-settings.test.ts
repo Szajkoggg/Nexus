@@ -12,7 +12,7 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -33,7 +33,7 @@ function setup(steps: Step[]) {
     steps: steps.map(({ fake, ...s }, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${fake}`, acceptance: [], ...s })),
   });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const args = () => (existsSync(process.env.FAKE_ARGS!) ? readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>) : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; run: ${JSON.stringify(queue().run)}; steps: ${queue().steps.map((s) => `${s.id}=${s.status}`).join(" ")}`);
@@ -132,7 +132,7 @@ test("a thinking partner follows the conversation settings from its next message
   process.env.FAKE_ARGS = join(root, "args.log");
   delete process.env.FAKE_LOG;
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
-  const engine = new Engine(store, () => {});
+  const engine = new Engine(store, () => {}, QUICK_ENGINE);
   const orchestrator = new Orchestrator(store, engine, () => {});
   const conversations = new Conversations(store, orchestrator, () => {});
   const args = () => (existsSync(process.env.FAKE_ARGS!) ? readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>) : []);
@@ -167,7 +167,7 @@ test("the orchestrator follows its model from the project's effective settings f
   process.env.FAKE_ARGS = join(root, "args.log");
   delete process.env.FAKE_LOG;
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
-  const engine = new Engine(store, () => {});
+  const engine = new Engine(store, () => {}, QUICK_ENGINE);
   const orchestrator = new Orchestrator(store, engine, () => {});
   const args = () => (existsSync(process.env.FAKE_ARGS!) ? readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>) : []);
   const until = (what: string, pred: () => boolean) => waitUntil(what, pred);

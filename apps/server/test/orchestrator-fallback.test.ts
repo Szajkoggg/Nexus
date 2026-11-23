@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, applyDraft, approveQueue, loadProjectState, updateSettings, writeUsage } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { until, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, until, LONGER } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -29,7 +29,7 @@ function setup(primary: Runtime, fallback?: Runtime, o: { lateTurnMs?: number } 
   updateSettings(store, { orchestrator: { runtime: primary, model: "primary-model", effort: "high",
     fallback: fallback ? { runtime: fallback, model: "backup-model", effort: "low" } : null } });
   let clock = Date.now();
-  const engine = new Engine(store, () => {});
+  const engine = new Engine(store, () => {}, QUICK_ENGINE);
   let orchestrator = new Orchestrator(store, engine, tick, {}, { nowMs: () => clock, lateTurnMs: o.lateTurnMs });
   function tick() { orchestrator.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 100);

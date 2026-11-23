@@ -14,7 +14,7 @@ import { ProjectStore, approveQueue, ensureUserSession, loadProjectState, newId,
 import { Engine, SURVEY_CONDITION } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { until as waitUntil, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, until as waitUntil, LONGER } from "./wait.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
@@ -60,7 +60,7 @@ function setup(opts: { orchestrator?: boolean; git?: boolean } = {}) {
   let orchestrator: Orchestrator | undefined;
   const reviews = { accept: true };
   const tick = () => { routeAnswers(store); if (reviews.accept) acceptReviews(store); const s = loadProjectState(store); orchestrator?.onChange(s); engine.onChange(s); };
-  const engine = new Engine(store, tick, { retryBaseMs: 30, startupMs: 20 });
+  const engine = new Engine(store, tick, { ...QUICK_ENGINE, retryBaseMs: 30, startupMs: 20 });
   if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick);
   const timer = setInterval(tick, 150);
   const state = () => loadProjectState(store);

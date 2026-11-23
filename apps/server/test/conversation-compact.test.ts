@@ -11,7 +11,7 @@ import { ActionError, ProjectStore } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { COMPACTED, Conversations } from "../src/conversations.ts";
-import { WAIT_MS, until as waitUntil } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -22,7 +22,7 @@ function setup(compacts?: (runtime: "claude" | "codex") => boolean) {
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_LOG = join(root, "fake.log");
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
-  const engine = new Engine(store, () => {});
+  const engine = new Engine(store, () => {}, QUICK_ENGINE);
   const orchestrator = new Orchestrator(store, engine, () => {});
   const conversations = new Conversations(store, orchestrator, () => {}, compacts ? { compacts } : {});
   /** What reached the fake partner (FAKE_LOG). */

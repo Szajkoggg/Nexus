@@ -18,7 +18,7 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { FAST, activityOf, setup } from "./engine-setup.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { LONGER, WAIT_MS, sleep, until as waitUntil } from "./wait.ts";
+import { QUICK_ENGINE, LONGER, WAIT_MS, sleep, until as waitUntil } from "./wait.ts";
 
 /** Long past every wait here: the window ends when the fake's held stdout does, not by the adapter's limit. */
 const DRAIN_MS = 60_000;
@@ -112,7 +112,7 @@ test("codex orchestrator: a message in the drain window starts a fresh process t
   const p = store.readProject();
   store.writeProject({ ...p, orchestrator: { notify: true, session: null, ...p.orchestrator, runtime: "codex" } });
   const made: CodexSession[] = [];
-  const engine: Engine = new Engine(store, () => tick());
+  const engine: Engine = new Engine(store, () => tick(), QUICK_ENGINE);
   const orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn: codexMaker(made) });
   // Stands in for the server's file watcher.
   function tick() { routeAnswers(store); acceptReviews(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }

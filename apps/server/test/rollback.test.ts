@@ -14,7 +14,7 @@ import { Engine } from "../src/engine.ts";
 import { isAlive } from "../src/handover.ts";
 import { Lifecycle } from "../src/lifecycle.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { until, LONGER, holdWork } from "./wait.ts";
+import { QUICK_ENGINE, until, LONGER, holdWork } from "./wait.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -60,7 +60,7 @@ async function setup(opts: { live: boolean; successor: "crash" | "never"; timeou
   approveQueue(store, "Q");
 
   const onChange = () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); };
-  let engine = new Engine(store, onChange);
+  let engine = new Engine(store, onChange, QUICK_ENGINE);
   const npm: string[][] = [];
   const notified: string[] = [];
   let exited = false;
@@ -72,7 +72,7 @@ async function setup(opts: { live: boolean; successor: "crash" | "never"; timeou
     timeoutMs: opts.timeoutMs ?? 15_000,
     npm: async (_root, ...args) => { npm.push(args); },
     release: async () => { engine.shutdown(); await until("the agent to exit", () => !engine.alive()); },
-    reacquire: async () => { engine = new Engine(store, onChange); }, // as main.ts: new engines recover the held runs
+    reacquire: async () => { engine = new Engine(store, onChange, QUICK_ENGINE); }, // as main.ts: new engines recover the held runs
     notify: (text) => notified.push(text),
     exit: () => { exited = true; },
   });
