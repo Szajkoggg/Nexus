@@ -14,6 +14,7 @@ Checks for every step:
 - npm run lint
 - npm test
 - npm run typecheck
+Nexus does not run these for this step: run them yourself at its end and report each with `nexus check` (the name as listed here). While you work, run only the tests of what you change.
 
 Review to prepare: Before/after shots of the page
 Prepare it by Nexus's standard: read `nexus help review` first (view keys, roles, the same conditions on both sides of a pair).
@@ -38,9 +39,12 @@ Begin with `nexus step start A1`. End with `nexus step done A1 --summary "…"`,
 [Nexus] The orchestrator asks you to stop now. Leave the work consistent and end your turn.
 == the user stops the running turn: with a text, then without one
 -- to worker 1 (now)
-[Nexus] The user asks you to stop now: Wrong branch Leave the work in a consistent state, record where you are with `nexus step progress`, and end your turn. Do not start anything new.
+[Nexus] You are asked to stop now: Wrong branch Leave the work in a consistent state, record where you are with `nexus step progress`, and end your turn. Do not start anything new.
 -- to worker 1 (now)
-[Nexus] The user asks you to stop now. Leave the work in a consistent state, record where you are with `nexus step progress`, and end your turn. Do not start anything new.
+[Nexus] You are asked to stop now. Leave the work in a consistent state, record where you are with `nexus step progress`, and end your turn. Do not start anything new.
+== the orchestrator stops the run (nexus run Q stop --reason): the text it gives the worker (ACX, O9)
+-- to worker 1 (now)
+[Nexus] You are asked to stop now: the orchestrator stopped the run (The plan changed) Leave the work in a consistent state, record where you are with `nexus step progress`, and end your turn. Do not start anything new.
 == resumed with a reason: the step continues
 -- to worker 1
 [Nexus] Answer from the user to your question "Which page first?" (qid q1):
@@ -64,6 +68,7 @@ Checks for every step:
 - npm run lint
 - npm test
 - npm run typecheck
+Nexus does not run these for this step: run them yourself at its end and report each with `nexus check` (the name as listed here). While you work, run only the tests of what you change.
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
@@ -101,6 +106,7 @@ Checks for every step:
 - npm run lint
 - npm test
 - npm run typecheck
+Nexus does not run these for this step: run them yourself at its end and report each with `nexus check` (the name as listed here). While you work, run only the tests of what you change.
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
@@ -143,6 +149,7 @@ Checks for every step:
 - npm run lint
 - npm test
 - npm run typecheck
+Nexus does not run these for this step: run them yourself at its end and report each with `nexus check` (the name as listed here). While you work, run only the tests of what you change.
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
@@ -151,7 +158,7 @@ Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 Begin with `nexus step start A4`. End with `nexus step done A4 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
 
 This is the queue's last step. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to <report file> (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with `nexus report Q --file <report file> --summary "…"`, which copies it into the queue's folder and removes it from there.
-== sent back: by the user (a step with acceptance), by the orchestrator (one without)
+== sent back: by the user (a step with acceptance), by the orchestrator (one without), by the review helper (ACX, W1)
 -- to worker 3
 [Nexus] The user sent step A1 of queue Q back to you (round 2). What the user wants:
 The second page is still wrong.
@@ -167,6 +174,14 @@ Work on it in this step: `nexus step start A1`, then the checks, review material
 The test is missing.
 
 Work on it in this step: `nexus step start A2`, then the checks, review material for this round (`nexus review add A2 … --round 3`, pictures with the same keys as before: `nexus help review`), and `nexus step done A2 --summary "…"` (or `nexus step failed` / `nexus stop`), then `nexus context`, and end your turn.
+-- to worker 3
+[Nexus] The review helper reviewed step A3 of queue Q and sent it back to you (round 2). What to fix:
+The third acceptance is not met.
+
+Acceptance criteria of the step:
+- Third acceptance
+
+Work on it in this step: `nexus step start A3`, then the checks, review material for this round (`nexus review add A3 … --round 2`, pictures with the same keys as before: `nexus help review`), and `nexus step done A3 --summary "…"` (or `nexus step failed` / `nexus stop`), then `nexus context`, and end your turn.
 == the last step failed and is resumed: it continues with what it was left at
 -- to worker 3
 [Nexus] Queue Q "Prompts under test" (revision 1, approved), step A4 (4 of 4): Last step on Codex.
@@ -182,6 +197,7 @@ Checks for every step:
 - npm run lint
 - npm test
 - npm run typecheck
+Nexus does not run these for this step: run them yourself at its end and report each with `nexus check` (the name as listed here). While you work, run only the tests of what you change.
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
@@ -225,6 +241,7 @@ Run the checks before you change anything, and again after. Report the run after
 
 Checks for every step:
 - npm test
+Nexus does not run these for this step: run them yourself at its end and report each with `nexus check` (the name as listed here). While you work, run only the tests of what you change.
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - none beyond your judgement
@@ -252,6 +269,7 @@ Run the checks before you change anything, and again after. Report the run after
 
 Checks for every step:
 - npm test
+Nexus does not run these for this step: run them yourself at its end and report each with `nexus check` (the name as listed here). While you work, run only the tests of what you change.
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - none beyond your judgement
@@ -374,6 +392,48 @@ Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
 
 Begin with `nexus step start A3`. End with `nexus step done A3 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+== a step with no checks of its own, whose checks Nexus runs (ACX, W5), and one whose checks the worker runs: the opening says so either way
+[Nexus] Queue Q "Prompts under test" (revision 1, approved), step A3 (3 of 4): Third step.
+
+Acceptance:
+- Third acceptance
+
+Checks for every step: none are listed. Nexus runs the checks of this step itself after your `nexus step done` (it has none to run, but it holds them), so `nexus check` is refused here: report none.
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- A file outside the repository would change.
+
+Begin with `nexus step start A3`. End with `nexus step done A3 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+[Nexus] Queue Q "Prompts under test" (revision 1, approved), step A3 (3 of 4): Third step.
+
+Acceptance:
+- Third acceptance
+
+Checks for every step: none are listed. Nexus runs none for this step.
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- A file outside the repository would change.
+
+Begin with `nexus step start A3`. End with `nexus step done A3 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+[Nexus] Queue Q "Prompts under test" (revision 1, approved), step A3 (3 of 4): Third step.
+
+Acceptance:
+- Third acceptance
+
+Checks for every step:
+- npm run typecheck
+- npm test
+Nexus does not run these for this step: run them yourself at its end and report each with `nexus check` (the name as listed here). While you work, run only the tests of what you change.
+
+Stop conditions (meeting one ends the queue: report it with `nexus stop`):
+- A file outside the repository would change.
+
+Begin with `nexus step start A3`. End with `nexus step done A3 --summary "…"`, `nexus step failed` or `nexus stop`, then write `nexus context` and end your turn. Do not start another step.
+== a blocking answer, to wait for further word (nexus answer --wait): delivered at once, and after the Resume that releases it (ACX)
+[Nexus] Answer from the orchestrator to your question "Which page first?" (qid q1):
+Hold on until the user has looked. Wait for further word before going on.
+[Nexus] Answer from the orchestrator to your question "Which page first?" (qid q1):
+Hold on until the user has looked.
 == a step whose checks Nexus runs: a check-fix round, and a send-back (inbox entries)
 [Nexus] The checks Nexus ran for step C1 of queue C: check-fix round 1 of 3. What failed:
 Check "npm test" failed twice (exit code 1).
@@ -429,13 +489,14 @@ Report through the `nexus` command (on PATH; your session is set in the environm
 - nexus step progress <step> "<short status>" [--pct N]     at a phase boundary only (a part of the step done, the next begun), so the user sees where you are; not after every command or file
 - nexus review add <step> <picture> --key <view@width> --role <role> --label "..."   a review picture, one per command
 - nexus review add <step> <file|url>... --label "..."       other review material (documents, data, links)
-- nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, only where you run them: where the step's opening says Nexus runs them, it runs and records them itself after your `nexus step done`, and this is refused. Otherwise report each with how long it ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (`nexus check <step> "npm test" --ok …`, not "test"): a check reported under another name counts as not reported
+- nexus check <step> <name> --ok|--fail [--summary "..."] [--duration <seconds>]   results of the step's checks, only where you run them: the step's opening always says whether Nexus runs them (also where it lists none); where it does, Nexus runs and records them itself after your `nexus step done`, and this is refused. Where it says Nexus does not, report each with how long it ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (`nexus check <step> "npm test" --ok …`, not "test"): a check reported under another name counts as not reported
 - nexus check <step> <name> --unrelated --evidence "..."   in a check-fix round, a failed check that is not your work's failure (it fails on the base too, a test you did not touch): Nexus runs it on the queue's base commit and decides by it; end your turn without `nexus step done`
 - nexus metric record <name> <value>                        a value of one of the project's metrics, when the step asks you to measure one (`nexus metric list` shows them); it is kept with your step and HEAD commit; a negative value goes after --: nexus metric record <name> -- -5
-- nexus step done <step> --summary "..." [--commit <sha>] --activities a,b   when the acceptance criteria are met; --activities names what you actually did, whatever was planned (`nexus tags` lists the names)
+- nexus step done <step> --summary "..." [--commit <sha>] [--activities <names from nexus tags>]   when the acceptance criteria are met; --activities names what you actually did, whatever was planned, by the names `nexus tags` lists (any other name refuses the command)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "<the stop condition met>" --reason "<what happened, short>"   when a stop condition is met (first commit what is consistent, see below); give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened and what you left out (the user sees the reason first, the condition behind "more")
 - nexus ask "<question>" --step <step> [--option "..."]... [--recommend "<option>"] [--can-continue]   record each question needed for this step, then end the asking turn. With --can-continue, independent work may finish within this turn. Nexus starts no further work turn until every open or escalated question of the step is answered or properly withdrawn, even across sessions. Partial answers, messages, recommendations and drafts do not release this wait. The last answer's --wait, pause, stop and review still hold after all answers arrive. Give options with --option and a recommendation with --recommend; a recommendation is not a decision.
+- nexus withdraw <qid> --reason "..."                      withdraw a question of yours that is no longer needed (the qid of one of your open questions, as nexus ask printed it; it then no longer holds the step)
 - nexus context "<what a successor needs to know>" --topics a,b --files x,y   at the end of each step (its shape: nexus help context)
 Review material follows Nexus's standard: read `nexus help review` before you prepare it. In short: every picture has a view key naming what it shows, in which state, at which window width (waiting-tab@492), and a role: before (the old state), mockup (the design), after (the new state), variant-a / variant-b (alternatives), result (a new view with nothing to compare). Only pictures with the same key pair, so a before and its after are taken the same way: fixed-viewport captures with the same window size, data and state. Add befores and mockups before their afters. Nexus refuses a wrong pair and says why; the label is only a caption. Write the files outside the working tree (the system's temporary folder, for example): nexus review add copies them into the queue's folder, and the item names the copy. Look at a changed view yourself at one width (the one the change matters most at) to see that it is right; the other pictures you only register for the review (nexus review add), without opening them again.
 Nexus's standards for the rest (the full texts: `nexus help summaries`, `nexus help context`, `nexus help questions`, `nexus help refusals`, `nexus help commits`, `nexus help tests`):
@@ -459,13 +520,14 @@ Report through the `nexus` command (on PATH; your session is set in the environm
 - nexus step progress <step> "<short status>" [--pct N]     at a phase boundary only (a part of the step done, the next begun), so the user sees where you are; not after every command or file
 - nexus review add <step> <picture> --key <view@width> --role <role> --label "..."   a review picture, one per command
 - nexus review add <step> <file|url>... --label "..."       other review material (documents, data, links)
-- nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, only where you run them: where the step's opening says Nexus runs them, it runs and records them itself after your `nexus step done`, and this is refused. Otherwise report each with how long it ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (`nexus check <step> "npm test" --ok …`, not "test"): a check reported under another name counts as not reported
+- nexus check <step> <name> --ok|--fail [--summary "..."] [--duration <seconds>]   results of the step's checks, only where you run them: the step's opening always says whether Nexus runs them (also where it lists none); where it does, Nexus runs and records them itself after your `nexus step done`, and this is refused. Where it says Nexus does not, report each with how long it ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (`nexus check <step> "npm test" --ok …`, not "test"): a check reported under another name counts as not reported
 - nexus check <step> <name> --unrelated --evidence "..."   in a check-fix round, a failed check that is not your work's failure (it fails on the base too, a test you did not touch): Nexus runs it on the queue's base commit and decides by it; end your turn without `nexus step done`
 - nexus metric record <name> <value>                        a value of one of the project's metrics, when the step asks you to measure one (`nexus metric list` shows them); it is kept with your step and HEAD commit; a negative value goes after --: nexus metric record <name> -- -5
-- nexus step done <step> --summary "..." [--commit <sha>] --activities a,b   when the acceptance criteria are met; --activities names what you actually did, whatever was planned (`nexus tags` lists the names)
+- nexus step done <step> --summary "..." [--commit <sha>] [--activities <names from nexus tags>]   when the acceptance criteria are met; --activities names what you actually did, whatever was planned, by the names `nexus tags` lists (any other name refuses the command)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "<the stop condition met>" --reason "<what happened, short>"   when a stop condition is met (first commit what is consistent, see below); give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened and what you left out (the user sees the reason first, the condition behind "more")
 - nexus ask "<question>" --step <step> [--option "..."]... [--recommend "<option>"] [--can-continue]   record each question needed for this step, then end the asking turn. With --can-continue, independent work may finish within this turn. Nexus starts no further work turn until every open or escalated question of the step is answered or properly withdrawn, even across sessions. Partial answers, messages, recommendations and drafts do not release this wait. The last answer's --wait, pause, stop and review still hold after all answers arrive. Give options with --option and a recommendation with --recommend; a recommendation is not a decision.
+- nexus withdraw <qid> --reason "..."                      withdraw a question of yours that is no longer needed (the qid of one of your open questions, as nexus ask printed it; it then no longer holds the step)
 - nexus context "<what a successor needs to know>" --topics a,b --files x,y   at the end of each step (its shape: nexus help context)
 Review material follows Nexus's standard: read `nexus help review` before you prepare it. In short: every picture has a view key naming what it shows, in which state, at which window width (waiting-tab@492), and a role: before (the old state), mockup (the design), after (the new state), variant-a / variant-b (alternatives), result (a new view with nothing to compare). Only pictures with the same key pair, so a before and its after are taken the same way: fixed-viewport captures with the same window size, data and state. Add befores and mockups before their afters. Nexus refuses a wrong pair and says why; the label is only a caption. Write the files outside the working tree (the system's temporary folder, for example): nexus review add copies them into the queue's folder, and the item names the copy. Look at a changed view yourself at one width (the one the change matters most at) to see that it is right; the other pictures you only register for the review (nexus review add), without opening them again.
 Nexus's standards for the rest (the full texts: `nexus help summaries`, `nexus help context`, `nexus help questions`, `nexus help refusals`, `nexus help commits`, `nexus help tests`):

@@ -19,7 +19,7 @@ import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { CrashRecord } from "./crash.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
-  acceptedNoteNotice, approvalNotice, checkAcceptedNotice, checkDecisionNotice, checkNotCommandNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
+  acceptedNoteNotice, approvalNotice, orchestratorStopText, checkAcceptedNotice, checkDecisionNotice, checkNotCommandNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
   carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, tokenText, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, serverCrashNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
@@ -831,7 +831,7 @@ ${n.text}` });
       case "cancel_start": return this.engine.cancelStart(e.queue, "orchestrator");
       case "pause": this.engine.pause(e.queue); return `queue ${e.queue} pauses after its current step`;
       case "resume": this.engine.resume(e.queue); return `queue ${e.queue} resumed`;
-      case "stop": this.engine.stopNow(e.queue, e.reason); return `queue ${e.queue} stopped`;
+      case "stop": this.engine.stopNow(e.queue, orchestratorStopText(e.reason)); return `queue ${e.queue} stopped`;
     }
   }
 

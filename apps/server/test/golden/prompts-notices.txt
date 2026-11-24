@@ -39,7 +39,9 @@ Which layout?
 Options: 1. grid / 2. list
 The worker recommends: grid Answer it if the answer is settled, otherwise escalate it to the user.
 == approvalNotice: no run
-[Nexus] Queue QN revision 1 approved. If the plan puts it next, start it now; otherwise tell the user why not.
+[Nexus] Queue QN revision 1 approved. It is not in the plan, so nothing starts it: start it now, or put it into the plan (nexus run QN start --after <queue>... | --next | --at ...), or tell the user why it waits.
+== approvalNotice: no run, in the plan (ACX, O3)
+[Nexus] Queue QN revision 1 approved. It is in the plan (QB is running): Nexus starts it itself, so start nothing; tell the user if anything follows from the approval.
 == liftNotice: with the stop's reason
 [Nexus] The user lifted the stop of queue QN with Continue (the stop was: condition: the disk is full); its run goes on. Nothing to start: the run goes on by itself. Tell the user briefly if anything follows from it for the plan.
 == levelToUserNotice: 
@@ -65,7 +67,7 @@ Commits: aaa1111
 
 Decide with one of: nexus review accept QN N1 [--note "..."] (the run goes on); nexus review send-back QN N1 "what to fix"; nexus review ask-user QN N1 "why" (the user decides). Tell the user briefly what you decided.
 == awayOnNotice: 
-[Nexus] The user is away until 18:00. Until then level-2 steps are reviewed as level 3: judge them; accept what has nothing of the user's, accept provisionally (nexus review provisional) what has, or send it back; the queue goes on. Level-1 steps still wait for the user. When a queue waits for the user, you are told which other approved queues can start; start one if the plan allows (never two queues in one checkout).
+[Nexus] The user is away until 18:00. Until then level-2 steps are reviewed as level 3: judge them; accept what has nothing of the user's, accept provisionally (nexus review provisional) what has, or send it back; the queue goes on. Level-1 steps still wait for the user. When a queue waits for the user, you are told what the plan starts next: Nexus starts those itself, so start no queue outside the plan and put no approved queue into it (Nexus refuses both).
 == awayEndNotice: at its time
 [Nexus] Away mode ended at its time. Level-2 steps are reviewed as before (what is the user's goes to them, and the queue waits). When the user is back, tell them briefly what ran and what waits in their return batch.
 == awayEndNotice: turned off
@@ -77,7 +79,7 @@ Decide with one of: nexus review accept QN N1 [--note "..."] (the run goes on); 
 == planHeldNotice: the user's dependency
 [Nexus] Queue QN waits in the plan, but QB is stopped. Nexus does not start QN until QB is done. If it should not wait for QB, the user made it wait for QB: propose a change with nexus plan propose QN [--after <queue>]... --reason "..."; else tell the user what it waits for.
 == planHeldNotice: the orchestrator's dependency
-[Nexus] Queue QN waits in the plan, but QB is cancelled. Nexus does not start QN until QB is done. If it should not wait for QB, you made it wait for QB: change it with nexus run QN start [--after <queue>]... --reason "..." (or take it out with nexus run QN cancel-start --reason "..."); else tell the user what it waits for.
+[Nexus] Queue QN waits in the plan, but QB is cancelled. Nexus does not start QN until QB is done. If it should not wait for QB, you made it wait for QB: change it with nexus run QN start --after <queue>... --reason "..." (or --next for none before it; without either the command starts the queue now, outside the plan) (or take it out with nexus run QN cancel-start --reason "..."); else tell the user what it waits for.
 == planDecisionNotice: accepted
 [Nexus] The user accepted your proposal: queue QN starts after QB. The plan is changed; go on from it.
 == planDecisionNotice: declined

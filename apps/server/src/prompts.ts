@@ -83,13 +83,14 @@ Report through the \`nexus\` command (on PATH; your session is set in the enviro
 - nexus step progress <step> "<short status>" [--pct N]     at a phase boundary only (a part of the step done, the next begun), so the user sees where you are; not after every command or file
 - nexus review add <step> <picture> --key <view@width> --role <role> --label "..."   a review picture, one per command
 - nexus review add <step> <file|url>... --label "..."       other review material (documents, data, links)
-- nexus check <step> <name> --ok|--fail --summary "..." --duration <seconds>   results of the step's checks, only where you run them: where the step's opening says Nexus runs them, it runs and records them itself after your \`nexus step done\`, and this is refused. Otherwise report each with how long it ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (\`nexus check <step> "npm test" --ok …\`, not "test"): a check reported under another name counts as not reported
+- nexus check <step> <name> --ok|--fail [--summary "..."] [--duration <seconds>]   results of the step's checks, only where you run them: the step's opening always says whether Nexus runs them (also where it lists none); where it does, Nexus runs and records them itself after your \`nexus step done\`, and this is refused. Where it says Nexus does not, report each with how long it ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (\`nexus check <step> "npm test" --ok …\`, not "test"): a check reported under another name counts as not reported
 - nexus check <step> <name> --unrelated --evidence "..."   in a check-fix round, a failed check that is not your work's failure (it fails on the base too, a test you did not touch): Nexus runs it on the queue's base commit and decides by it; end your turn without \`nexus step done\`
 - nexus metric record <name> <value>                        a value of one of the project's metrics, when the step asks you to measure one (\`nexus metric list\` shows them); it is kept with your step and HEAD commit; a negative value goes after --: nexus metric record <name> -- -5
-- nexus step done <step> --summary "..." [--commit <sha>] --activities a,b   when the acceptance criteria are met; --activities names what you actually did, whatever was planned (\`nexus tags\` lists the names)
+- nexus step done <step> --summary "..." [--commit <sha>] [--activities <names from nexus tags>]   when the acceptance criteria are met; --activities names what you actually did, whatever was planned, by the names \`nexus tags\` lists (any other name refuses the command)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "<the stop condition met>" --reason "<what happened, short>"   when a stop condition is met (first commit what is consistent, see below); give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened and what you left out (the user sees the reason first, the condition behind "more")
 - nexus ask "<question>" --step <step> [--option "..."]... [--recommend "<option>"] [--can-continue]   record each question needed for this step, then end the asking turn. With --can-continue, independent work may finish within this turn. Nexus starts no further work turn until every open or escalated question of the step is answered or properly withdrawn, even across sessions. Partial answers, messages, recommendations and drafts do not release this wait. The last answer's --wait, pause, stop and review still hold after all answers arrive. Give options with --option and a recommendation with --recommend; a recommendation is not a decision.
+- nexus withdraw <qid> --reason "..."                      withdraw a question of yours that is no longer needed (the qid of one of your open questions, as nexus ask printed it; it then no longer holds the step)
 - nexus context "<what a successor needs to know>" --topics a,b --files x,y   at the end of each step (its shape: nexus help context)
 Review material follows Nexus's standard: read \`nexus help review\` before you prepare it. In short: every picture has a view key naming what it shows, in which state, at which window width (waiting-tab@492), and a role: before (the old state), mockup (the design), after (the new state), variant-a / variant-b (alternatives), result (a new view with nothing to compare). Only pictures with the same key pair, so a before and its after are taken the same way: fixed-viewport captures with the same window size, data and state. Add befores and mockups before their afters. Nexus refuses a wrong pair and says why; the label is only a caption. Write the files outside the working tree (the system's temporary folder, for example): nexus review add copies them into the queue's folder, and the item names the copy. Look at a changed view yourself at one width (the one the change matters most at) to see that it is right; the other pictures you only register for the review (nexus review add), without opening them again.
 Nexus's standards for the rest (the full texts: \`nexus help summaries\`, \`nexus help context\`, \`nexus help questions\`, \`nexus help refusals\`, \`nexus help commits\`, \`nexus help tests\`):
@@ -122,6 +123,8 @@ export function workerBriefing(l: Languages, runtime: Runtime = "claude"): strin
  * step is the queue's integration step, and this is what it is given (src/integration.ts).
  */
 /** Said under the checks of a step whose checks Nexus runs (docs/protocol/checks.md, "Checks run by Nexus"). */
+const CHECKS_BY_WORKER = "Nexus does not run these for this step: run them yourself at its end and report each with \`nexus check\` (the name as listed here). While you work, run only the tests of what you change.";
+const CHECKS_NONE_BY_NEXUS = "Nexus runs the checks of this step itself after your \`nexus step done\` (it has none to run, but it holds them), so \`nexus check\` is refused here: report none.";
 const CHECKS_BY_NEXUS = "Nexus runs these itself after your `nexus step done` and sends you their output only if one fails; do not run or report them yourself (`nexus check` refuses them). While you work, run only the tests of what you change.";
 
 export function stepOpening(o: {
@@ -150,7 +153,7 @@ export function stepOpening(o: {
     o.pull ? pullText(o.pull) : "",
     closing ? closingText(closing, !!o.checksByNexus) : "",
     integration ? integrationText(step.id, integration, !!o.checksByNexus) : "",
-    checks.length ? `\nChecks for every step:\n${checks.map((c) => `- ${c}`).join("\n")}${o.checksByNexus ? `\n${CHECKS_BY_NEXUS}` : ""}` : "",
+    checksText(checks, !!o.checksByNexus),
     step.review?.prepare ? `\nReview to prepare: ${step.review.prepare}\nPrepare it by Nexus's standard: read \`nexus help review\` first (view keys, roles, the same conditions on both sides of a pair).` : "",
     `\nStop conditions (meeting one ends the queue: report it with \`nexus stop\`):\n${[...q.stop_conditions, ...projectStopConditions].map((c) => `- ${c}`).join("\n") || "- none beyond your judgement"}`,
     notes.length ? `\nNotes from the user for this step:\n${notes.map((n) => `- ${n.body}`).join("\n")}` : "",
@@ -160,6 +163,12 @@ export function stepOpening(o: {
     last ? `\nThis is the queue's last step${!step.integration && q.steps.some((x) => x.integration) ? " before its integration step, which Nexus runs after it (without a model when the merge is clean)" : ""}. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to ${report} (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with \`nexus report ${q.id} --file ${report} --summary "…"${q.maintenance ? " --findings <the number of findings>" : ""}\`, which copies it into the queue's folder and removes it from there.${q.maintenance ? ` This is a maintenance queue (${q.maintenance}): give the number of findings with --findings (0 when there were none); Nexus tells the orchestrator only when there are some.` : ""}` : "",
     q.maintenance === "survey" ? "\nThis is a survey: change nothing and commit nothing. When a step ends, Nexus checks that it left no commit and no changed tracked file, and stops the queue otherwise." : "",
   ].filter(Boolean).join("\n");
+}
+
+/** The step's checks and who runs them, said in every opening (also for a step with none of its own). */
+function checksText(checks: string[], byNexus: boolean): string {
+  if (!checks.length) return byNexus ? `\nChecks for every step: none are listed. ${CHECKS_NONE_BY_NEXUS}` : "\nChecks for every step: none are listed. Nexus runs none for this step.";
+  return `\nChecks for every step:\n${checks.map((c) => `- ${c}`).join("\n")}\n${byNexus ? CHECKS_BY_NEXUS : CHECKS_BY_WORKER}`;
 }
 
 /** A merge of the base at a step boundary, as the next step's opening tells it (queue MI). */
@@ -359,9 +368,14 @@ export function orchestratorRuntimeSeed(from: string, to: string, status: string
   ].filter(Boolean).join("\n");
 }
 
-/** The user stops the running turn (`text`: why, in the user's words). */
+/** The running turn is stopped, by the user or by the orchestrator (`text`: why, in their words; the orchestrator's starts with orchestratorStopText). */
 export function userStopNow(text?: string): string {
-  return `[Nexus] The user asks you to stop now${text ? `: ${text}` : "."} Leave the work in a consistent state, record where you are with \`nexus step progress\`, and end your turn. Do not start anything new.`;
+  return `[Nexus] You are asked to stop now${text ? `: ${text}` : "."} Leave the work in a consistent state, record where you are with \`nexus step progress\`, and end your turn. Do not start anything new.`;
+}
+
+/** The reason the orchestrator's `nexus run <queue> stop` gives the worker, saying whose it is. */
+export function orchestratorStopText(reason: string): string {
+  return `the orchestrator stopped the run (${reason})`;
 }
 
 /** An inbox entry as it is delivered to the session. */
@@ -380,7 +394,7 @@ export function formatInbox(m: InboxView, state: ProjectState, released = false)
         m.text,
         `The user's words win over the step's acceptance criteria where they conflict; the rest of the criteria still hold.`,
       ]
-      : [`[Nexus] The orchestrator reviewed step ${m.step} of queue ${m.queue} and sent it back to you (round ${m.round}). What to fix:`, m.text];
+      : [`[Nexus] ${m.from === "helper" ? "The review helper" : "The orchestrator"} reviewed step ${m.step} of queue ${m.queue} and sent it back to you (round ${m.round}). What to fix:`, m.text];
     return [
       ...lines,
       step?.acceptance.length ? `\nAcceptance criteria of the step:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
@@ -447,7 +461,8 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus review accept <queue> <step> [--note "..."]   accept a step waiting for your review; the run goes on (with the project's push_accepted on, Nexus pushes the commit the step was reviewed at; never push yourself)
 - nexus review send-back <queue> <step> "what to fix"   send it back to its worker, as the step's next round in the same session (beyond the project's limit of send-backs per step, 2 by default, the step goes to the user instead)
 - nexus review ask-user <queue> <step> "why"      hand its review to the user
-- nexus review provisional <queue> <step> --note "what the user should look at"   review level 3 only: accept it provisionally; the run goes on, and the step waits in the user's return batch, where the user confirms it or asks a fix (only the user confirms)
+- nexus review audit <queue> <step> agree|disagree --reason "why"   your audit of a step the review helper accepted, when a notice asks for it; it does not reopen the step (a needed fix is a revision you draft)
+- nexus review provisional <queue> <step> --note "what the user should look at"   review level 3, or level 2 while away mode is on: accept it provisionally; the run goes on, and the step waits in the user's return batch, where the user confirms it or asks a fix (only the user confirms)
 - nexus server status                            the running Nexus version, the steps running in every project, and an update in progress
 - nexus server update [--now]                    deploy: update Nexus itself and restart it (only when the user asks; see below)
 - nexus server update --after <queue>[/<step>]   plan the deploy for once that step is in (done, or accepted after its review) or that queue is done (only when the user asks)
@@ -530,7 +545,7 @@ Items of the project's plan documents: when a queue carries out an item of one o
 
 Review material follows Nexus's standard, \`nexus help review\` (read it before you write a review.prepare): every picture has a view key (subject, state, window width: waiting-tab@492) and a role (before, mockup, after, variant-a, variant-b, result); only the same key pairs, and Nexus refuses a wrong pair. In review.prepare name the views with their keys and roles, and what each is compared with (the old screen: before; a design: mockup; a new screen: result). The project's own conventions (its AGENTS.md) come on top.
 
-A revision changes only what has not started: add, change, remove or reorder pending steps freely. A started step (one that has been at work, or whose status is not pending or skipped) keeps its title, goal, acceptance, review, runtime, model, effort and tags (also those it inherits from the queue), stays in the draft and keeps its order among the started steps; a change to the running step reaches its worker as a message (your answer to its question, or the user's message) or with nexus review send-back when it waits for your review. Once a queue has run, its worktree, branch and base stay as they are. Nexus refuses a draft that breaks this and says why. A new revision of a running queue never stops its running step: the step goes on to its end, through its questions, answers and nudges. Then the run goes on under the new revision in the same session if the user has approved it, or waits for the approval (run state approval_wait, its session kept) and goes on by itself once the user approves: there is nothing to start or resume, and a start or cancel of the queue is refused while it waits.
+A revision changes only what has not started: add, change, remove or reorder pending steps freely. A started step (one that has been at work, or whose status is not pending or skipped) keeps its title, goal, acceptance, review, runtime, model, effort, fallback and tags (also those it inherits from the queue), stays in the draft and keeps its order among the started steps; a change to the running step reaches its worker as a message (your answer to its question, or the user's message) or with nexus review send-back when it waits for your review. Once a queue has run, its worktree, branch and base stay as they are. Nexus refuses a draft that breaks this and says why. A new revision of a running queue never stops its running step: the step goes on to its end, through its questions, answers and nudges. Then the run goes on under the new revision in the same session if the user has approved it, or waits for the approval (run state approval_wait, its session kept) and goes on by itself once the user approves: there is nothing to start or resume, and a start or cancel of the queue is refused while it waits.
 
 Choosing model and effort: a step's kind chooses them by default. Each kind has its runtime, model, effort and fallback in the settings (nexus tags lists the kinds; the user sets their values), so tag each step with its one dominant kind and usually name nothing else. What a step runs on, strongest first: the step's own runtime, model, effort and fallback in the YAML; the queue's; what you name when you start the run (--runtime, --model, --effort); the step's kind's; the project's defaults. So start runs without --model and --effort unless you mean to override every kind for that run, and say why when you do; to depart for one step, name its values in the YAML. Before you choose a model or effort other than the kind's (for a run or a step), or propose to the user changing a kind's values, look at nexus stats --by model and --by effort (with --by kind for the work at hand) and cite the figures you go by in your reason: accepted in the first round, rounds, failures, working time and use. A group marked few data is no evidence yet; say so rather than lean on it. Codex takes the levels its model lists (low up to ultra for most); Claude Code takes low to max. A step without values of its own runs on what this resolves to, not on the previous step's. Another runtime runs the step in a fresh session given the previous step's context summary; another model or effort keeps the session.
 
@@ -554,7 +569,7 @@ Statuses change through Nexus, never by editing files. Housekeeping is yours, wi
 - nexus queue set <queue> propose-lift --reason "..."         propose that the user lift the stop of a stopped queue; they decide in the dashboard
 Consent is the user's, and refused to you: marking a step done (a step whose work is done but went on elsewhere, or was done elsewhere, is skipped with --continued-in naming where), approving, lifting a stop, reopening a finished step. A stopped queue goes on only when the user lifts the stop: by approving a new revision (then a start begins at the first pending step) or with Continue. When you draft a new revision of a stopped queue to replace the stopped step, keep that step in the draft (a draft may not drop, change or move a step that has started or stopped, nor change a step's status) and skip it with nexus queue set once the user has approved, so the record shows what became of it.
 
-Reviewing steps: the user may write a note on a step you hold in review (or comment on one of its pictures); you get it as a [Nexus] message: weigh it in your acceptance, and send the step back if it asks for a fix. A step whose review is yours (review level 2 or 3) waits for you when it is done, and you get a [Nexus] message with its goal, acceptance, the checks and review material of the round, and its commits. Check the work against its acceptance: read the commits (git show, git diff), the review material and the summary; for more than a glance, ${codex ? "go through the run's record yourself, as for a digest (above)" : "have run-digest summarize the run or use the project's own read-only reviewers (agents that read and report)"}. You run no checks yourself: a check of the queue that is missing or failed is a send-back. Then accept it, send it back with what to fix, or ask the user. Matters the project's rules give the user (for example the look, gameplay, final numbers) go to the user with ask-user, with your framing and recommendation; so does anything you cannot judge from what you can read.
+Reviewing steps: the user may write a note on a step you hold in review (or comment on one of its pictures); you get it as a [Nexus] message: weigh it in your acceptance, and send the step back if it asks for a fix. A step whose review is yours (review level 2 or 3) waits for you when it is done (with the project's review helper on, the default, a short-lived helper session reviews such a step first: at level 2 it accepts, sends back or passes the step on to you; at level 3 it never accepts, only sends back or passes on, so what reaches you has its findings; a send-back reaches the worker as the helper's; you are told of what it accepted, and sometimes asked to audit one), and you get a [Nexus] message with its goal, acceptance, the checks and review material of the round, and its commits. Check the work against its acceptance: read the commits (git show, git diff), the review material and the summary; for more than a glance, ${codex ? "go through the run's record yourself, as for a digest (above)" : "have run-digest summarize the run or use the project's own read-only reviewers (agents that read and report)"}. You run no checks yourself: a check of the queue that is missing or failed is a send-back. Then accept it, send it back with what to fix, or ask the user. Matters the project's rules give the user (for example the look, gameplay, final numbers) go to the user with ask-user, with your framing and recommendation; so does anything you cannot judge from what you can read.
 
 Messages marked [Nexus] tell you that a worker asked a question, that a step waits for your review, that the user accepted a step with a note for you (their words, as in the chat: take them into the plan), that the user rejected a step (propose what follows as revisions for their approval), that the user asked a fix of a step you accepted provisionally (draft a revision with a step that fixes it), that the user approved a queue or withdrew an approval, that a run reached a requested pause, that a run halted or finished, or how a Nexus update you ran ended. What came up while Nexus updated reaches you right after its restart. After a deploy you may also be told what changed for agents (the commits' Agents: lines): your briefing may still describe the older way, so follow those where they differ. They are for you, not the user. Act on them: answer or escalate questions; an approval or a reached pause is your cue to start (or resume) what the plan put next, and say in the chat what you started; tell the user about withdrawals, halts and finished queues briefly, with what you propose next.
 Deploying Nexus itself: run nexus server update only when the user asks for it in the chat, never on your own, not even when a queue that changes Nexus has finished. Before you run it, tell the user (from nexus server status) whether a step is running in any project: the update waits for those steps to finish (no new step starts meanwhile), and with --now it interrupts them instead (they continue afterwards). Also tell them that you restart with Nexus: your process ends, and this conversation goes on after the restart. The chat stays open while the update waits for the running steps; a turn of yours still running when Nexus restarts is cut off, and after the restart a [Nexus] message quotes what you were answering: answer it again, after checking what the cut-off turn had already done. You then get a [Nexus] message with the outcome (the new version, or why it failed and what still runs); pass it on to the user. When the user asks to deploy once a given step or queue is in, plan it with --after instead (one plan at a time, also only when the user asks): after a step, its queue opens no next step until the deploy is done and goes on after the restart; after a queue, only once every step is closed, its closing step included. If the step fails, stops or is rejected (or the queue gets a stopped step), or the update fails, the plan is dropped and you are told; pass it on. If the step's queue runs on its own worktree branch, the command warns that its work is in the deploy only once merged into main: tell the user. With --at, from that time no new step starts and the deploy waits for the running steps; with --deadline, steps still running then are interrupted and continue after the restart. Where the project's provisional work does not count (provisional_counts off), a planned deploy waits while it would include provisional work the user has not confirmed, and you are told; only the user confirms it.
@@ -572,8 +587,8 @@ Keep replies short and concrete. Before proposing a queue, read enough of the pr
 function codexOwnWork(queueLanguage: string | undefined): string {
   return `No helpers: on Codex you have no subagents, so you do their work yourself. Read what it takes, and keep long research out of your replies:
 - Before you propose a queue, review the draft yourself: could an agent work on each goal alone for hours without guessing; does each acceptance criterion name what a check, a measure or a picture shows; is any step several steps; does each step have what it needs from the earlier ones; does a matter the project gives the user (the look, gameplay, final numbers) get a stop or a review point; do the stop conditions cover the project's rules and this queue's risks; does each step say how it is verified and what the user gets to see; does anything reach beyond what the user asked for${queueLanguage ? `; is the queue's text in ${queueLanguage}` : ""}. Fix what you find, then propose.
-- When a worker asks, find whether the answer is settled: in the approved queue's text and notes, the project's rules (AGENTS.md and what it points to), its records of decisions, the queue's earlier answers (.nexus/sessions/*/events.jsonl), then the code. Answer only what a source really settles, citing it; otherwise it is the user's: escalate it with the options and your recommendation.
-- When a run halts or finishes, go through its record: .nexus/queues/<queue>/queue.yaml, run.yaml, report.md, and the events of the session that ran it (step progress, checks, review material, questions, why it stopped); tell the user the outcome, each step against its acceptance, what to look at, and what is open. Facts from the records; mark what you infer.`;
+- When a worker asks, find whether the answer is settled: in the approved queue's text and notes, the project's rules (AGENTS.md and what it points to), its records of decisions, the queue's earlier answers (.nexus/sessions/*/inbox.jsonl), then the code. Answer only what a source really settles, citing it; otherwise it is the user's: escalate it with the options and your recommendation.
+- When a run halts or finishes, go through its record: .nexus/queues/<queue>/queue.yaml, run.yaml, report.md, the checks Nexus ran (checks.yaml), and the events of the sessions that ran it (run.yaml names them; step progress, review material, questions, why it stopped; the answers are in each worker's inbox.jsonl); tell the user the outcome, each step against its acceptance, what to look at, and what is open. Facts from the records; mark what you infer.`;
 }
 
 // Subagents Nexus gives every orchestrator (Claude Code's --agents, written to a file by orchestratorAgentsFile in
@@ -621,7 +636,7 @@ Never present a guess as settled.`,
     model: "sonnet",
     prompt: `Summarize a queue's run so the orchestrator can tell the user about it without reading the whole record.
 
-Read: .nexus/queues/<queue>/queue.yaml (the steps and their acceptance), run.yaml (the run's state and reason), report.md if the worker wrote one, and the events of the session that ran it (.nexus/sessions/<session>/events.jsonl: step.started, step.progress, check.result, review.added, step.done / failed, queue.stop, question.asked and answers, context.summary). activity.jsonl in the same folder shows what the agent did, if a step needs explaining.
+Read: .nexus/queues/<queue>/queue.yaml (the steps and their acceptance), run.yaml (the run's state and reason), report.md if the worker wrote one, the checks Nexus ran (.nexus/queues/<queue>/checks.yaml: each step's runs, the failed ones and the ones that passed on a rerun), and the events of the sessions that ran it (run.yaml names them; a run may span several): .nexus/sessions/<session>/events.jsonl has step.started, step.progress, review.added, step.done / failed, queue.stop, question.asked and context.summary; the answers to the worker's questions are in its inbox (.nexus/sessions/<session>/inbox.jsonl). activity.jsonl in the same folder shows what the agent did, if a step needs explaining.
 
 Write, briefly (the user may read it on a phone):
 - One line: the outcome (finished / halted at a step / stopped by a stop condition) and why.
@@ -695,17 +710,27 @@ The worker recommends: ${x.recommended}` : ""}` : ""}`,
   };
 }
 
+/**
+ * What to do with an approved queue that has no run to go on: one in the plan is started by Nexus itself once what it
+ * waits for is done (the orchestrator's own start would race it); one not in the plan waits for the orchestrator.
+ */
+function notPlanned(q: QueueView, start: string): string {
+  return q.start
+    ? `It is in the plan (${q.start.waiting || "nothing to wait for"}): Nexus starts it itself, so start nothing; tell the user if anything follows from the approval.`
+    : `It is not in the plan, so nothing starts it: ${start}, or put it into the plan (nexus run ${q.id} start --after <queue>... | --next | --at ...), or tell the user why it waits.`;
+}
+
 /** The user approved revision `a.revision` of the queue; what to do depends on its run. */
 export function approvalNotice(q: QueueView, a: { revision: number }): Notice {
   const r = q.run;
   // A run of an older revision goes on under the new one (a revision changes no started step); a finished one is over:
   // the new revision's steps need a start.
   const todo = !r
-    ? "If the plan puts it next, start it now; otherwise tell the user why not."
+    ? notPlanned(q, "start it now")
     : r.rejected && r.state === "paused" && !q.rejection
       ? `Its run was paused because the user rejected step ${r.rejected}; this revision lifts that. If the plan puts it next, resume it now (it goes on at the first pending step); otherwise tell the user why not.`
     : r.state === "finished" && runIsOlder(r, a.revision, q.history)
-      ? `Its earlier run is finished. If the plan puts it next, start it now (it begins at the first pending step); otherwise tell the user why not.`
+      ? `Its earlier run is finished. ${notPlanned(q, "start it now (it begins at the first pending step)")}`
     : r.state === "finished"
       ? "Its run is finished; tell the user if anything follows from the approval."
     : r.state === "paused" || r.state === "halted"
@@ -779,7 +804,7 @@ export function helperBriefing(p: Pick<ProjectFile, "name" | "languages">): stri
 What you may do:
 - Read the packet, the diff file it names, and the checkout (to check a criterion: a document that should say something, a test that should exist). Use read-only git (git log, git show, git diff, git status), nexus status, nexus help and nexus doc (a Markdown file's headings, or one section: nexus doc <file.md#section>).
 - Never run a build, a test or a check: the packet has the results of the checks (the ones Nexus ran, or those the worker reported where Nexus ran none). Never change a file.
-- Decide exactly once, with one of the three commands the packet names: accept, send back, or pass on to the orchestrator. Then end your turn with a one-line reply.
+- Decide exactly once, with one of the commands the packet names (accept, send back, or pass on to the orchestrator; at review level 3 it names send back and pass on only). Then end your turn with a one-line reply.
 
 How to decide:
 - Judge the step against its acceptance criteria and review notes, one by one, from the packet and the checkout. Do not accept by default.
@@ -846,7 +871,7 @@ export function helperPacket(q: QueueView, st: StepView, c: HelperPacketContext)
 export function awayOnNotice(a: { until: string }): Notice {
   return {
     fact: `The user is away until ${formatClock(a.until, new Date())}.`,
-    todo: "Until then level-2 steps are reviewed as level 3: judge them; accept what has nothing of the user's, accept provisionally (nexus review provisional) what has, or send it back; the queue goes on. Level-1 steps still wait for the user. When a queue waits for the user, you are told which other approved queues can start; start one if the plan allows (never two queues in one checkout).",
+    todo: "Until then level-2 steps are reviewed as level 3: judge them; accept what has nothing of the user's, accept provisionally (nexus review provisional) what has, or send it back; the queue goes on. Level-1 steps still wait for the user. When a queue waits for the user, you are told what the plan starts next: Nexus starts those itself, so start no queue outside the plan and put no approved queue into it (Nexus refuses both).",
   };
 }
 
@@ -877,7 +902,7 @@ export function awayStuckNotice(q: QueueView, st: StepView, why: string, next: {
 export function planHeldNotice(q: QueueView, e: { queue: string; by: "user" | "orchestrator"; waiting: string }): Notice {
   const change = e.by === "user"
     ? `the user made it wait for ${e.queue}: propose a change with nexus plan propose ${q.id} [--after <queue>]... --reason "..."`
-    : `you made it wait for ${e.queue}: change it with nexus run ${q.id} start [--after <queue>]... --reason "..." (or take it out with nexus run ${q.id} cancel-start --reason "...")`;
+    : `you made it wait for ${e.queue}: change it with nexus run ${q.id} start --after <queue>... --reason "..." (or --next for none before it; without either the command starts the queue now, outside the plan) (or take it out with nexus run ${q.id} cancel-start --reason "...")`;
   return {
     fact: `Queue ${q.id} waits in the plan, but ${e.waiting}.`,
     todo: `Nexus does not start ${q.id} until ${e.queue} is done. If it should not wait for ${e.queue}, ${change}; else tell the user what it waits for.`,

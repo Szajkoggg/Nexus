@@ -25,7 +25,7 @@ import {
 import type { AgentEvents, AgentProcess, Priority } from "../src/agent.ts";
 import type { Launch } from "../src/agent-host.ts";
 import { Engine } from "../src/engine.ts";
-import { formatInbox, freshSessionSeed, helperBriefing, helperPacket, midStepSeed, noOutcomeNudge, stepOpening, switchReason } from "../src/prompts.ts";
+import { formatInbox, freshSessionSeed, helperBriefing, helperPacket, midStepSeed, noOutcomeNudge, orchestratorStopText, stepOpening, switchReason } from "../src/prompts.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import type { DeployChanges } from "../src/deploy.ts";
@@ -146,6 +146,8 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
   stand().state = "working";
   later(); engine.stopNow("Q", "Wrong branch");
   later(); engine.stopNow("Q");
+  tr.section("the orchestrator stops the run (nexus run Q stop --reason): the text it gives the worker (ACX, O9)");
+  later(); engine.stopNow("Q", orchestratorStopText("The plan changed"));
   stand().state = "idle";
 
   tr.section("resumed with a reason: the step continues");
@@ -178,9 +180,10 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
   const codex = (stand().launch.options as { instructions: string }).instructions;
   event(worker(), { type: "step.started", queue: "Q", step: "A4" });
 
-  tr.section("sent back: by the user (a step with acceptance), by the orchestrator (one without)");
+  tr.section("sent back: by the user (a step with acceptance), by the orchestrator (one without), by the review helper (ACX, W1)");
   later(); store.appendInbox(worker(), { v: 1, id: newId(), at: now(), from: "user", type: "send_back", ref: "r1", queue: "Q", step: "A1", text: "The second page is still wrong.", round: 2 });
   later(); store.appendInbox(worker(), { v: 1, id: newId(), at: now(), from: "orchestrator", type: "send_back", ref: "r2", queue: "Q", step: "A2", text: "The test is missing.", round: 3 });
+  later(); store.appendInbox(worker(), { v: 1, id: newId(), at: now(), from: "helper", type: "send_back", ref: "r4", queue: "Q", step: "A3", text: "The third acceptance is not met.", round: 2 });
   change();
 
   tr.section("the last step failed and is resumed: it continues with what it was left at");
@@ -223,6 +226,19 @@ test("the worker's texts: briefing, step openings, inbox entries, seeds and nudg
   tr.add(opening());
   tr.add(opening({ base: "main", sha: "4444444444444444444444444444444444444444", branch: "nexus/Q", resolve: false }));
   tr.add(opening({ base: "main", sha: "4444444444444444444444444444444444444444", branch: "nexus/Q", resolve: true }));
+
+  tr.section("a step with no checks of its own, whose checks Nexus runs (ACX, W5), and one whose checks the worker runs: the opening says so either way");
+  const bare = (checksByNexus: boolean) => stepOpening({
+    q: { ...nq, checks: [] }, step: nq.steps[2]!, mode: "start", projectStopConditions: [], notes: [], answers: [], last: false, report: "<report file>", checksByNexus,
+  });
+  tr.add(bare(true));
+  tr.add(bare(false));
+  tr.add(stepOpening({ q: nq, step: nq.steps[2]!, mode: "start", projectStopConditions: [], notes: [], answers: [], last: false, report: "<report file>", checksByNexus: false }));
+
+  tr.section("a blocking answer, to wait for further word (nexus answer --wait): delivered at once, and after the Resume that releases it (ACX)");
+  const waited = { v: 1, id: newId(), at: now(), from: "orchestrator", type: "answer", ref: "a1", qid: "q1", text: "Hold on until the user has looked.", continue: false } as const;
+  tr.add(formatInbox(waited as never, loadProjectState(store)));
+  tr.add(formatInbox(waited as never, loadProjectState(store), true));
 
   tr.section("a step whose checks Nexus runs: a check-fix round, and a send-back (inbox entries)");
   store.writeChecks("C", { protocol: 1, steps: { C1: { by: "nexus", sets: [] } } });
@@ -528,6 +544,7 @@ test("every notice of prompts.ts, rendered from fixtures, matches the golden fil
   show("acceptedNoteNotice", "the last step", prompts.acceptedNoteNotice({ queue: "QN", step: "N1", text: "Smaller steps next time.", last: true }));
   show("questionNotice", "with options", prompts.questionNotice({ qid: "q-1", queue: "QN", step: "N1", text: "Which layout?", options: ["grid", "list"], recommended: "grid", can_continue: true } as never));
   show("approvalNotice", "no run", prompts.approvalNotice(q, { revision: 1 }));
+  show("approvalNotice", "no run, in the plan (ACX, O3)", prompts.approvalNotice({ ...q, start: { waiting: "QB is running", blocked: false } as never }, { revision: 1 }));
   show("liftNotice", "with the stop's reason", prompts.liftNotice(q, { reason: "condition: the disk is full" }));
   show("levelToUserNotice", "", prompts.levelToUserNotice(q, st));
   show("withdrawalNotice", "with a reason", prompts.withdrawalNotice(q, { revision: 1, reason: "Not yet." }));
