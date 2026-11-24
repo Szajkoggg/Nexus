@@ -56,9 +56,11 @@ export interface HostHandlers {
   tag?(): TurnTag;
 }
 
-/** A turn in progress, for its record: when it began, the windows then, what it works on. */
-/** `startedMs`: the monotonic clock at the start, for the turn's duration (a clock step does not change it). */
-/** A turn under way; `startedMs` (the clock's) only for one this process saw begin: a turn a crash left has no duration. */
+/**
+ * A turn in progress, for its record: when it began, the windows then, what it works on. `startedMs`: the monotonic
+ * clock at the start, for the turn's duration (a clock step does not change it); only for a turn this process saw
+ * begin: a turn a crash left has no duration.
+ */
 interface OpenTurn { started: string; startedMs?: number; windows?: TurnRecord["windows_start"]; tag: TurnTag }
 /** What a turn works on, for its record: the queue and step, and the fallback the step runs on, if it does. */
 type TurnTag = { queue?: string; step?: string; fallback?: TurnRecord["fallback"] };
@@ -428,10 +430,10 @@ export class AgentHost<E extends object = object> {
    * from the record. Called by the next server before it marks the session exited.
    */
   closeLeftTurn(session: string): void {
-    const t = this.store.readRuntime(session)?.turn_open;
-    if (!t) return;
-    const { started_at, ...tag } = t;
-    this.recordTurn(this.store.readSession(session), { started: started_at, tag: tag as TurnTag }, this.store.readRuntime(session)?.model, undefined);
+    const r = this.store.readRuntime(session);
+    if (!r?.turn_open) return;
+    const { started_at, ...tag } = r.turn_open;
+    this.recordTurn(this.store.readSession(session), { started: started_at, tag: tag as TurnTag }, r.model, undefined);
     this.write(session, { turn_open: undefined });
   }
 

@@ -975,8 +975,8 @@ export function checkAcceptedNotice(q: QueueView, st: StepView, set: CheckSet): 
 }
 
 /**
- * A check of the queue is no command (queue EF, P1): an older queue's check written in words. Nexus did not run it and
- * the step went on; the orchestrator converts it.
+ * A check of the queue is no command (queue EF, P1): not on the server's PATH, or an older queue's check written in
+ * words. Nexus did not run it and the run halted (queue CK); the orchestrator converts it.
  */
 export function checkNotCommandNotice(q: QueueView, st: StepView, check: string): Notice {
   return {

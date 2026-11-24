@@ -137,7 +137,6 @@ export function applyCheckSets(q: QueueView, st: StepView, limit?: number): void
   if (!entry) return;
   st.checks_by = entry.by;
   for (const set of entry.sets) for (const c of set.checks) {
-    // Not a command (an older queue's check in words, queue EF): not run, and it holds nothing up.
     // Not a command (not on the server's PATH, or an older queue's check in words): not run, and failed (queue CK).
     if (c.not_command) { st.checks.push({ name: c.name, ok: false, not_command: true, summary: "not on the server's PATH: not run", at: set.ended_at ?? set.requested_at, by: "nexus" }); continue; }
     const last = c.runs.at(-1);
