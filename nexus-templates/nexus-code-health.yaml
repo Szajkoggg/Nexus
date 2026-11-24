@@ -1,0 +1,91 @@
+# Nexus's code-health survey (queue CHT): the whole code base's quality measured against principles, not a checklist, a
+# rotating area or two at a time, with five trend numbers from scripts/code-health-metrics.ts recorded as the project's
+# metrics for the Stats view. Meant to recur (the user's decision of 2026-11-23: after every 15 queues done; the
+# orchestrator sets it up, the user approves) with the recurrence id code-health, so its runs are
+# code-health-<date>-<time> and their reports are what previous_reports finds. It fixes nothing.
+template:
+  id: nexus-code-health
+  title: Code health
+  description: Survey the code base's health against six groups of principles and the project's own rules, an area or
+    two at a time in rotation, and record the five code-health trend numbers; it never fixes anything itself.
+maintenance: survey
+# A worktree of its own: a survey keeps the main checkout free; it has nothing to merge back, and Nexus removes the
+# worktree once the run is done. The earlier reports are under the main checkout's .nexus, read by their absolute path.
+worktree: auto
+params:
+  - name: focus
+    description: "the groups of principles to survey: all, or one or more of clean code, longevity, scalability,
+      anti-slop, diagnosability, one vocabulary and one way"
+    default: all
+  - name: areas
+    description: "the project's areas to survey: rotate (the step picks the one or two whose turn is longest past, from
+      the earlier reports), or one or more of the areas `nexus tags` lists"
+    default: rotate
+  - name: previous_reports
+    description: the earlier runs' reports, for the rotation and the trend numbers (a path pattern, read only)
+    default: C:/Code/Nexus/.nexus/queues/code-health-*/report.md
+title: "Maintenance: code health"
+description: |
+  A survey of the code's health in the areas {{areas}}, against the principles {{focus}} (six groups, each meant
+  generally: what the step names under each is an example, not the limit) and the project's own rules (AGENTS.md,
+  docs/design/), with the five trend numbers of node scripts/code-health-metrics.ts recorded beside the earlier
+  runs'. It reports weighted findings, which become a queue the user approves. Nothing is changed or committed, in
+  any mode. The areas of the sibling surveys (nexus-test-health, nexus-server-speed, nexus-performance,
+  nexus-agent-contract, nexus-notes, nexus-docs-freshness, nexus-security-audit, nexus-dead-code) are theirs.
+  The report ends with a section "Recommended additions" (see the step).
+coding: false
+origin: maintenance
+stop_conditions:
+  - Surveying would need a change to the project (an install, a fix, a commit); report it as a finding instead.
+  - A decision that belongs to the user comes up; ask with nexus ask, with a recommendation.
+steps:
+  - id: "{{id}}1"
+    title: "Survey: code health"
+    goal: |
+      The areas: with {{areas}} = rotate, read the earlier reports ({{previous_reports}}, read only) and pick the one
+      or two of the project's areas (`nexus tags`) whose last turn is longest past, or that never had one; with no
+      earlier report, pick them yourself. Otherwise survey {{areas}}. Say in the report which areas and why.
+      The principles ({{focus}}; all means the six groups below). Each group is a principle, meant generally: what
+      follows "for example" illustrates it and does not limit it, so a fault of the same kind that is not named counts
+      as well.
+      1. Clean code: the code says what it does, simply. For example duplication, files and functions too large to
+         hold in mind, constants scattered instead of named once, comments the code contradicts.
+      2. Longevity: the code stays correct as it changes. For example the layering rules kept, errors not swallowed,
+         type safety not worn away (any, as, the non-null !), temporary workarounds that became permanent, comments
+         about the code's history that turn into noise.
+      3. Scalability: the code holds up as the data and the load grow. For example calls that block the event loop on
+         a hot path, a full recomputation where an incremental one would do, data and caches that grow without a
+         bound.
+      4. Anti-slop: nothing is there without a reason. For example over-defensive code, speculative generality,
+         comments that repeat the code, several patterns for one task, tests that prove little.
+      5. Diagnosability: when something goes wrong, an error or a log line says what happened and where.
+      6. One vocabulary and one way: one name for one concept and one path for one task, in the code, the documents
+         and the dashboard.
+      The project's own rules are a measure too: AGENTS.md and docs/design/ as they are at the run, including what was
+      added since this template was written. A pattern you see doing harm that fits none of the principles is a
+      finding as well, with why.
+      Look at the areas' boundaries too: what they use from elsewhere, and who uses them. When you find a fault, look
+      for the same fault elsewhere in the code, and name every place.
+      The evidence: run npm run knip, npm run lint and `node scripts/code-health-metrics.ts` on the whole code (it
+      prints JSON and writes no file). Record its five top-level numbers as the project's metrics, with their names as
+      they are: `nexus metric record code.largest_file_kb <value>`, and the same for code.duplication_pct,
+      code.type_escapes, code.empty_catches and code.sync_calls. Leave the areas of the sibling surveys to them (the
+      tests' quality, the server's speed, the dashboard's performance, the agents' contract, the notes, the documents'
+      freshness, security, unused code): at most point to their latest report.
+      The report: the areas and why; the findings, weighted (high, medium, low), each with where, which principle or
+      rule, why it matters, the fix proposed and its size (S, M, L); the five trend numbers beside the previous run's
+      (from its report, or "first run"), with what moved. Change nothing, commit nothing, leave no file behind.
+      The report ends with "Recommended additions" (not counted among the findings): a rule for AGENTS.md or
+      docs/design/, a check or a measure the project lacks, each with its reason.
+    acceptance:
+      - The areas surveyed and why they were chosen.
+      - Each finding with its weight, place, principle or rule, reason, proposed fix and size, or that there were none.
+      - The five numbers recorded with nexus metric record and reported beside the previous run's.
+      - The report ends with "Recommended additions", each with its reason (or says there are none).
+      - The working tree as it was (no commit, no leftover files).
+    review:
+      level: 2
+    kind: research
+    activities:
+      - cleanup
+    size: M

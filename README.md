@@ -544,10 +544,14 @@ Nexus's own instances, filled in for this repository, are in `nexus-templates/`.
 there has nothing to merge back: once it is done Nexus removes its worktree, whether merging back by itself is on or
 not; if files are left in it, the worktree stays and "Waiting for you" gets a "Cleanup" item naming them (look, then
 Clean up on the queue's page). A stopped survey keeps its worktree as evidence. In fix_small mode the run ends with
-the integration step and is merged back like any worktree queue. One of them has no shipped template behind it:
+the integration step and is merged back like any worktree queue. Two of them have no shipped template behind them:
 `nexus-server-speed` runs the server's speed benchmark (`node scripts/server-speed.ts`), which records the run for
-the Stats view's "Server speed" trend, and reports a measure more than 25 % slower than the earlier runs' median; the
-orchestrator proposes how often it recurs.
+the Stats view's "Server speed" trend, and reports a measure more than 25 % slower than the earlier runs' median;
+`nexus-code-health` surveys the code's health against six groups of principles (clean code, longevity, scalability,
+anti-slop, diagnosability, one vocabulary and one way) and the rules in AGENTS.md and docs/design/, an area or two at
+a time in rotation, and records five trend numbers from `node scripts/code-health-metrics.ts` as the project's
+metrics (code.largest_file_kb, code.duplication_pct, code.type_escapes, code.empty_catches, code.sync_calls). It
+fixes nothing; the orchestrator proposes how often each recurs.
 
 **Static analysis setup.** The `static-analysis` template sets up static analysis for any stack (ESLint or Biome
 for Node, the .NET analyzers and `dotnet format` for .NET and Unity): it asks you which tools to use, takes the

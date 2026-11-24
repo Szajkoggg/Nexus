@@ -290,8 +290,9 @@ test("the shipped templates carry no command of the Nexus repository; its own in
   const read = readTemplateDir(join(shippedTemplatesDir(), "..", "nexus-templates"), "project");
   assert.deepEqual(read.filter((x) => "problem" in x), []);
   const instances = read as Template[];
-  // An instance of each shipped maintenance template, and Nexus's own that no other project has (queue SB: its server's speed).
-  assert.deepEqual(instances.map((t) => t.id).sort(), [...Object.keys(MAINTENANCE).map((x) => `nexus-${x}`), "nexus-server-speed"].sort());
+  // An instance of each shipped maintenance template, and Nexus's own that no other project has (queue SB: its server's
+  // speed; queue CHT: its code health).
+  assert.deepEqual(instances.map((t) => t.id).sort(), [...Object.keys(MAINTENANCE).map((x) => `nexus-${x}`), "nexus-server-speed", "nexus-code-health"].sort());
   for (const t of instances) {
     assert.ok(t.params.every((p) => p.default !== undefined), `${t.id}: every parameter has the repository's value`);
     assert.doesNotMatch(JSON.stringify(fillTemplate(t, {}, "NX")), /\{\{/, t.id);
