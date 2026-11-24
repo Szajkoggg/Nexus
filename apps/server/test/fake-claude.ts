@@ -2,10 +2,8 @@
 // What it does is in fake-behaviour.ts. runFakeClaude runs it on the streams it is given: as a process (this file
 // run as a script, for the tests of real processes) or inside the test's own process (in-process-runtime.ts).
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
-  BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, contextWindow, endFake, fakeSaved, interrupt, later, onBackgroundEnd, record, recordArgs, respond, saveFakeConversation,
+  BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, contextWindow, endFake, fakeSaved, interrupt, later, onBackgroundEnd, record, recordArgs, respond, runAsScript, saveFakeConversation,
   type Background, type Fake, type FakeFailure, type FakeIo,
 } from "./fake-behaviour.ts";
 
@@ -235,10 +233,4 @@ export function runFakeClaude(io: FakeIo): () => void {
   return () => endFake(fake);
 }
 
-// Run as a script: the fake as a process of its own.
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  runFakeClaude({
-    argv: process.argv.slice(2), env: process.env, cwd: process.cwd(), stdin: process.stdin, stdout: process.stdout, stderr: process.stderr,
-    exit: (code) => process.exit(code), signal: () => process.kill(process.pid, "SIGTERM"),
-  });
-}
+runAsScript(import.meta.url, runFakeClaude);

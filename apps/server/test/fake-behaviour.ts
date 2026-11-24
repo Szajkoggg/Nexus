@@ -107,6 +107,18 @@ export interface FakeIo {
   signal(): void;
 }
 
+/**
+ * Runs a fake on this process's own stdio when its file (`moduleUrl`, its import.meta.url) was started as a script:
+ * the fake as a process of its own, for the tests of real processes.
+ */
+export function runAsScript(moduleUrl: string, run: (io: FakeIo) => unknown): void {
+  if (!process.argv[1] || resolve(process.argv[1]) !== fileURLToPath(moduleUrl)) return;
+  run({
+    argv: process.argv.slice(2), env: process.env, cwd: process.cwd(), stdin: process.stdin, stdout: process.stdout, stderr: process.stderr,
+    exit: (code) => process.exit(code), signal: () => process.kill(process.pid, "SIGTERM"),
+  });
+}
+
 /** A promise that never settles: what an ended fake's work waits on, as a process's work ends with it. */
 const never = <T = never>(): Promise<T> => new Promise<T>(() => {});
 

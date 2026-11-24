@@ -5,10 +5,8 @@
 // (in-process-runtime.ts).
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
-  PARTIAL, actOnRead, contextTokens, contextWindow, endFake, fakeSaved, interrupt, later, onBackgroundEnd, record, recordArgs, respond, saveFakeConversation,
+  PARTIAL, actOnRead, contextTokens, contextWindow, endFake, fakeSaved, interrupt, later, onBackgroundEnd, record, recordArgs, respond, runAsScript, saveFakeConversation,
   type Background, type Fake, type FakeFailure, type FakeIo,
 } from "./fake-behaviour.ts";
 
@@ -261,10 +259,4 @@ export function runFakeCodex(io: FakeIo): () => void {
   return () => endFake(fake);
 }
 
-// Run as a script: the fake as a process of its own.
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  runFakeCodex({
-    argv: process.argv.slice(2), env: process.env, cwd: process.cwd(), stdin: process.stdin, stdout: process.stdout, stderr: process.stderr,
-    exit: (code) => process.exit(code), signal: () => process.kill(process.pid, "SIGTERM"),
-  });
-}
+runAsScript(import.meta.url, runFakeCodex);
