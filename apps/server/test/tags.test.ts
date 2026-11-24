@@ -68,6 +68,9 @@ test("a proposed area waits for the user; a draft using it is refused until the 
     acceptTagProposal(x.store, id);
     assert.equal(loadProjectState(x.store).attention.some((a) => a.kind === "tags"), false, "decided: no longer waiting");
     await x.until("told of the acceptance", () => x.said(/^The user accepted your tag proposal: area terrain is on the project's list\.$/));
+    // The notice shows in the chat as its turn starts. Sent before that turn ends, the draft would go into it, where
+    // the fake only acts on commands: the draft must be a turn of its own, so wait for the orchestrator to be idle.
+    await x.until("the notice's turn over", () => x.orchestrator.idle());
     x.orchestrator.say(DRAFT);
     await x.until("the draft accepted", () => x.said(/^ok: queue T created as proposed/m));
     assert.deepEqual(loadProjectState(x.store).queues.find((q) => q.id === "T")!.steps[0]!.tags, { kind: "code", area: "terrain", size: "M", origin: "user" });
