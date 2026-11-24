@@ -160,6 +160,31 @@ which looks at every session's record at its start before anything else starts a
 `interrupted` (no duration: its end is unknown) and drops `turn_open` with the record's `exited`. git.yaml's round
 turns already close lazily at the next turn or the step's end, so they were left as they are.
 
+### When a worker's process ends
+
+A worker session's process lives across turns and steps. The engine ends it (through AgentHost, never by pid, name or
+command line) when its run finishes, when context care or a fallback switches the run to a fresh session, at a restart
+for another model or effort, and at Stop at once. A paused or halted run keeps its process: a Resume goes on in the
+same session and the same process, and only a process that is gone starts again resuming the session.
+
+**A queue's earlier sessions keep no process (queue PRC).** A halt does not end the process, and before queue PRC
+nothing did later either: a halted run started afresh (a new session) left the old session's process idle beside the
+new one, in the same checkout, until the server stopped; a halted run closed as finished, or a queue cancelled, kept
+its process the same way, and a worktree cleanup then met a folder a live process held. Now:
+
+- a start of the queue (`Engine.start`) ends the processes of the queue's other worker sessions (a session belongs to
+  the queue its file names); a session the start continues (`--use-session`) is kept;
+- a queue that is done or cancelled keeps none: the engine ends them at its next look after the change (`onChange`);
+- a worktree cleanup, Nexus's (Merger, after a merge back or a survey run) or the user's Clean up, first asks the
+  engine to end them (`Engine.endQueueProcesses`) and waits until none is alive: Nexus's looks again, the user's is
+  refused for a moment (409).
+
+A process in the middle of a turn ends after that turn (its input closes: a done queue's last turn may still write its
+context summary), any other at once; one Nexus is ending already is left to end as it does. A session a going run works
+in is never ended this way. The exit is one Nexus asked for: no failure, nothing retried, and AgentHost marks the
+runtime record `exited`. After a server restart nothing more happens than the recovery's rule (every record not
+`exited` is marked so; a worker's job closed with the old server).
+
 ## The texts agents receive
 
 What Nexus says to agents lives in one module, `apps/server/src/prompts.ts`, as pure functions of their inputs: the

@@ -377,6 +377,9 @@ export class Engine implements Member {
     const plan = openPlanFile(this.store.readPlan(queueId));
     if (plan) this.store.writePlan(queueId, { ...plan, started_at: now(), proposal: undefined });
     this.scheduler.disarm(queueId);
+    // The queue's earlier sessions are done with: a process one of them still has (a halted or paused run's) ends, so
+    // it works no turn beside the new run's and holds nothing in the checkout (queue PRC). A continued session is kept.
+    this.endProcesses((q) => q === queueId, { keep: session.id });
     this.ensureProcess(session);
     this.advance(queueId);
     return run;
@@ -686,6 +689,10 @@ export class Engine implements Member {
   /** Called after every change to the project's files (debounced by the server). */
   onChange(state: ProjectState): void {
     if (!this.stopped) this.pusher.onChange(state);
+    // A done or cancelled queue keeps no process (queue PRC): a halted run closed as finished, or cancelled, left its
+    // session's process idle; nothing would end it before the server stops.
+    const closed = new Set(state.queues.filter((q) => q.status === "done" || q.status === "cancelled").map((q) => q.id));
+    if (closed.size && !this.stopped) this.endProcesses((q) => closed.has(q), { state });
     for (const l of this.host.all()) this.deliverInbox(state, l);
     // Also a run held at the limit: a stop or a pause still reaches it.
     for (const q of state.queues) if (q.run?.state === "running" || q.run?.state === "pausing") this.advance(q.id, state);
@@ -1716,6 +1723,45 @@ export class Engine implements Member {
     this.restarting.add(session);
     this.ending.add(session);
     live.proc.kill();
+  }
+
+  /**
+   * Ends the worker processes AgentHost holds for a done or cancelled queue (Merger: before its worktree is cleaned up;
+   * the user's Clean up). True when none of them is alive any more; a queue not closed is left alone (true: its cleanup
+   * is refused anyway).
+   */
+  endQueueProcesses(queueId: string): boolean {
+    const status = loadProjectState(this.store).queues.find((q) => q.id === queueId)?.status;
+    if (status !== "done" && status !== "cancelled") return true;
+    return !this.endProcesses((q) => q === queueId);
+  }
+
+  /**
+   * Ends the processes AgentHost holds for the worker sessions of the queues `of` names (a session belongs to the queue
+   * its file names), except `keep`'s and any session a going run works in (queue PRC). A process in the middle of a turn
+   * ends after that turn (its input closes: a done queue's last turn may still write its context summary), any other
+   * now; one Nexus is ending already (its run finished, its session switched) is left to end as it does. Each exits as
+   * one Nexus ended (no failure, nothing to retry) and its runtime record becomes `exited` (AgentHost's exit handler).
+   * Returns whether any of them is still alive. `state`: the project's state as it stands, when the caller has it (else
+   * the files are read).
+   */
+  private endProcesses(of: (queue: string) => boolean, o: { keep?: string; state?: ProjectState } = {}): boolean {
+    let alive = false;
+    let going: Set<string> | undefined;
+    for (const l of this.host.all()) {
+      if (l.session === o.keep || l.proc.state === "exited") continue;
+      let s: SessionFile | undefined;
+      try { s = o.state ? o.state.sessions.find((x) => x.id === l.session) : this.store.readSession(l.session); } catch { continue; }
+      if (s?.role !== "worker" || !s.queue || !of(s.queue)) continue;
+      going ??= new Set((o.state ? o.state.queues.map((q) => q.run) : this.store.queueIds().map((q) => this.store.readRun(q)))
+        .filter((r) => runGoing(r)).map((r) => r!.session));
+      if (going.has(l.session)) continue;
+      alive = true;
+      if (this.ending.has(l.session)) continue;
+      this.ending.add(l.session);
+      if (l.proc.state === "working") l.proc.close(); else l.proc.kill();
+    }
+    return alive;
   }
 
   private ensureProcess(session: SessionFile): Live {
