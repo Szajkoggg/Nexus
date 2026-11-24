@@ -386,7 +386,7 @@ function withOrchestrator(queues: string[]) {
   // The server: its capacity, engine and orchestrator; `restart` is the next server on the same files.
   const serve = () => {
     cap = capacity();
-    engine = new Engine(store, () => tick(), { spawn: inProcessRuntime(), ...FAST, capacity: cap });
+    engine = new Engine(store, () => tick(), { ...FAST, capacity: cap });
     orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn: inProcessRuntime() });
   };
   serve();

@@ -96,7 +96,7 @@ function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean; jobs?
   // Objects where a test ends a check mid-run (else its child keeps running).
   const server = () => {
     const cap = new Capacity({ testLock: join(mkdtempSync(join(TMP, "nexus-free-lock-")), "full-test.lock"), pollMs: 20, jobs: !!o.jobs });
-    const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store, free()); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, spawn: inProcessRuntime(), checkDrainWaitMs: 300, capacity: cap, ...(o.slowHosts ? { spawn: slowHosts() } : {}) });
+    const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store, free()); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, spawn: o.slowHosts ? slowHosts() : inProcessRuntime(), checkDrainWaitMs: 300, capacity: cap });
     return { engine, cap };
   };
   let now = server();
