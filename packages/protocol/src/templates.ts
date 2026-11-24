@@ -203,11 +203,13 @@ export function filledTemplateYaml(t: Template, queue: Record<string, unknown>, 
 // ---------------------------------------------------------------- the three folders
 
 /** Nexus's own templates, in its repository's templates/ (beside packages/); NEXUS_SHIPPED_TEMPLATES replaces it in tests. */
-export function shippedTemplatesDir(): string {
-  return process.env.NEXUS_SHIPPED_TEMPLATES ?? join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "templates");
+export function shippedTemplatesDir(env: NodeJS.ProcessEnv = process.env): string {
+  return env.NEXUS_SHIPPED_TEMPLATES ?? join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "templates");
 }
 /** The user's templates for every project: <NEXUS_HOME>/templates/. */
-const globalTemplatesDir = (): string => join(nexusHome(), "templates");
+const globalTemplatesDir = (env: NodeJS.ProcessEnv = process.env): string => join(nexusHome(env), "templates");
+/** Nexus's and the user's template folders, by the environment's NEXUS_SHIPPED_TEMPLATES and NEXUS_HOME (readTemplates). */
+export const templateDirs = (env: NodeJS.ProcessEnv = process.env) => ({ nexus: shippedTemplatesDir(env), global: globalTemplatesDir(env) });
 /** A project's templates, versioned in its repository: <root>/nexus-templates/ (not under .nexus/, which git ignores). */
 const projectTemplatesDir = (root: string): string => join(root, "nexus-templates");
 
@@ -235,7 +237,7 @@ export function templatesStamp(projectRoot: string): string {
 }
 
 /** The templates in effect for a project (its root), or without one only Nexus's and the user's. */
-export function readTemplates(projectRoot?: string, dirs = { nexus: shippedTemplatesDir(), global: globalTemplatesDir() }): MergedTemplates {
+export function readTemplates(projectRoot?: string, dirs = templateDirs()): MergedTemplates {
   return mergeTemplates([
     ...readTemplateDir(dirs.nexus, "nexus"),
     ...readTemplateDir(dirs.global, "global"),

@@ -16,6 +16,7 @@ import { Engine } from "../src/engine.ts";
 import { closingContext, hasRefactoringSection } from "../src/closing.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, LONGER, holdWork, until as waitUntil } from "./wait.ts";
+import { cliOut } from "../../../packages/cli/test/run-cli.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -198,7 +199,7 @@ for (const skip of [true, false]) {
         assert.deepEqual([change.kind, change.by, change.step, change.to], ["status", "user_continue", "Q.refactor", "skipped"]);
         // Shown to the orchestrator in nexus status --all (the default only counts finished queues).
         x.store.writeSession({ protocol: 1, id: "orch", project: "p", role: "orchestrator", runtime: "external", cwd: x.root, launched_by: "external", created_at: now() });
-        const out = execFileSync(process.execPath, [join(here, "../../../packages/cli/bin/nexus.js"), "status", "--all"], { env: { ...process.env, NEXUS_DIR: x.store.dir, NEXUS_SESSION: "orch" }, encoding: "utf8" });
+        const out = await cliOut(["status", "--all"], { env: { ...process.env, NEXUS_DIR: x.store.dir, NEXUS_SESSION: "orch" } });
         assert.match(out, /finished: Q \(closing refactoring skipped by the user: the user skipped the closing refactoring at Continue; the stop was: fake condition: fake stop\)/);
       } else {
         assert.deepEqual(x.openings().map((o) => o.step), ["Q1", "Q2", "Q2", "Q.refactor"]);
@@ -231,7 +232,7 @@ for (const skip of [true, false]) {
         assert.deepEqual([change.by, change.to, change.revision], ["user_approval", "skipped", 2]);
         // Shown to the orchestrator in nexus status --all (the default only counts finished queues).
         x.store.writeSession({ protocol: 1, id: "orch", project: "p", role: "orchestrator", runtime: "external", cwd: x.root, launched_by: "external", created_at: now() });
-        const out = execFileSync(process.execPath, [join(here, "../../../packages/cli/bin/nexus.js"), "status", "--all"], { env: { ...process.env, NEXUS_DIR: x.store.dir, NEXUS_SESSION: "orch" }, encoding: "utf8" });
+        const out = await cliOut(["status", "--all"], { env: { ...process.env, NEXUS_DIR: x.store.dir, NEXUS_SESSION: "orch" } });
         assert.match(out, /finished: Q \(closing refactoring skipped by the user: the user skipped the closing refactoring with the approval of revision 2; the stop was: fake condition: fake stop\)/);
       } else {
         assert.deepEqual(x.openings().map((o) => o.step), ["Q1", "Q2", "Q2", "Q3", "Q.refactor"]);

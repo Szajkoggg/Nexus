@@ -7,20 +7,19 @@
 // the fake `claude`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, approveQueue, loadProjectState, now, writeRegistry } from "@nexus/protocol";
 import { deployPlanFile, judgePlan, readPlanFile } from "../src/deploy-plan.ts";
 import { serverEnv, spawnServer } from "./helpers.ts";
 import { tempDir } from "./temp-dirs.ts";
 import { until, LONGER, sleep } from "./wait.ts";
 import { handedOver, here, setup, successor } from "./deploy-plan-setup.ts";
+import { cliOut } from "../../../packages/cli/test/run-cli.ts";
 
-const CLI = join(here, "..", "..", "..", "packages", "cli", "bin", "nexus.js");
 const freePort = () => new Promise<number>((resolve) => {
   const s = createServer();
   s.listen(0, "127.0.0.1", () => { const p = (s.address() as { port: number }).port; s.close(() => resolve(p)); });
@@ -243,8 +242,8 @@ test("nexus server update --after plans through the server, status shows the pla
   writeRegistry({ protocol: 1, projects: [{ id: "p", root }] });
   const port = await freePort();
   const env = { ...serverEnv({ NEXUS_HOME: home, NEXUS_PORT: String(port) }), NEXUS_SESSION: "", NEXUS_DIR: store.dir };
-  const cli = (...args: string[]) => execFileSync(process.execPath, [CLI, "server", ...args], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  const fails = (...args: string[]) => { try { cli(...args); return ""; } catch (e) { return String((e as { stderr: string }).stderr); } };
+  const cli = async (...args: string[]) => await cliOut(["server", ...args], { env });
+  const fails = async (...args: string[]) => { try { await cli(...args); return ""; } catch (e) { return String((e as { stderr: string }).stderr); } };
   let out = "";
   const start = () => {
     out = "";
@@ -257,25 +256,25 @@ test("nexus server update --after plans through the server, status shows the pla
   let s = start();
   try {
     await until("the server", () => out.includes("Nexus server on"), LONGER.processes, () => out);
-    assert.match(cli("update", "--after", "Q/Q1"), /^ok: a deploy is planned after step Q\/Q1 \(step Q\/Q1 is pending\)/);
-    assert.match(fails("update", "--after", "Q"), /a deploy is already planned after step Q\/Q1; cancel it first/);
-    assert.match(fails("update", "--after", "Q/Q1", "--now"), /--now goes with an update at once/);
-    assert.match(cli("status"), /planned update: after step Q\/Q1 of project p; waiting: step Q\/Q1 is pending/);
+    assert.match(await cli("update", "--after", "Q/Q1"), /^ok: a deploy is planned after step Q\/Q1 \(step Q\/Q1 is pending\)/);
+    assert.match(await fails("update", "--after", "Q"), /a deploy is already planned after step Q\/Q1; cancel it first/);
+    assert.match(await fails("update", "--after", "Q/Q1", "--now"), /--now goes with an update at once/);
+    assert.match(await cli("status"), /planned update: after step Q\/Q1 of project p; waiting: step Q\/Q1 is pending/);
 
     await stopServer(s);
     s = start();
     await until("the server again", () => out.includes("Nexus server on"), LONGER.processes, () => out);
-    assert.match(cli("status"), /planned update: after step Q\/Q1 of project p/, "the plan stays across a restart");
+    assert.match(await cli("status"), /planned update: after step Q\/Q1 of project p/, "the plan stays across a restart");
 
-    assert.match(cli("cancel-plan"), /^ok: the deploy planned after step Q\/Q1 is cancelled/);
-    assert.match(cli("status"), /planned update: none/);
-    assert.match(fails("cancel-plan"), /no deploy is planned/);
+    assert.match(await cli("cancel-plan"), /^ok: the deploy planned after step Q\/Q1 is cancelled/);
+    assert.match(await cli("status"), /planned update: none/);
+    assert.match(await fails("cancel-plan"), /no deploy is planned/);
 
     // At a time, with a deadline (this machine's local time).
-    assert.match(cli("update", "--at", "2099-01-01 05:00", "--deadline", "2099-01-01 06:00"), /^ok: a deploy is planned at 2099-01-01 05:00 \(until 2099-01-01 05:00\); at 2099-01-01 06:00 the running steps are interrupted/);
-    assert.match(cli("status"), /planned update: at 2099-01-01 05:00, deadline 2099-01-01 06:00; waiting: until 2099-01-01 05:00/);
-    assert.match(fails("update", "--deadline", "6:00"), /--deadline goes with --at/);
-    assert.match(fails("update", "--at", "5:00", "--after", "Q"), /--at goes alone/);
-    assert.match(cli("cancel-plan"), /^ok: the deploy planned at 2099-01-01 05:00 is cancelled/);
+    assert.match(await cli("update", "--at", "2099-01-01 05:00", "--deadline", "2099-01-01 06:00"), /^ok: a deploy is planned at 2099-01-01 05:00 \(until 2099-01-01 05:00\); at 2099-01-01 06:00 the running steps are interrupted/);
+    assert.match(await cli("status"), /planned update: at 2099-01-01 05:00, deadline 2099-01-01 06:00; waiting: until 2099-01-01 05:00/);
+    assert.match(await fails("update", "--deadline", "6:00"), /--deadline goes with --at/);
+    assert.match(await fails("update", "--at", "5:00", "--after", "Q"), /--at goes alone/);
+    assert.match(await cli("cancel-plan"), /^ok: the deploy planned at 2099-01-01 05:00 is cancelled/);
   } finally { await stopServer(s); }
 });

@@ -2,14 +2,12 @@
 // the server as `status.set` with `continued_in`, and `nexus status` shows the mark.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFile, execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, approveQueue, now, orchestratorStatusChange } from "@nexus/protocol";
+import { cliOut, cliRun } from "./run-cli.ts";
 
-const CLI = join(dirname(fileURLToPath(import.meta.url)), "../bin/nexus.js");
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "nexus-cli-queue-set-"));
@@ -21,13 +19,13 @@ function setup() {
   });
   approveQueue(store, "FL");
   const env = { ...process.env, NEXUS_DIR: store.dir, NEXUS_SESSION: "o", NEXUS_HOME: join(root, "home") };
-  const run = (...a: string[]) => {
-    try { return { out: execFileSync(process.execPath, [CLI, ...a], { cwd: root, env, encoding: "utf8", stdio: "pipe" }), err: "" }; }
+  const run = async (...a: string[]) => {
+    try { return { out: await cliOut([...a], { cwd: root, env }), err: "" }; }
     catch (e) { return { out: "", err: String((e as { stderr?: string }).stderr ?? e) }; }
   };
   /** The command while a stand-in for the server applies its status.set as the server does, and records the result. */
   const set = async (...a: string[]): Promise<string> => {
-    const child = new Promise<string>((ok) => execFile(process.execPath, [CLI, "queue", "set", ...a], { cwd: root, env, encoding: "utf8" }, (e, out, err) => ok(e ? `ERR ${err}` : out)));
+    const child = cliRun(["queue", "set", ...a], { cwd: root, env }).then((r) => (r.status ? `ERR ${r.stderr}` : r.stdout));
     let done = false;
     void child.then(() => { done = true; });
     while (!done) {
@@ -52,8 +50,8 @@ test("--continued-in goes with the skip as continued_in, and nexus status shows 
     /step FL\/FL2 skipped \(was pending\), continued in FL4, FL5/);
   const e = x.store.readEvents("o").entries.find((y) => y.type === "status.set");
   assert.deepEqual(e?.type === "status.set" && e.continued_in, ["FL4", "FL5"]);
-  assert.match(x.run("status").out, /FL2 skipped → FL4, FL5 \(level 2\)/, "the orchestrator's overview");
+  assert.match((await x.run("status")).out, /FL2 skipped → FL4, FL5 \(level 2\)/, "the orchestrator's overview");
   // Without it, a skip is as before; an empty --continued-in is refused before anything is sent.
   assert.match(await x.set("FL", "--step", "FL1", "skipped", "--reason", "no longer needed"), /step FL\/FL1 skipped \(was pending\)$/m);
-  assert.match(x.run("queue", "set", "FL", "--step", "FL3", "skipped", "--continued-in", ",", "--reason", "x").err, /--continued-in names where/);
+  assert.match((await x.run("queue", "set", "FL", "--step", "FL3", "skipped", "--continued-in", ",", "--reason", "x")).err, /--continued-in names where/);
 });

@@ -208,17 +208,18 @@ function appendJsonl(file: string, entry: unknown): void {
 
 // ---------------------------------------------------------------- registry
 
-export function nexusHome(): string {
-  return process.env.NEXUS_HOME ?? join(process.env.APPDATA ?? join(homedir(), ".config"), "Nexus");
+/** NEXUS_HOME of `env` (default: this process's); the CLI passes the environment of its call. */
+export function nexusHome(env: NodeJS.ProcessEnv = process.env): string {
+  return env.NEXUS_HOME ?? join(env.APPDATA ?? join(homedir(), ".config"), "Nexus");
 }
-const registryFile = () => join(nexusHome(), "projects.yaml");
+const registryFile = (env: NodeJS.ProcessEnv) => join(nexusHome(env), "projects.yaml");
 
-export function readRegistry(): RegistryFile {
-  const f = registryFile();
+export function readRegistry(env: NodeJS.ProcessEnv = process.env): RegistryFile {
+  const f = registryFile(env);
   return exists(f) ? readYaml(f, RegistryFile) : { protocol: 1, projects: [] };
 }
-export function writeRegistry(r: RegistryFile): void {
-  writeYaml(registryFile(), r);
+export function writeRegistry(r: RegistryFile, env: NodeJS.ProcessEnv = process.env): void {
+  writeYaml(registryFile(env), r);
 }
 
 // ---------------------------------------------------------------- locating a project's .nexus/
@@ -227,14 +228,14 @@ export function writeRegistry(r: RegistryFile): void {
  * Finds the .nexus directory for a working directory: walking up from it, then (for a worktree outside the main
  * checkout) the main checkout of its git repository.
  */
-export function findNexusDir(cwd = process.cwd()): string | null {
+export function findNexusDir(cwd = process.cwd(), env: NodeJS.ProcessEnv = process.env): string | null {
   for (let d = resolve(cwd); ; d = dirname(d)) {
     if (exists(join(d, NEXUS_DIRNAME, "project.yaml"))) return normPath(join(d, NEXUS_DIRNAME));
     if (dirname(d) === d) break;
   }
   try {
     const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
-      cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+      cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     const main = dirname(common);
     if (exists(join(main, NEXUS_DIRNAME, "project.yaml"))) return normPath(join(main, NEXUS_DIRNAME));
@@ -261,10 +262,17 @@ export class ProjectStore {
   readonly dir: string;
   /** How it reads: the files themselves (fileReader), or a model of them (model.ts). */
   readonly reader: Reader;
-  constructor(nexusDir: string, reader?: Reader) { this.dir = normPath(nexusDir); this.reader = reader ?? readerFor?.(this.dir) ?? fileReader; }
+  /**
+   * The environment it reads NEXUS_HOME from (the global settings, the away mode, the templates): this process's, or
+   * the one a CLI call was given (several sessions' calls may run in one process).
+   */
+  readonly env: NodeJS.ProcessEnv;
+  constructor(nexusDir: string, reader?: Reader, env: NodeJS.ProcessEnv = process.env) {
+    this.dir = normPath(nexusDir); this.reader = reader ?? readerFor?.(this.dir) ?? fileReader; this.env = env;
+  }
   private yaml<S extends z.ZodType>(file: string, schema: S): z.infer<S> { return schema.parse(this.reader.parsed(file, YAML.parse)); }
 
-  static forRoot(root: string): ProjectStore { return new ProjectStore(join(root, NEXUS_DIRNAME)); }
+  static forRoot(root: string, env: NodeJS.ProcessEnv = process.env): ProjectStore { return new ProjectStore(join(root, NEXUS_DIRNAME), undefined, env); }
 
   /**
    * Test seam (queue LH): a server that ends between two writes. The first `after` writes of the file named by its
@@ -284,8 +292,8 @@ export class ProjectStore {
    * Creates .nexus/ with a .gitignore that ignores the directory itself, so the project's own .gitignore is untouched.
    * The settings given are the project's own values; every other setting follows the global one.
    */
-  static init(root: string, project: Omit<z.input<typeof StoredProject>, "protocol" | "follows_global">): ProjectStore {
-    const store = ProjectStore.forRoot(root);
+  static init(root: string, project: Omit<z.input<typeof StoredProject>, "protocol" | "follows_global">, env: NodeJS.ProcessEnv = process.env): ProjectStore {
+    const store = ProjectStore.forRoot(root, env);
     mkdirSync(join(store.dir, "queues"), { recursive: true });
     mkdirSync(join(store.dir, "sessions"), { recursive: true });
     writeFileSync(join(store.dir, ".gitignore"), "*\n", "utf8");
@@ -296,7 +304,7 @@ export class ProjectStore {
 
   get projectFile(): string { return join(this.dir, "project.yaml"); }
   /** The project's effective settings: its own values where it has them, else the global ones (src/settings.ts). */
-  readProject(): ProjectFile { return effectiveProject(this.readStoredProject(), readGlobalSettings()); }
+  readProject(): ProjectFile { return effectiveProject(this.readStoredProject(), readGlobalSettings(this.env)); }
   /** project.yaml as stored: project-only settings, state and the project's own values (overrides). */
   readStoredProject(): StoredProject { return this.yaml(this.projectFile, StoredProject); }
   writeStoredProject(p: StoredProject): void { writeYaml(this.projectFile, StoredProject.parse(p)); }
@@ -306,7 +314,7 @@ export class ProjectStore {
    * `follow` follow the global value again. Every writer of project.yaml goes through this.
    */
   updateProject(change: (p: ProjectFile) => ProjectFile, follow: readonly string[] = [], own: readonly string[] = []): ProjectFile {
-    const global = readGlobalSettings();
+    const global = readGlobalSettings(this.env);
     const stored = applyChange(this.readStoredProject(), global, change(this.readProject()), follow, own);
     this.writeStoredProject(stored);
     return effectiveProject(stored, global);
@@ -316,7 +324,7 @@ export class ProjectStore {
    * one becomes the project's own (settings.ts, storedFrom). For setting up a project or a test; a change of some
    * settings goes through updateProject, which keeps an own value that happens to equal the global one.
    */
-  writeProject(p: ProjectFile): void { this.writeStoredProject(storedFrom(p, readGlobalSettings())); }
+  writeProject(p: ProjectFile): void { this.writeStoredProject(storedFrom(p, readGlobalSettings(this.env))); }
   /**
    * .nexus/orchestrator/summary.md: the summary the orchestrator wrote when its context neared full, which the fresh
    * session that went on from it started from (the latest one; each is also a context.summary event of its session).
@@ -336,7 +344,7 @@ export class ProjectStore {
    * Writes only when the file is not migrated yet; returns whether it wrote.
    */
   migrateProject(): boolean {
-    const migrated = migrateStored(YAML.parse(readText(this.projectFile)), readGlobalSettings());
+    const migrated = migrateStored(YAML.parse(readText(this.projectFile)), readGlobalSettings(this.env));
     if (migrated) this.writeStoredProject(migrated);
     return !!migrated;
   }
@@ -597,10 +605,10 @@ export class ProjectStore {
 
 // ---------------------------------------------------------------- account-wide usage
 
-const turnsFile = () => join(nexusHome(), "turns.jsonl");
+const turnsFile = (env: NodeJS.ProcessEnv = process.env) => join(nexusHome(env), "turns.jsonl");
 /** One line per agent turn of every project (TurnRecord). Written only by the server (AgentHost). */
 export function appendTurn(r: TurnRecord): void { mkdirSync(nexusHome(), { recursive: true }); appendJsonl(turnsFile(), TurnRecord.parse(r)); }
-export function readTurns(): JsonlRead<TurnRecord> { return home.jsonl(turnsFile(), TurnRecord, false); }
+export function readTurns(env: NodeJS.ProcessEnv = process.env): JsonlRead<TurnRecord> { return home.jsonl(turnsFile(env), TurnRecord, false); }
 
 // ---------------------------------------------------------------- the server's speed (queue SB)
 
@@ -617,10 +625,10 @@ export function readServerSpeed(file = serverSpeedFile()): JsonlRead<ServerSpeed
 
 // ---------------------------------------------------------------- global settings
 
-const globalSettingsFile = () => join(nexusHome(), "settings.yaml");
+const globalSettingsFile = (env: NodeJS.ProcessEnv = process.env) => join(nexusHome(env), "settings.yaml");
 /** The global settings (<NEXUS_HOME>/settings.yaml); the built-in defaults while the file does not exist. */
-export function readGlobalSettings(): GlobalSettings {
-  const f = globalSettingsFile();
+export function readGlobalSettings(env: NodeJS.ProcessEnv = process.env): GlobalSettings {
+  const f = globalSettingsFile(env);
   return home.has(f) ? GlobalSettings.parse(home.parsed(f, YAML.parse)) : builtInSettings();
 }
 /**
@@ -659,10 +667,11 @@ export function ensureGlobalSettings(): GlobalSettings {
   return next;
 }
 
-const awayFile = () => join(nexusHome(), "away.yaml");
+const awayFile = (env: NodeJS.ProcessEnv = process.env) => join(nexusHome(env), "away.yaml");
 /** The away mode (missing: never turned on). */
-export function readAway(): AwayFile {
-  try { return home.has(awayFile()) ? AwayFile.parse(home.parsed(awayFile(), YAML.parse)) : AwayFile.parse({ protocol: 1 }); } catch { return AwayFile.parse({ protocol: 1 }); }
+export function readAway(env: NodeJS.ProcessEnv = process.env): AwayFile {
+  const f = awayFile(env);
+  try { return home.has(f) ? AwayFile.parse(home.parsed(f, YAML.parse)) : AwayFile.parse({ protocol: 1 }); } catch { return AwayFile.parse({ protocol: 1 }); }
 }
 /** Only the server writes it, from the user's action or at its end (away.ts). */
 export function writeAway(a: AwayFile): void {
@@ -670,10 +679,11 @@ export function writeAway(a: AwayFile): void {
   writeYaml(awayFile(), AwayFile.parse(a));
 }
 
-const capacityFile = () => join(nexusHome(), "capacity.yaml");
+const capacityFile = (env: NodeJS.ProcessEnv = process.env) => join(nexusHome(env), "capacity.yaml");
 /** The capacity coordinator's state; undefined when there is none, or it cannot be read (nothing is shown then). */
-export function readCapacity(): CapacityFile | undefined {
-  try { return exists(capacityFile()) ? readYaml(capacityFile(), CapacityFile) : undefined; } catch { return undefined; }
+export function readCapacity(env: NodeJS.ProcessEnv = process.env): CapacityFile | undefined {
+  const f = capacityFile(env);
+  try { return exists(f) ? readYaml(f, CapacityFile) : undefined; } catch { return undefined; }
 }
 /** Only the server writes it (apps/server/src/capacity.ts). */
 export function writeCapacity(c: CapacityFile): void {

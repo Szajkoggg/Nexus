@@ -88,12 +88,22 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const CLI = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/cli/bin/nexus.js");
-
-const nexus = (...args: string[]) => execFileSync(process.execPath, [CLI, ...args], { env: process.env, stdio: "ignore" });
-const nexusOut = (args: string[], input?: string): string => {
-  try { return execFileSync(process.execPath, [CLI, ...args], { env: process.env, input, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim(); }
-  catch (e) { return `nexus failed: ${String((e as { stderr?: string }).stderr ?? e).trim()}`; }
+/**
+ * `nexus`, run inside the fake's own process with its environment and working directory (queue IPR): the CLI's run(),
+ * loaded at the first call. A failure throws, as a failed process did. The fake's input waits meanwhile, as it did
+ * while the fake waited for the process: a message sent during a call (one that waits for the server, `queue draft`)
+ * is read after it, not taken in as read inside the turn.
+ */
+const cli = () => import("../../../packages/cli/test/run-cli.ts");
+async function holdingInput<T>(call: () => Promise<T>): Promise<T> {
+  const hold = !process.stdin.isPaused();
+  if (hold) process.stdin.pause();
+  try { return await call(); } finally { if (hold) process.stdin.resume(); }
+}
+const nexus = async (...args: string[]): Promise<void> => { await holdingInput(async () => (await cli()).cliOut(args)); };
+const nexusOut = async (args: string[], input?: string): Promise<string> => {
+  const r = await holdingInput(async () => (await cli()).cliRun(args, { input }));
+  return r.status === 0 ? r.stdout.trim() : `nexus failed: ${r.stderr.trim()}`;
 };
 
 /**
@@ -170,8 +180,9 @@ export interface Fake {
  * turn ends, as an agent acts on what it reads mid-turn; its output joins the reply. Without it, a command sent while
  * the orchestrator's fake answered a notice was lost, and the test waited in vain (queue TS1).
  */
-export function actOnRead(read: readonly string[], reply: string): string {
-  const outs = read.map((t) => /FAKE-NEXUS: (\[.*\])/.exec(t)).filter((m): m is RegExpExecArray => !!m).map((m) => nexusOut(JSON.parse(m[1]!) as string[]));
+export async function actOnRead(read: readonly string[], reply: string): Promise<string> {
+  const outs: string[] = [];
+  for (const m of read.map((t) => /FAKE-NEXUS: (\[.*\])/.exec(t)).filter((m): m is RegExpExecArray => !!m)) outs.push(await nexusOut(JSON.parse(m[1]!) as string[]));
   return outs.length ? [reply, ...outs].join("\n\n") : reply;
 }
 
@@ -282,28 +293,28 @@ export function saveFakeConversation(id: string, runtime: "claude" | "codex" = "
 let stoppedIntegration = false;
 
 /** The integration step's merge, as its opening asks (see the header). */
-function integrate(step: string, text: string): void {
+async function integrate(step: string, text: string): Promise<void> {
   stoppedIntegration = false;
   const g = ["-c", "user.name=worker", "-c", "user.email=worker@example.invalid", "-c", "commit.gpgsign=false"];
   const git = (...a: string[]) => execFileSync("git", [...g, ...a], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   const stop = /nexus stop \S+ --condition "([^"]+)"/.exec(text)?.[1] ?? "integration conflict";
   const base = /git merge --no-edit (\S+)/.exec(text)?.[1];
-  if (!base) { stoppedIntegration = true; nexus("stop", step, "--condition", stop, "--reason", "fake: no base branch to merge"); return; }
+  if (!base) { stoppedIntegration = true; await nexus("stop", step, "--condition", stop, "--reason", "fake: no base branch to merge"); return; }
   try { git("merge", "--no-edit", base); }
   catch {
     const files = git("diff", "--name-only", "--diff-filter=U").split(/\r?\n/).filter(Boolean);
     if (/- A conflict: resolve it/.test(text) && !(process.env.FAKE_INTEGRATE_GIVE_UP && existsSync(process.env.FAKE_INTEGRATE_GIVE_UP))) {
       for (const f of files) { git("checkout", "--ours", "--", f); git("add", "--", f); }
       git("commit", "--no-edit", "-q");
-      nexus("step", "done", step, "--summary", `fake merged ${base}, resolved ${files.join(", ")}`, "--commit", git("rev-parse", "HEAD"));
+      await nexus("step", "done", step, "--summary", `fake merged ${base}, resolved ${files.join(", ")}`, "--commit", git("rev-parse", "HEAD"));
       return;
     }
     git("merge", "--abort");
     stoppedIntegration = true;
-    nexus("stop", step, "--condition", stop, "--reason", `fake: conflict in ${files.join(", ")} not resolved`);
+    await nexus("stop", step, "--condition", stop, "--reason", `fake: conflict in ${files.join(", ")} not resolved`);
     return;
   }
-  nexus("step", "done", step, "--summary", `fake merged ${base}`, "--commit", git("rev-parse", "HEAD"));
+  await nexus("step", "done", step, "--summary", `fake merged ${base}`, "--commit", git("rev-parse", "HEAD"));
 }
 
 /** A Write the runtime's --disallowedTools rules refuse (Claude's form for an absolute path: Write(//C:/x/**)). */
@@ -331,7 +342,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     const closing = text.includes("This is the queue's closing refactoring step");
     const integration = text.includes("This is the queue's integration step");
     let behaviour = /FAKE: (\w+)/.exec(text)?.[1] ?? (closing ? process.env.FAKE_CLOSING : undefined) ?? (integration ? process.env.FAKE_INTEGRATE ?? "merge" : undefined) ?? "done";
-    nexus("step", "start", step);
+    await nexus("step", "start", step);
     tool(`nexus step start ${step}`);
     // Real OS descendants under the fake runtime: one direct sleeper and an orphaned grandchild. The intermediate
     // exits before the turn reports its outcome, which a process-list snapshot cannot reliably reconstruct.
@@ -360,12 +371,12 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     }
     const fail = failure(step, behaviour);
     if (fail) return { fail };
-    if (/^(overloaded|network|auth|limit|crash|cloudflare)/.test(behaviour)) nexus("step", "done", step, "--summary", `fake finished ${step} after failures`);
+    if (/^(overloaded|network|auth|limit|crash|cloudflare)/.test(behaviour)) await nexus("step", "done", step, "--summary", `fake finished ${step} after failures`);
     if (behaviour === "slow" || behaviour === "slownoop" || behaviour === "slowask") await work(step);
     if (behaviour === "checks" || behaviour === "shortchecks") {
       const listed = /\nChecks for every step:\n((?:- .*(?:\n|$))+)/.exec(text)?.[1] ?? "";
       for (const name of listed.split("\n").filter(Boolean).map((l) => l.slice(2).trim())) {
-        nexus("check", step, behaviour === "checks" ? name : name.split(/\s+/).at(-1)!, "--ok", "--summary", "fake run", "--duration", "1");
+        await nexus("check", step, behaviour === "checks" ? name : name.split(/\s+/).at(-1)!, "--ok", "--summary", "fake run", "--duration", "1");
       }
     }
     // "commit": a commit in the working directory (a file named after the step), then done.
@@ -375,55 +386,55 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
       const g = ["-c", "user.name=worker", "-c", "user.email=worker@example.invalid", "-c", "commit.gpgsign=false"];
       execFileSync("git", [...g, "add", `${step}.txt`], { stdio: "ignore" });
       execFileSync("git", [...g, "commit", "-q", "-m", `${step} work`], { stdio: "ignore" });
-      if (behaviour === "commit") nexus("step", "done", step, "--summary", `fake committed ${step}`);
-      else nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop after a commit");
+      if (behaviour === "commit") await nexus("step", "done", step, "--summary", `fake committed ${step}`);
+      else await nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop after a commit");
     }
     if (behaviour === "untracked") {
       writeFileSync(join(process.cwd(), `${step}-left.txt`), "left behind\n");
-      nexus("step", "done", step, "--summary", `fake finished ${step}, leaving ${step}-left.txt`);
+      await nexus("step", "done", step, "--summary", `fake finished ${step}, leaving ${step}-left.txt`);
     }
-    if (behaviour === "merge") integrate(step, text);
+    if (behaviour === "merge") await integrate(step, text);
     if (behaviour === "review") {
       const dir = join(tmpdir(), "nexus-review", step);
       mkdirSync(dir, { recursive: true });
       const shot = join(dir, `${step.toLowerCase()}-shot@492.png`), note = join(dir, "notes.md");
       writeFileSync(shot, PNG_492); writeFileSync(note, `# Review notes of ${step}
 `);
-      nexus("review", "add", step, shot, "--key", `${step.toLowerCase()}-shot@492`, "--role", "result", "--label", `${step} shot`);
-      nexus("review", "add", step, note, "--label", `${step} notes`);
-      nexus("step", "done", step, "--summary", `fake finished ${step} with review material`);
+      await nexus("review", "add", step, shot, "--key", `${step.toLowerCase()}-shot@492`, "--role", "result", "--label", `${step} shot`);
+      await nexus("review", "add", step, note, "--label", `${step} notes`);
+      await nexus("step", "done", step, "--summary", `fake finished ${step} with review material`);
     }
     if (behaviour === "subagent") {
       fake.subagent = true;
-      nexus("step", "done", step, "--summary", `fake finished ${step} with a sub-agent`);
+      await nexus("step", "done", step, "--summary", `fake finished ${step} with a sub-agent`);
     }
     if (behaviour === "metric") {
-      for (const [, name, value] of text.matchAll(/FAKE-METRIC: (\S+) (\S+)/g)) nexus("metric", "record", name!, value!);
-      nexus("step", "done", step, "--summary", `fake finished ${step} with its metrics`);
+      for (const [, name, value] of text.matchAll(/FAKE-METRIC: (\S+) (\S+)/g)) await nexus("metric", "record", name!, value!);
+      await nexus("step", "done", step, "--summary", `fake finished ${step} with its metrics`);
     }
-    if (behaviour === "refused") { refused?.(); nexus("step", "done", step, "--summary", `fake finished ${step} without what was refused`); }
+    if (behaviour === "refused") { refused?.(); await nexus("step", "done", step, "--summary", `fake finished ${step} without what was refused`); }
     // A closing refactoring step done finds nothing worth refactoring.
-    if (["done", "slow", "summary", "summaryslow", "checks", "shortchecks"].includes(behaviour)) nexus("step", "done", step, "--summary", closing ? `fake: nothing in ${step} is worth refactoring, the change is too small` : `fake finished ${step}`);
-    if (behaviour.startsWith("summary")) nexus("context", `fake summary of ${step}`, "--topics", "fake,context");
+    if (["done", "slow", "summary", "summaryslow", "checks", "shortchecks"].includes(behaviour)) await nexus("step", "done", step, "--summary", closing ? `fake: nothing in ${step} is worth refactoring, the change is too small` : `fake finished ${step}`);
+    if (behaviour.startsWith("summary")) await nexus("context", `fake summary of ${step}`, "--topics", "fake,context");
     if (behaviour === "summaryslow") await work(step);
-    if (behaviour === "fail") nexus("step", "failed", step, "--reason", "fake failure");
+    if (behaviour === "fail") await nexus("step", "failed", step, "--reason", "fake failure");
     if (behaviour === "doneexit" || behaviour === "doneexitheld") {
-      nexus("step", "done", step, "--summary", `fake finished ${step}, then exits`);
+      await nexus("step", "done", step, "--summary", `fake finished ${step}, then exits`);
       if (behaviour === "doneexitheld") await work(step); // accept review before the runtime's exit arrives
       return { exit: true };
     }
-    if (behaviour === "stop") nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop");
+    if (behaviour === "stop") await nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop");
     // stop1: a stop condition on the step's first turn; once the stop is lifted, the step is done.
     if (behaviour === "stop1") {
       const file = join(dirname(process.env.FAKE_LOG ?? "."), `fake-stops-${step}`);
-      if (existsSync(file)) nexus("step", "done", step, "--summary", `fake finished ${step} after the stop was lifted`);
-      else { writeFileSync(file, "1"); nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop"); }
+      if (existsSync(file)) await nexus("step", "done", step, "--summary", `fake finished ${step} after the stop was lifted`);
+      else { writeFileSync(file, "1"); await nexus("stop", step, "--condition", "fake condition", "--reason", "fake stop"); }
     }
-    if (behaviour === "ask" || behaviour === "slowask" || behaviour === "askslow") nexus("ask", "Which way?", "--step", step);
+    if (behaviour === "ask" || behaviour === "slowask" || behaviour === "askslow") await nexus("ask", "Which way?", "--step", step);
     if (behaviour === "askslow") fake.answerWork = true;
-    if (behaviour === "askwork") { nexus("ask", "Which way?", "--step", step, "--can-continue"); await work(step); }
+    if (behaviour === "askwork") { await nexus("ask", "Which way?", "--step", step, "--can-continue"); await work(step); }
     if (behaviour === "askthree") {
-      for (const text of ["Which layout?", "Which colour?", "Which sound?"]) nexus("ask", text, "--step", step, "--can-continue", "--option", "First", "--option", "Second", "--recommend", "First");
+      for (const text of ["Which layout?", "Which colour?", "Which sound?"]) await nexus("ask", text, "--step", step, "--can-continue", "--option", "First", "--option", "Second", "--recommend", "First");
       if (process.env.FAKE_ASK_LINGER_MS) await new Promise(r => setTimeout(r, Number(process.env.FAKE_ASK_LINGER_MS)));
     }
     // ask1 and partial: what they do the first time, counted in a file beside FAKE_LOG (any session of the step).
@@ -435,26 +446,26 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     };
     if (behaviour === "ask1") {
       if (first("ask1")) {
-        nexus("ask", "Which way?", "--step", step);
+        await nexus("ask", "Which way?", "--step", step);
         if (process.env.FAKE_ASK_LINGER_MS) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_ASK_LINGER_MS)));
       }
-      else nexus("step", "done", step, "--summary", `fake finished ${step} after its question`);
+      else await nexus("step", "done", step, "--summary", `fake finished ${step} after its question`);
     }
     if (behaviour === "noopexit1") {
       if (first("noopexit1")) fake.exitHeld = true;
-      else nexus("step", "done", step, "--summary", `fake finished ${step} after its process exited`);
+      else await nexus("step", "done", step, "--summary", `fake finished ${step} after its process exited`);
     }
     if (behaviour === "partial") {
       if (first("partial")) {
-        nexus("step", "progress", step, "half way", "--pct", "50");
+        await nexus("step", "progress", step, "half way", "--pct", "50");
         const g = ["-c", "user.name=worker", "-c", "user.email=worker@example.invalid", "-c", "commit.gpgsign=false"];
         writeFileSync(join(process.cwd(), `${step}-a.txt`), "first\n");
         execFileSync("git", [...g, "add", `${step}-a.txt`], { stdio: "ignore" });
         execFileSync("git", [...g, "commit", "-q", "-m", `${step} first half`], { stdio: "ignore" });
         writeFileSync(join(process.cwd(), `${step}-a.txt`), "first\nsecond\n");
         writeFileSync(join(process.cwd(), `${step}-b.txt`), "not committed\n");
-      } else if (existsSync(join(process.cwd(), `${step}-b.txt`))) nexus("step", "done", step, "--summary", `fake finished ${step}: kept the uncommitted work`);
-      else nexus("step", "failed", step, "--reason", "the uncommitted work is gone");
+      } else if (existsSync(join(process.cwd(), `${step}-b.txt`))) await nexus("step", "done", step, "--summary", `fake finished ${step}: kept the uncommitted work`);
+      else await nexus("step", "failed", step, "--reason", "the uncommitted work is gone");
     }
     if (behaviour === "background" || behaviour === "bgagent" || behaviour === "bglong") {
       fake.background = behaviour === "bglong"
@@ -472,7 +483,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
         // Tests running side by side may share a project id and so a report file: a refusal here is not the test's subject.
         // "FAKE-FINDINGS: <n>" in the goal: the number of findings, given as a maintenance queue's report gives it.
         const findings = /FAKE-FINDINGS: (\d+)/.exec(text)?.[1];
-        try { nexus("report", report[1]!, "--file", path, "--summary", `fake report of ${report[1]}`, ...(findings ? ["--findings", findings] : [])); } catch { /* another test took it */ }
+        try { await nexus("report", report[1]!, "--file", path, "--summary", `fake report of ${report[1]}`, ...(findings ? ["--findings", findings] : [])); } catch { /* another test took it */ }
       }
     }
     return `step ${step}: ${behaviour}`;
@@ -481,12 +492,12 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
   fake.step ??= stepFile && existsSync(stepFile) ? readFileSync(stepFile, "utf8") : undefined;
   // Background work ended: Claude Code's own turn with the task's notification, or Nexus's nudge after it (Codex).
   if ((text.startsWith(BACKGROUND_NOTICE) || text.startsWith("[Nexus] The background work you started has finished")) && fake.step) {
-    nexus("step", "done", fake.step, "--summary", `fake finished ${fake.step} after its background work`);
+    await nexus("step", "done", fake.step, "--summary", `fake finished ${fake.step} after its background work`);
     return "background done";
   }
   if (text.startsWith("[Nexus] Answer") && fake.step) {
     if (fake.answerWork) await work(fake.step);
-    nexus("step", "done", fake.step, "--summary", `fake finished ${fake.step} after an answer`);
+    await nexus("step", "done", fake.step, "--summary", `fake finished ${fake.step} after an answer`);
     return "answered";
   }
   // A check-fix round (the checks Nexus ran failed): with FAKE_CHECK_DISPUTE naming a check that failed, say once (per
@@ -501,31 +512,31 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     const name = dispute === "*" ? /Check "(.+)" failed/.exec(text)?.[1] : dispute;
     if (name && !existsSync(marker) && text.includes(`Check "${name}" failed`)) {
       writeFileSync(marker, "1");
-      const out = nexusOut(["check", step, name, "--unrelated", "--evidence", "it fails on the base too"]);
+      const out = await nexusOut(["check", step, name, "--unrelated", "--evidence", "it fails on the base too"]);
       return `disputed: ${out}`;
     }
-    nexus("step", "start", step);
+    await nexus("step", "start", step);
     // FAKE_CHECK_FIX_MS: the fix takes that long (a picture of the round at work; a stop ends it early).
     if (process.env.FAKE_CHECK_FIX_MS && await interruptible(Number(process.env.FAKE_CHECK_FIX_MS))) return { interrupted: true };
-    nexus("step", "done", step, "--summary", `fake fixed ${step} in check-fix round ${fix[2]}`);
+    await nexus("step", "done", step, "--summary", `fake fixed ${step} in check-fix round ${fix[2]}`);
     return `check-fix round ${fix[2]}`;
   }
   // A step sent back (by the orchestrator or the user's Fix it): work on it again and report it done.
   const back = /^\[Nexus\] The (?:orchestrator reviewed|user sent) step (\S+) of queue \S+ .*\(round (\d+)\)/.exec(text);
   if (back) {
-    nexus("step", "start", back[1]!);
-    nexus("step", "done", back[1]!, "--summary", `fake finished ${back[1]} round ${back[2]}`);
+    await nexus("step", "start", back[1]!);
+    await nexus("step", "done", back[1]!, "--summary", `fake finished ${back[1]} round ${back[2]}`);
     return `round ${back[2]}`;
   }
   if (text.startsWith("[Nexus] Your context holds") && text.includes("fresh orchestrator session")) {
-    if (!process.env.FAKE_NO_SUMMARY) nexus("context", "fake orchestrator summary", "--topics", "plan,promises", "--files", "docs/plan.md");
+    if (!process.env.FAKE_NO_SUMMARY) await nexus("context", "fake orchestrator summary", "--topics", "plan,promises", "--files", "docs/plan.md");
     if (process.env.FAKE_SUMMARY_MS) await new Promise((r) => setTimeout(r, Number(process.env.FAKE_SUMMARY_MS)));
     return "summary written";
   }
   if (text.includes("write your context summary")) {
     // FAKE_SUMMARY_FAIL: the request's turn fails that way (a failure kind, as a step's behaviour names it).
     if (process.env.FAKE_SUMMARY_FAIL) return { fail: process.env.FAKE_SUMMARY_FAIL as FakeFailure };
-    if (!process.env.FAKE_NO_SUMMARY && fake.step) nexus("context", `fake summary of ${fake.step}, on request`, "--topics", "fake");
+    if (!process.env.FAKE_NO_SUMMARY && fake.step) await nexus("context", `fake summary of ${fake.step}, on request`, "--topics", "fake");
     return "summary";
   }
   if (text.includes("hands this conversation to the orchestrator")) return longReply("SUMMARY");
@@ -542,19 +553,19 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
   if (text.includes("FAKE-EXIT-HELD")) { fake.exitHeld = true; return "exit reply"; }
   if (text.includes("FAKE-HISTORY")) return `history: ${(fake.history ?? []).join(" | ")}`;
   const draft = /FAKE-DRAFT:\s*\n([\s\S]*)$/.exec(text);
-  if (draft) return nexusOut(["queue", "draft", "-"], draft[1]);
+  if (draft) return await nexusOut(["queue", "draft", "-"], draft[1]);
   const run = /FAKE-NEXUS: (\[.*\])/.exec(text);
-  if (run) return nexusOut(JSON.parse(run[1]!) as string[]);
+  if (run) return await nexusOut(JSON.parse(run[1]!) as string[]);
   const script = /FAKE-SCRIPT: (.+)/.exec(text);
   if (script) {
     try { return execFileSync(process.execPath, [script[1]!.trim()], { env: process.env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(); }
     catch (e) { return `script failed: ${(e as { stderr?: string }).stderr ?? (e as Error).message}`; }
   }
   const asked = /A worker asked[\s\S]*?\(qid (\S+);/.exec(text);
-  if (asked) return nexusOut(["answer", asked[1]!, "fake answer", "--continue"]);
+  if (asked) return await nexusOut(["answer", asked[1]!, "fake answer", "--continue"]);
   // With FAKE_REVIEW_ACCEPT set, a step waiting for its review is accepted (tests about something other than review).
   const review = /\bStep (\S+) of queue (\S+) is done and waits for your review/.exec(text);
-  if (review && process.env.FAKE_REVIEW_ACCEPT) return nexusOut(["review", "accept", review[2]!, review[1]!]);
+  if (review && process.env.FAKE_REVIEW_ACCEPT) return await nexusOut(["review", "accept", review[2]!, review[1]!]);
   return "ok"; // a nudge, a message sent while idle, anything else
 }
 
@@ -565,13 +576,13 @@ async function reviewAsHelper(text: string, queue: string, step: string, round: 
   const run = (args: string[]) => { tool(`nexus ${args.join(" ")}`); return nexusOut(args); };
   if (verdict === "none") return "fake helper: no verdict";
   if (verdict === "hang") { await work(step); return "fake helper: no verdict after work"; }
-  if (verdict === "accept" || (verdict === "sendback1" && round > 1)) return run(["review", "accept", queue, step, "--note", `fake helper checked round ${round}`]);
-  if (verdict === "sendback" || verdict === "sendback1") return run(["review", "send-back", queue, step, `fake helper: fix round ${round}`]);
-  if (verdict.startsWith("passon:")) return run(["review", "pass-on", queue, step, "--why", verdict.slice(7), "--findings", `fake helper findings for ${step}`]);
+  if (verdict === "accept" || (verdict === "sendback1" && round > 1)) return await run(["review", "accept", queue, step, "--note", `fake helper checked round ${round}`]);
+  if (verdict === "sendback" || verdict === "sendback1") return await run(["review", "send-back", queue, step, `fake helper: fix round ${round}`]);
+  if (verdict.startsWith("passon:")) return await run(["review", "pass-on", queue, step, "--why", verdict.slice(7), "--findings", `fake helper findings for ${step}`]);
   if (verdict === "refused") {
     refused?.();
-    const asked = run(["ask", "May I push?", "--step", step]);
-    return run(["review", "pass-on", queue, step, "--why", "doubt", "--findings", `fake helper: git push was refused; ${asked}`]);
+    const asked = await run(["ask", "May I push?", "--step", step]);
+    return await run(["review", "pass-on", queue, step, "--why", "doubt", "--findings", `fake helper: git push was refused; ${asked}`]);
   }
   return `fake helper: unknown verdict ${verdict}`;
 }

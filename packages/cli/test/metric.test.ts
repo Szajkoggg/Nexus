@@ -5,14 +5,13 @@
 // the orchestrator's events as the server does (defineMetric, then applied.jsonl).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFile, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ActionError, ProjectStore, defineMetric, loadProjectState, newId, now, type Event } from "@nexus/protocol";
+import { cliOut, cliRun } from "./run-cli.ts";
 
-const CLI = join(dirname(fileURLToPath(import.meta.url)), "../bin/nexus.js");
 const G = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
 
 function setup() {
@@ -26,15 +25,15 @@ function setup() {
   store.writeSession({ protocol: 1, id: "w", project: "p", role: "worker", runtime: "claude", cwd: root, launched_by: "nexus", created_at: at, queue: "Q" });
   store.writeSession({ protocol: 1, id: "o", project: "p", role: "orchestrator", runtime: "claude", cwd: root, launched_by: "nexus", created_at: at });
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "approved", stop_conditions: [], checks: [], steps: [{ id: "Q1", title: "Step", goal: "", acceptance: [] }, { id: "Q2", title: "Next", goal: "", acceptance: [] }] });
-  const run = (session: string, a: string[]) => {
+  const run = async (session: string, a: string[]) => {
     const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: store.dir, NEXUS_SESSION: session };
-    try { return { out: execFileSync(process.execPath, [CLI, ...a], { cwd: root, env, encoding: "utf8", stdio: "pipe" }), err: "" }; }
+    try { return { out: await cliOut([...a], { cwd: root, env }), err: "" }; }
     catch (e) { return { out: "", err: String((e as { stderr?: string }).stderr ?? e) }; }
   };
   /** The orchestrator's command while a stand-in for the server applies its metric.defined events. */
   const define = async (...a: string[]): Promise<string> => {
     const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: store.dir, NEXUS_SESSION: "o" };
-    const child = new Promise<string>((ok) => execFile(process.execPath, [CLI, "metric", "define", ...a], { cwd: root, env, encoding: "utf8" }, (e, out, err) => ok(e ? `ERR ${err}` : out)));
+    const child = cliRun(["metric", "define", ...a], { cwd: root, env }).then((r) => (r.status ? `ERR ${r.stderr}` : r.stdout));
     let done = false;
     void child.then(() => { done = true; });
     while (!done) {
@@ -69,12 +68,12 @@ test("the orchestrator defines a metric with its unit, how it shows, a target an
   assert.match(await x.define("bundle-kb", "--unit", "KB", "--warn-above", "600"), /^ok: metric bundle-kb \(KB, line; warn above 600\) changed/);
   assert.deepEqual(x.store.readMetrics().metrics.map((m) => [m.name, m.target, m.warn_above]), [["bundle-kb", undefined, 600], ["fps.p95", undefined, undefined], ["check:npm test", undefined, 300]], "the whole definition is replaced, in its place");
   assert.equal(loadProjectState(x.store).metrics.metrics.length, 3, "the state carries the definitions");
-  const list = x.run("w", ["metric", "list"]).out;
+  const list = (await x.run("w", ["metric", "list"])).out;
   assert.match(list, /^ {2}bundle-kb \(KB, line; warn above 600\)$/m);
   assert.match(list, /every check's time is a metric too: check:<the check's name> \(s\)/);
 });
 
-test("a bad definition is refused before anything is written", () => {
+test("a bad definition is refused before anything is written", async () => {
   const x = setup();
   const bad: [string[], RegExp][] = [
     [["Bundle KB", "--unit", "KB"], /a metric's name is lowercase words/],
@@ -87,7 +86,7 @@ test("a bad definition is refused before anything is written", () => {
     [["check:"], /a check's time is check:<the check's name/],
   ];
   for (const [a, re] of bad) {
-    const r = x.run("o", ["metric", "define", ...a]);
+    const r = await x.run("o", ["metric", "define", ...a]);
     assert.match(r.err, re, a.join(" "));
   }
   assert.equal(x.events("o", "metric.defined").length, 0, "nothing was written");
@@ -101,12 +100,12 @@ test("a worker records a value for its step at work, with the metric's unit and 
   x.start("Q1");
   writeFileSync(join(x.root, "a.txt"), "a\n"); x.git("add", "a.txt"); x.git("commit", "-qm", "work");
   const head = x.git("rev-parse", "HEAD");
-  assert.match(x.run("w", ["metric", "record", "bundle-kb", "512.5"]).out, new RegExp(`^ok: bundle-kb = 512\\.5 KB for Q/Q1 at ${head.slice(0, 7)}`));
-  x.run("w", ["metric", "record", "bundle-kb", "480", "--step", "Q2"]);
+  assert.match((await x.run("w", ["metric", "record", "bundle-kb", "512.5"])).out, new RegExp(`^ok: bundle-kb = 512\\.5 KB for Q/Q1 at ${head.slice(0, 7)}`));
+  await x.run("w", ["metric", "record", "bundle-kb", "480", "--step", "Q2"]);
   const recorded = x.events("w", "metric.recorded") as Extract<Event, { type: "metric.recorded" }>[];
   assert.deepEqual(recorded.map((e) => [e.queue, e.step, e.name, e.value, e.unit, e.commit]), [["Q", "Q1", "bundle-kb", 512.5, "KB", head], ["Q", "Q2", "bundle-kb", 480, "KB", head]]);
   // In the step's view, with the mark of a value beyond the threshold; a check's time is a metric too.
-  x.run("w", ["check", "Q1", "npm test", "--ok", "--duration", "12"]);
+  await x.run("w", ["check", "Q1", "npm test", "--ok", "--duration", "12"]);
   const steps = loadProjectState(x.store).queues[0]!.steps;
   assert.deepEqual(steps[0]!.metrics.map((m) => [m.name, m.value, m.unit, m.commit, m.warn]), [
     ["bundle-kb", 512.5, "KB", head, { side: "above", limit: 500 }],
@@ -118,22 +117,22 @@ test("a worker records a value for its step at work, with the metric's unit and 
 test("a bad value, an unknown metric, a check's time, or no step at work is refused, and nothing is written", async () => {
   const x = setup();
   await x.define("bundle-kb", "--unit", "KB");
-  assert.match(x.run("w", ["metric", "record", "bundle-kb", "12"]).err, /none of your steps is at work: add --step <step>/);
+  assert.match((await x.run("w", ["metric", "record", "bundle-kb", "12"])).err, /none of your steps is at work: add --step <step>/);
   x.start("Q1");
-  for (const bad of ["12kb", "", "Infinity", "abc"]) assert.match(x.run("w", ["metric", "record", "bundle-kb", bad]).err, /takes a number|missing <value>/, bad);
-  assert.match(x.run("w", ["metric", "record", "size", "12"]).err, /the project has no metric size \(it has bundle-kb\); the orchestrator defines metrics with nexus metric define/);
-  assert.match(x.run("w", ["metric", "record", "check:npm test", "12"]).err, /is recorded by nexus check <step> <name> --ok\|--fail --duration/);
-  assert.match(x.run("w", ["metric", "record", "bundle-kb", "12", "--step", "Q9"]).err, /queue Q has no step Q9/);
+  for (const bad of ["12kb", "", "Infinity", "abc"]) assert.match((await x.run("w", ["metric", "record", "bundle-kb", bad])).err, /takes a number|missing <value>/, bad);
+  assert.match((await x.run("w", ["metric", "record", "size", "12"])).err, /the project has no metric size \(it has bundle-kb\); the orchestrator defines metrics with nexus metric define/);
+  assert.match((await x.run("w", ["metric", "record", "check:npm test", "12"])).err, /is recorded by nexus check <step> <name> --ok\|--fail --duration/);
+  assert.match((await x.run("w", ["metric", "record", "bundle-kb", "12", "--step", "Q9"])).err, /queue Q has no step Q9/);
   assert.equal(x.events("w", "metric.recorded").length, 0);
 });
 
 test("a worker cannot define a metric, and an orchestrator cannot record one; the loader ignores a recording that is not a worker's", async () => {
   const x = setup();
-  assert.match(x.run("w", ["metric", "define", "bundle-kb", "--unit", "KB"]).err, /only an orchestrator session may do this/);
+  assert.match((await x.run("w", ["metric", "define", "bundle-kb", "--unit", "KB"])).err, /only an orchestrator session may do this/);
   assert.equal(x.events("w", "metric.defined").length, 0);
   await x.define("bundle-kb", "--unit", "KB", "--warn-above", "1");
   x.start("Q1");
-  assert.match(x.run("o", ["metric", "record", "bundle-kb", "12", "--step", "Q1"]).err, /only a worker records a metric's value/);
+  assert.match((await x.run("o", ["metric", "record", "bundle-kb", "12", "--step", "Q1"])).err, /only a worker records a metric's value/);
   assert.equal(x.events("o", "metric.recorded").length, 0);
   // Written by hand into the orchestrator's log: ignored, with a warning.
   x.store.appendEvent({ v: 1, id: newId(), at: now(), session: "o", type: "metric.recorded", queue: "Q", step: "Q1", name: "bundle-kb", value: 9, unit: "KB" });

@@ -41,9 +41,10 @@ async function runTurn(id: string, text: string): Promise<void> {
     notify("item/completed", { threadId, turnId: id, item: { ...item, status: "completed", exitCode: 0 } });
   }, () => refused(id));
   if (typeof first !== "string") return "exit" in first ? exitOnSignal() : "interrupted" in first ? interrupted(id) : fail(id, first.fail);
-  for (const s of steered) takeIn(id, s);
-  const reply = actOnRead(steered, first);
+  const read = steered;
   steered = [];
+  for (const s of read) takeIn(id, s);
+  const reply = await actOnRead(read, first);
   notify("item/completed", { threadId, turnId: id, item: { type: "agentMessage", id: randomUUID(), text: reply } });
   // Two model requests per turn, each with its `last` and the thread's running `total` (checked live). Turn n:
   // 100n input of which 60n cached and 3n output, then the context's fill (120) of which 50 cached and 2n output.

@@ -2,7 +2,6 @@
 // the step's latest conversation, and that a conversation changes nothing in the run. Against the fake runtimes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -13,11 +12,11 @@ import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import { stepSeed, sinceThen } from "../src/step-seed.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil } from "./wait.ts";
+import { cliOut } from "../../../packages/cli/test/run-cli.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
 process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
-const CLI = join(here, "../../../packages/cli/bin/nexus.js");
 
 const T0 = Date.now() - 86_400_000;
 const at = (min: number) => new Date(T0 + min * 60_000).toISOString();
@@ -157,7 +156,7 @@ test("opening and talking about a step in review leaves the run, the step and it
 
     // nexus status as the partner would run it.
     const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: store.dir, NEXUS_SESSION: c.id };
-    const out = execFileSync(process.execPath, [CLI, "status"], { env, encoding: "utf8", cwd: root });
+    const out = await cliOut(["status"], { env, cwd: root });
     assert.match(out, /Queues/);
 
     const after = before();

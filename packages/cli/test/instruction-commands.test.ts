@@ -86,10 +86,10 @@ function commandsIn(text: string): Found[] {
 
 // ---------------------------------------------------------------- checking a command
 
-/** The option names the parser knows, read from main.ts's `commandLine({ … })` call. */
+/** The option names the parser knows, read from main.ts's `commandLine(argv, { … })` call. */
 function parserOptions(main: string): Set<string> {
-  const start = main.indexOf("= commandLine({");
-  assert.ok(start >= 0, "main.ts parses its command line with commandLine({ … })");
+  const start = main.indexOf("commandLine(argv, {");
+  assert.ok(start >= 0, "main.ts parses its command line with commandLine(argv, { … })");
   const block = main.slice(start, main.indexOf("\n});", start));
   return new Set([...block.matchAll(/(?:^|[\s{,])"?([a-z][a-z-]*)"?: \{ type:/g)].map((m) => `--${m[1]}`));
 }
@@ -163,7 +163,7 @@ function problemsOf(cli: Cli, parser: ReadonlySet<string>, found: Pick<Found, "c
 
 // ---------------------------------------------------------------- the texts
 
-const cli = readHelp(helpText());
+const cli = readHelp(await helpText());
 const parser = parserOptions(readFileSync(join(ROOT, "packages/cli/src/main.ts"), "utf8"));
 
 function texts(): Map<string, string> {

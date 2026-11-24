@@ -5,7 +5,7 @@
 // and ends it at its time.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -17,10 +17,10 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { spawnServer } from "./helpers.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil, serverUp, LONGER } from "./wait.ts";
+import { cliOut } from "../../../packages/cli/test/run-cli.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-const CLI = join(here, "../../../packages/cli/bin/nexus.js");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** The user turns away mode on until `until` (ISO), or off: what the server's POST /api/server/away writes. */
@@ -122,13 +122,13 @@ test("away mode: a queue waiting for the user brings what the plan starts next; 
   } finally { x.stop(); away(null); }
 });
 
-test("agents cannot switch away mode: the CLI refuses any agent session", () => {
+test("agents cannot switch away mode: the CLI refuses any agent session", async () => {
   const root = mkdtempSync(join(tmpdir(), "nexus-away-cli-"));
   const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_HOME: join(root, "home"), NEXUS_SESSION: "01AGENTSESSION", NEXUS_PORT: "1" };
   delete env.NEXUS_DIR;
   for (const args of [["on", "--until", "8:00"], ["off"]]) {
     let out = "";
-    try { execFileSync(process.execPath, [CLI, "server", "away", ...args], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); }
+    try { await cliOut(["server", "away", ...args], { env }); }
     catch (err) { out = String((err as { stderr?: string }).stderr); }
     assert.match(out, /only the user switches away mode/, args.join(" "));
   }

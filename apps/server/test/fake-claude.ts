@@ -52,9 +52,10 @@ async function turn(text: string): Promise<void> {
     out({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command } }] }, parent_tool_use_id: null }), () => refused(denials));
   if (typeof first !== "string") return "exit" in first ? exitOnSignal() : "interrupted" in first ? interrupted() : fail(first.fail);
   // What came in during the turn was read inside it (and a command in it is acted on).
-  fake.history!.push(...unread);
-  const reply = actOnRead(unread, first);
+  const read = unread;
   unread = [];
+  fake.history!.push(...read);
+  const reply = await actOnRead(read, first);
   out({ type: "assistant", message: { content: [{ type: "text", text: reply }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: contextTokens(contextWindow(1000), 100) - 10 } }, parent_tool_use_id: null });
   // FAKE_LATE_NEXT: the process's first turn writes its result only once a message comes in after its reply, and that
   // message, come too late to be read in the turn, runs as a turn of its own after it (as Claude Code runs a `next`

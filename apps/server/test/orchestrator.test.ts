@@ -12,6 +12,7 @@ import { Orchestrator, type UserNotice } from "../src/orchestrator.ts";
 import { longReply } from "./fake-behaviour.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER, untilAsync, holdWork } from "./wait.ts";
+import { cliOut } from "../../../packages/cli/test/run-cli.ts";
 
 process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 
@@ -120,11 +121,9 @@ test("changing an approved queue makes a new revision that needs approval again"
 test("a worker may not draft queues or start runs", async () => {
   const { store, stop } = setup();
   try {
-    const { execFileSync } = await import("node:child_process");
     store.writeSession({ protocol: 1, id: "w1", project: "p", role: "worker", runtime: "external", cwd: store.dir, launched_by: "external", created_at: new Date().toISOString() });
-    const cli = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/cli/bin/nexus.js");
-    assert.throws(
-      () => execFileSync(process.execPath, [cli, "run", "R", "start", "--reason", "x"], { env: { ...process.env, NEXUS_SESSION: "w1", NEXUS_DIR: store.dir }, stdio: "pipe" }),
+    await assert.rejects(
+      async () => cliOut(["run", "R", "start", "--reason", "x"], { env: { ...process.env, NEXUS_SESSION: "w1", NEXUS_DIR: store.dir } }),
       (e: { stderr: Buffer }) => /only an orchestrator/.test(e.stderr.toString()),
     );
   } finally { stop(); }
@@ -199,8 +198,6 @@ test("the orchestrator drafts and then revises a queue from one file under .nexu
 test("only the user or an orchestrator may update, plan an update of, or stop updating the Nexus server", async () => {
   const { store, stop } = setup();
   try {
-    const { execFileSync } = await import("node:child_process");
-    const cli = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/cli/bin/nexus.js");
     const commands: [string[], string][] = [
       [["update"], "update"], [["cancel"], "cancel"],
       [["update", "--after", "Q/Q1"], "plan an update of"], [["update", "--at", "6:00"], "plan an update of"], [["cancel-plan"], "cancel a planned update of"],
@@ -208,8 +205,8 @@ test("only the user or an orchestrator may update, plan an update of, or stop up
     for (const role of ["worker", "conversation"] as const) {
       store.writeSession({ protocol: 1, id: `s-${role}`, project: "p", role, runtime: "external", cwd: store.dir, launched_by: "external", created_at: new Date().toISOString() });
       for (const [args, what] of commands) {
-        assert.throws(
-          () => execFileSync(process.execPath, [cli, "server", ...args], { env: { ...process.env, NEXUS_SESSION: `s-${role}`, NEXUS_DIR: store.dir, NEXUS_PORT: "1" }, stdio: "pipe" }),
+        await assert.rejects(
+          async () => cliOut(["server", ...args], { env: { ...process.env, NEXUS_SESSION: `s-${role}`, NEXUS_DIR: store.dir, NEXUS_PORT: "1" } }),
           (e: { stderr: Buffer }) => new RegExp(`only the user or an orchestrator may ${what} the Nexus server, not a ${role}`).test(e.stderr.toString()),
           `${role} ${args.join(" ")}`,
         );

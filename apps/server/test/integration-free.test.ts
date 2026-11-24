@@ -22,6 +22,7 @@ import { Engine, type EngineOptions } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { gatedCleanup } from "./gated-cleanup.ts";
 import { LONGER, QUICK_ENGINE, holdWork, until as waitUntil } from "./wait.ts";
+import { cliOut } from "../../../packages/cli/test/run-cli.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -284,8 +285,7 @@ test("nexus status names a base Nexus did not merge at a step boundary because i
     const line = `  base: main (${main.slice(0, 12)}) conflicts with the queue's branch in Q1.txt (found before step Q2, `;
     const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: x.store.dir };
     delete env.NEXUS_SESSION;
-    const cli = join(here, "../../../packages/cli/bin/nexus.js");
-    const out = execFileSync(process.execPath, [cli, "status"], { env, encoding: "utf8" });
+    const out = await cliOut(["status"], { env });
     assert.ok(out.includes(line), out);
     assert.ok(out.includes("Nexus did not merge it, the integration step will"), out);
     assert.ok(orchestratorOverview(loadProjectState(x.store)).includes(line), "the orchestrator's overview too");
