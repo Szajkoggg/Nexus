@@ -94,7 +94,7 @@ export class Recurrer {
       // Times from now on count, and queues done since its last run (or from now on, if it never ran): a set never
       // starts what came before it, nor throws away what was done since it ran. One paused or skipped counts from now
       // (the user's decision of 2026-11-23, queue CK): what was done meanwhile does not start it at once.
-      handled: at, baseline: o.after_queues !== undefined ? (resumes(old) ? this.doneNow() : this.countStart(old)) : undefined,
+      handled: at, baseline: o.after_queues !== undefined ? this.countStart(old) : undefined,
     });
     this.arm(o.id);
     this.deps.changed();
@@ -117,7 +117,7 @@ export class Recurrer {
       handled: later(r.handled, at),
       // After N queues: the count goes on from its last run, or starts at the approval if it never ran; one paused or
       // skipped starts it at the approval (queue CK).
-      ...(r.after_queues !== undefined ? { baseline: resumes(r) ? this.doneNow() : this.countStart(r) } : {}),
+      ...(r.after_queues !== undefined ? { baseline: this.countStart(r) } : {}),
     });
     this.arm(id);
     this.deps.changed();
@@ -180,9 +180,12 @@ export class Recurrer {
     return countable(loadProjectState(this.store).queues);
   }
 
-  /** Where the count starts at an approval or a set (`r`: the file before it): at its last run, or now if none. */
-  private countStart(r: Pick<RecurringFile, "last"> | undefined): string[] {
-    return countStart(r ?? {}, loadProjectState(this.store).queues);
+  /**
+   * Where the count starts at an approval or a set (`r`: the file before it): at its last run, or now if none, or if
+   * it stood still (paused or skipped, queue CK).
+   */
+  private countStart(r: Pick<RecurringFile, "last" | "paused" | "skipped"> | undefined): string[] {
+    return resumes(r) ? this.doneNow() : countStart(r ?? {}, loadProjectState(this.store).queues);
   }
 
   /**
