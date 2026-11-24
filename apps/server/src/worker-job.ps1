@@ -13,7 +13,7 @@ $trace = $env:NEXUS_JOB_CACHE_TRACE -eq '1'
 $env:NEXUS_JOB_CACHE_TRACE = $null
 try {
     $source = Join-Path $PSScriptRoot 'worker-job.cs'
-    $how = 'fallback'
+    $how = 'fallback'  # until a type is loaded from the cache ('cached') or from a newly stored file ('stored')
     $dir = if ($env:NEXUS_JOB_CACHE) { $env:NEXUS_JOB_CACHE } else { Join-Path $env:LOCALAPPDATA 'Nexus\job-host' }
     try {
         $sha = [Security.Cryptography.SHA256]::Create()
@@ -26,7 +26,6 @@ try {
             } catch {
                 Write-JobCacheLog $dir "could not load $dll, compiling instead: $($_.Exception.Message)"
                 try { [IO.File]::Delete($dll) } catch { }
-                $how = 'fallback'
             }
         } else {
             # A private file first, then renamed: hosts starting at once never write into each other's file.
@@ -42,7 +41,6 @@ try {
         }
     } catch {
         Write-JobCacheLog $dir "could not use the cache in $dir, compiling instead: $($_.Exception.Message)"
-        $how = 'fallback'
     }
     if ($how -eq 'fallback') { Add-Type -Path $source }
     if ($trace) { [Console]::Error.WriteLine("worker job cache: $how") }
