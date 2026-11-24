@@ -289,7 +289,9 @@ saved manifest, the canonical target and repository must still match, the branch
 changes them; directory identity is compared. Links are never traversed. The entire remainder is checked before
 deletion and each entry and its parents again before removal; nonrecursive rmdir refuses new children.
 Transient Windows removal errors get at most eight retries with increasing 250 ms delays, each preceded by a
-fresh proof check; exhaustion leaves the proof for a later Clean up.
+fresh proof check; exhaustion leaves the proof for a later Clean up. Nexus's own cleanup after a merge back (and a survey run's) retries
+only on its first try for a queue; once that failed, each later look (at most every 30 s) tries once, without the
+delays, which wait synchronously on the server's one loop (queue CWA).
 
 Missing files, a missing `.git` pointer or registration, and an entirely absent target are valid subsets. A missing
 branch is accepted only with saved proof; it lets a crash after `branch -d` finish writing `cleaned`. The final

@@ -379,15 +379,24 @@ function orchestrator(st: ProjectStore): SessionFile {
   return s;
 }
 
-/** The server carries out an orchestrator's request when it sees the event; this waits for its result. */
-async function waitApplied(st: ProjectStore, session: string, event: string, ms = 15_000): Promise<{ ok: boolean; message: string } | undefined> {
-  const until = Date.now() + ms;
+/**
+ * The server carries out an orchestrator's request when it sees the event; this waits for its result. It reads once
+ * more at the deadline: an answer written during the last pause (queue CWA) is the answer, not "has not answered".
+ * `sleep` is a test's seam.
+ */
+export async function waitApplied(
+  st: ProjectStore, session: string, event: string,
+  o: { ms?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<{ ok: boolean; message: string } | undefined> {
+  const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const read = () => st.readApplied(session).entries.find((x) => x.event === event);
+  const until = Date.now() + (o.ms ?? 15_000);
   while (Date.now() < until) {
-    const a = st.readApplied(session).entries.find((x) => x.event === event);
+    const a = read();
     if (a) return a;
-    await new Promise((r) => setTimeout(r, 150));
+    await sleep(150);
   }
-  return undefined;
+  return read();
 }
 
 /**

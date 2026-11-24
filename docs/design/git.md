@@ -288,7 +288,11 @@ final filesystem syscall; users must not keep editing a worktree they are deleti
 serializes the dashboard and server callers. No running queue is eligible. Removal retries transient Windows
 errors up to eight times with increasing 250 ms delays, rechecking the proof on each attempt. A fake-runtime
 survey test exposed a short EBUSY while its exiting worker still held the empty directory; keeping the former
-bounded retry behavior handles that without treating a lasting lock as success. Once the directory is gone,
+bounded retry behavior handles that without treating a lasting lock as success. A lasting lock is another matter: the
+delays are synchronous, and the merger looked again every 30 s and on every change, before the orchestrator's
+requests in the same round. On 2026-11-24 two worktree folders locked for nearly seven hours blocked the server's
+loop 27-93% of the time, and orchestrator requests took 15-31 s, past the CLI's 15 s wait (queue CWA1). So the
+merger retries only on a queue's first failed cleanup; later looks try once. Once the directory is gone,
 `git worktree remove` removes only its registration; a global prune would affect unrelated missing worktrees.
 
 A missing target is an empty subset. A missing branch can complete only when the recorded tip is still in the
