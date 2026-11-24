@@ -39,7 +39,7 @@ Which layout?
 Options: 1. grid / 2. list
 The worker recommends: grid Answer it if the answer is settled, otherwise escalate it to the user.
 == approvalNotice: no run
-[Nexus] Queue QN revision 1 approved. It is not in the plan, so nothing starts it: start it now, or put it into the plan (nexus run QN start --after <queue>... | --next | --at ...), or tell the user why it waits.
+[Nexus] Queue QN revision 1 approved. It is not in the plan, so nothing starts it: start it now, or put it into the plan (nexus run QN start --after <queue>... --reason "..."; or --next, or --at), or tell the user why it waits.
 == approvalNotice: no run, in the plan (ACX, O3)
 [Nexus] Queue QN revision 1 approved. It is in the plan (QB is running): Nexus starts it itself, so start nothing; tell the user if anything follows from the approval.
 == liftNotice: with the stop's reason

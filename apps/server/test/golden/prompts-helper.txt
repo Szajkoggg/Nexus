@@ -46,7 +46,7 @@ The whole diff: <root>/sessions/h-3/diff.patch (read the parts you need).
 Review level 2. Every criterion checkable and met: nexus review accept QH H2 --note "what you checked". A criterion you can check not met: nexus review send-back QH H2 "what to fix". Otherwise: nexus review pass-on QH H2 --why <reasons> --findings "what you checked and what you could not".
 == H2 passed on by the helper (a criterion, a deviation): the review notice, with H1's acceptance and its audit riding with it
 -- to orchestrator 1
-[Nexus] Queue QH revision 1 approved. It is not in the plan, so nothing starts it: start it now, or put it into the plan (nexus run QH start --after <queue>... | --next | --at ...), or tell the user why it waits.
+[Nexus] Queue QH revision 1 approved. It is not in the plan, so nothing starts it: start it now, or put it into the plan (nexus run QH start --after <queue>... --reason "..."; or --next, or --at), or tell the user why it waits.
 -- to orchestrator 1
 [Nexus] Step H2 of queue QH is done and waits for your review: H2 done; the colours differ from the plan (left out: the dark theme). 
 

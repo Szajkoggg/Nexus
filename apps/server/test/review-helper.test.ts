@@ -78,7 +78,7 @@ test("a checkable level-2 step: the helper accepts it on its own model and effor
     assert.ok(x.delivered().some((d) => d.session === h.id && d.text === packet), "the packet is the helper's turn");
     // The model and effort from the settings are on the helper's command line, with its rights.
     const args = readFileSync(process.env.FAKE_ARGS!, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as { argv: string[]; briefing: string | null });
-    const started = args.filter((a) => a.briefing?.includes("review helper"));
+    const started = args.filter((a) => a.briefing?.includes("You are Nexus's review helper"));
     assert.equal(started.length, 2);
     const argv = started[0]!.argv.join(" ");
     for (const part of ["--model claude-haiku-5-5", "--effort low", "--permission-mode dontAsk", "Bash(nexus review pass-on:*)", "Read"]) assert.ok(argv.includes(part), `${part} in ${argv}`);

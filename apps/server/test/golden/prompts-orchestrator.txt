@@ -33,7 +33,7 @@ Options: 1. grid / 2. list Answer it if the answer is settled, otherwise escalat
 May I delete the old file? Answer it if the answer is settled, otherwise escalate it to the user.
 == approvals: no run; a run paused by a rejection; a run of an older revision; a paused run; a running one
 -- to orchestrator 1
-[Nexus] Queue QA revision 1 approved. It is not in the plan, so nothing starts it: start it now, or put it into the plan (nexus run QA start --after <queue>... | --next | --at ...), or tell the user why it waits.
+[Nexus] Queue QA revision 1 approved. It is not in the plan, so nothing starts it: start it now, or put it into the plan (nexus run QA start --after <queue>... --reason "..."; or --next, or --at), or tell the user why it waits.
 -- to orchestrator 1
 [Nexus] Queue QB revision 1 approved. Its run was paused because the user rejected step B1; this revision lifts that. If the plan puts it next, resume it now (it goes on at the first pending step); otherwise tell the user why not.
 -- to orchestrator 1
@@ -143,9 +143,9 @@ The run is paused and nothing was reverted. Propose what follows as queue revisi
 -- to orchestrator 1
 [Nexus] The user rejected step O2 of queue QO (no reason given). The run is paused and nothing was reverted. Propose what follows as queue revisions for the user's approval: a revert as a step, changes to the remaining steps, or a new queue (then the user can stop this one). The rejected step is never run again; the run goes on only after the user approves a new revision, at its first pending step, and nothing of the queue is pushed until then. Tell the user briefly what you propose.
 -- to orchestrator 1
-[Nexus] Queue QN revision 1 approved. It is not in the plan, so nothing starts it: start it now, or put it into the plan (nexus run QN start --after <queue>... | --next | --at ...), or tell the user why it waits.
+[Nexus] Queue QN revision 1 approved. It is not in the plan, so nothing starts it: start it now, or put it into the plan (nexus run QN start --after <queue>... --reason "..."; or --next, or --at), or tell the user why it waits.
 -- to orchestrator 1
-[Nexus] Queue QO revision 1 approved. It is not in the plan, so nothing starts it: start it now, or put it into the plan (nexus run QO start --after <queue>... | --next | --at ...), or tell the user why it waits.
+[Nexus] Queue QO revision 1 approved. It is not in the plan, so nothing starts it: start it now, or put it into the plan (nexus run QO start --after <queue>... --reason "..."; or --next, or --at), or tell the user why it waits.
 
 Since your last notice (for your overview; nothing to do):
 - step N1 of queue QN: accepted by the user

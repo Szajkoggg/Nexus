@@ -608,7 +608,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     return `check-fix round ${fix[2]}`;
   }
   // A step sent back (by the orchestrator or the user's Fix it): work on it again and report it done.
-  const back = /^\[Nexus\] The (?:orchestrator reviewed|user sent) step (\S+) of queue \S+ .*\(round (\d+)\)/.exec(text);
+  const back = /^\[Nexus\] (?:The (?:orchestrator|review helper) reviewed|The user sent) step (\S+) of queue \S+ .*\(round (\d+)\)/.exec(text);
   if (back) {
     await nexus("step", "start", back[1]!);
     await nexus("step", "done", back[1]!, "--summary", `fake finished ${back[1]} round ${back[2]}`);

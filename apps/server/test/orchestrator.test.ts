@@ -257,14 +257,14 @@ test("approvals and withdrawals are told once each, by their position, the chat 
     await untilAsync("the deliveries", async () => (await delivered()).filter((t) => t.startsWith("[Nexus] Queue A revision")).length >= 3, LONGER.step);
     const sent = (await delivered()).filter((t) => t.startsWith("[Nexus] Queue A revision"));
     assert.equal(sent.length, 3);
-    assert.ok(sent.every((t) => /If the plan puts it next, start it now; otherwise tell the user why not/.test(t)), "no run yet: start it");
+    assert.ok(sent.every((t) => /It is not in the plan, so nothing starts it: start it now/.test(t)), "no run yet: start it");
   } finally { stop(); }
 });
 
 test("approving a halted queue's new revision says resume: the run goes on under it; a stopped one's is archived: start", async () => {
   for (const [first, told] of [
     ["fail", /Its run is halted at step H1\. If the plan puts it next, resume it now \(it goes on under this revision\)/],
-    ["stop", /Queue H revision 2 approved\. If the plan puts it next, start it now/],
+    ["stop", /Queue H revision 2 approved\. It is not in the plan, so nothing starts it: start it now/],
   ] as const) {
     const x = setup();
     process.env.FAKE_LOG = join(x.root, "fake.log");
