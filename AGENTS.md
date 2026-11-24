@@ -80,6 +80,9 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
 - **Agents: lines**: a commit that changes something agents rely on (a CLI command, a briefing, the protocol, or a
   file an agent reads or writes) carries a line `Agents: <what changed>` in its message, one per change, written for
   an orchestrator whose briefing is older. At a deploy, every project's orchestrator is told these lines.
+- **User: lines**: a commit that changes something the user sees or does (the dashboard, a CLI command's output,
+  something the user has to do differently) carries a line `User: <what changed>` in its message, one per change,
+  written for the user, not for a developer. They are what the README's user-facing parts are checked against.
 - **Screenshots** of the dashboard: `node scripts/capture.ts <views.yaml>` takes the listed views, the afters and
   (from the step's base commit) the befores, each on its own development instance with the fake runtimes; headless
   Edge by hand only for a view it cannot take. Widths: 492 px (the narrowest window), 390 px in an iframe for a
@@ -93,6 +96,11 @@ The closing refactoring step of a queue also runs `npm run knip` and fixes its f
 (`git diff <base>..HEAD --name-only`): an export nothing imports loses `export`, or goes if nothing uses it; a file
 loaded only by its path becomes an entry in `knip.json`. Findings in other files are reported, not fixed: they belong
 to a maintenance queue.
+
+It also compares the queue's `User:` lines (`git log <base>..HEAD`) with README.md and writes into it what is missing.
+And if the queue grew a topic file in docs/ past about 40 KB, it splits that file along its headings, with the
+contents, and proves with `node scripts/check-doc-split.ts --topic <base commit> <topic file> <new file>...` that the
+split only moved text.
 
 ## Rules the code keeps
 
