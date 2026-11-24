@@ -1731,9 +1731,10 @@ export class Engine implements Member {
    * is refused anyway).
    */
   endQueueProcesses(queueId: string): boolean {
-    const status = loadProjectState(this.store).queues.find((q) => q.id === queueId)?.status;
+    const state = loadProjectState(this.store);
+    const status = state.queues.find((q) => q.id === queueId)?.status;
     if (status !== "done" && status !== "cancelled") return true;
-    return !this.endProcesses((q) => q === queueId);
+    return !this.endProcesses((q) => q === queueId, { state });
   }
 
   /**
@@ -1746,15 +1747,17 @@ export class Engine implements Member {
    * the files are read).
    */
   private endProcesses(of: (queue: string) => boolean, o: { keep?: string; state?: ProjectState } = {}): boolean {
+    const { state } = o;
+    const sessionFile = (id: string) => (state ? state.sessions.find((x) => x.id === id) : this.store.readSession(id));
+    const runs = () => (state ? state.queues.map((q) => q.run) : this.store.queueIds().map((q) => this.store.readRun(q)));
     let alive = false;
-    let going: Set<string> | undefined;
+    let going: Set<string> | undefined; // read once, and only when a process of the queues is found
     for (const l of this.host.all()) {
       if (l.session === o.keep || l.proc.state === "exited") continue;
       let s: SessionFile | undefined;
-      try { s = o.state ? o.state.sessions.find((x) => x.id === l.session) : this.store.readSession(l.session); } catch { continue; }
+      try { s = sessionFile(l.session); } catch { continue; }
       if (s?.role !== "worker" || !s.queue || !of(s.queue)) continue;
-      going ??= new Set((o.state ? o.state.queues.map((q) => q.run) : this.store.queueIds().map((q) => this.store.readRun(q)))
-        .filter((r) => runGoing(r)).map((r) => r!.session));
+      going ??= new Set(runs().flatMap((r) => (r && runGoing(r) ? [r.session] : [])));
       if (going.has(l.session)) continue;
       alive = true;
       if (this.ending.has(l.session)) continue;
