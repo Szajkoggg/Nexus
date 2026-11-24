@@ -42,6 +42,7 @@ import { checkoutOf, patchGit } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
 import { cleanUp, fastForward, judgeMerge, leftText, reintegrate, stillEnding, withMergeLock, worktreeLeft } from "./mergeback.ts";
 import { samePath } from "./worktree.ts";
+import type { RemovalIO } from "./cleanup-proof.ts";
 
 export interface MergerOptions {
   /** Starts a queue's run (Engine.start); throws when it cannot start now. */
@@ -60,10 +61,8 @@ export interface MergerOptions {
   /** How long after a look that left something waiting it looks again (default POLL_MS). */
   pollMs?: number;
   /** How a cleanup removes the worktree's files (a test's seam: a locked folder, fewer retries). */
-  removal?: Removal;
+  removal?: RemovalIO;
 }
-
-type Removal = NonNullable<Parameters<typeof cleanUp>[2]>;
 
 /** How often a merge back that waits is looked at again. */
 const POLL_MS = 30_000;

@@ -24,7 +24,7 @@ import {
 import { checkoutOf, git, patchGit } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
 import { samePath } from "./worktree.ts";
-import { cleanupIdentity, cleanupPath, cleanupRefusal, cleanupSnapshot, removeVerifiedTree } from "./cleanup-proof.ts";
+import { cleanupIdentity, cleanupPath, cleanupRefusal, cleanupSnapshot, removeVerifiedTree, type RemovalIO } from "./cleanup-proof.ts";
 import { gitLabel, perf } from "./perf.ts";
 
 const ENV = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_EDITOR: "true", GIT_MERGE_AUTOEDIT: "no" };
@@ -331,11 +331,11 @@ export function leftText(left: { files: string[]; count: number }): string {
  * The cleanup of a finished worktree queue (the user's, or Nexus's after merging back or after a survey run): the
  * worktree removed, its branch deleted with -d.
  */
-export function cleanUp(store: ProjectStore, queueId: string, io: Parameters<typeof removeVerifiedTree>[2] = {}): string {
+export function cleanUp(store: ProjectStore, queueId: string, io: RemovalIO = {}): string {
   return withMergeLock(store, queueId, () => cleanUpLocked(store, queueId, io));
 }
 
-function cleanUpLocked(store: ProjectStore, queueId: string, io: Parameters<typeof removeVerifiedTree>[2]): string {
+function cleanUpLocked(store: ProjectStore, queueId: string, io: RemovalIO): string {
   const { q, root, path, branch } = finishedWorktreeQueue(store, queueId, true);
   if (q.git?.cleaned) return `queue ${queueId} was cleaned up already`;
   const repository = cleanupPath(run(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
