@@ -271,7 +271,7 @@ export class Merger {
       if (q.git.merge?.waiting) this.writeMerge(q, { ...q.git.merge, waiting: undefined });
       return; // the user's return batch shows it; a Fix it runs in the worktree
     }
-    try { this.cleanUp(q.id); }
+    try { this.tryCleanUp(q.id); }
     catch (e) { this.wait(q, `queue ${q.id} is merged back, but its cleanup waits: ${(e as Error).message}`); }
   }
 
@@ -287,7 +287,7 @@ export class Merger {
     if (!path || samePath(path, state.project.root)) return;
     let waiting: CleanupWaiting;
     try {
-      this.cleanUp(q.id);
+      this.tryCleanUp(q.id);
       return;
     } catch (e) {
       waiting = { reason: `survey run ${q.id} is done, but its worktree could not be cleaned up: ${firstLine(e)}`, since: now() };
@@ -310,7 +310,7 @@ export class Merger {
   }
 
   /** A queue's cleanup: with the removal's retries the first time, without them once one failed (cleanupFailed). */
-  private cleanUp(queue: string): void {
+  private tryCleanUp(queue: string): void {
     const again = this.cleanupFailed.has(queue);
     try { cleanUp(this.store, queue, again ? { ...this.o.removal, retries: 0 } : this.o.removal); }
     catch (e) { this.cleanupFailed.add(queue); throw e; }
