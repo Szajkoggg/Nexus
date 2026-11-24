@@ -682,6 +682,11 @@ its log, but it also leaves a record behind. Once it runs again, the dashboard s
 <time>" at the top of the page until you close it, and every project's orchestrator is told once, so it can check
 what the stop interrupted. The record is `crash.json` in `NEXUS_HOME`, with the full stack.
 
+A damaged Nexus file (one that is there but does not parse) is never replaced silently. The dashboard's warnings or
+the server's log name it; where Nexus goes on without it and writes the file anew, the old copy is kept beside it as
+`<file>.corrupt`, for you to look at or delete. A damaged `queue.yaml` is not drafted over: repair it or move it away
+first.
+
 While an update waits, you can go on talking with the orchestrator and the thinking partners. An answer still being
 written when Nexus restarts is cut off; after the restart the chat says "Nexus restarted while answering; it goes on",
 and the same conversation answers your message again.
@@ -1050,7 +1055,8 @@ origin. Never forced, never with a prompt. The step shows "Pushed: …" or "Push
 step accepted, is tried again with the next accepted step, and has a "Push again" button. Without a remote the step
 says it was not pushed.
 
-"Replace token" in the panel signs every remote device out. To have Nexus start with Windows, without a console
+"Replace token" in the panel signs every remote device out; so does a damaged `auth.json` (the server's log says so,
+and the old file is kept as `auth.json.corrupt`). To have Nexus start with Windows, without a console
 window, run from the live instance: `powershell -ExecutionPolicy Bypass -File C:\Code\Nexus-live\scripts\autostart.ps1`
 (`-Remove` undoes it; the log goes to `%APPDATA%\Nexus\server.log`). To start it once without a window:
 `wscript C:\Code\Nexus-live\scripts\start-hidden.vbs`.
