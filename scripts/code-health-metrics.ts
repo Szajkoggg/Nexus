@@ -54,6 +54,9 @@ export function isTest(path: string): boolean {
   return parts.slice(0, -1).some((p) => p === "test" || p === "tests" || p === "__tests__") || /\.(test|spec)\.[^.]+$/.test(name);
 }
 
+/** Orders by repository path, code point by code point (not by locale), so that the output is the same everywhere. */
+const byPath = (a: { path: string }, b: { path: string }) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+
 const kb = (bytes: number) => Math.round((bytes / 1024) * 10) / 10;
 
 /** A line as the duplication count compares it, or undefined when it is not significant. */
@@ -165,7 +168,7 @@ const sum = <K extends string>(items: readonly Record<K, number>[], keys: readon
 function largest(files: readonly SourceFile[]): { path: string; kb: number }[] {
   return files
     .map((f) => ({ path: f.path, bytes: Buffer.byteLength(f.text, "utf8") }))
-    .sort((a, b) => b.bytes - a.bytes || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    .sort((a, b) => b.bytes - a.bytes || byPath(a, b))
     .slice(0, 10)
     .map((f) => ({ path: f.path, kb: kb(f.bytes) }));
 }
@@ -186,7 +189,7 @@ function measure(files: readonly SourceFile[]) {
 
 /** The report for a set of code files (the paths relative to the repository, forward slashes). */
 export function report(all: readonly SourceFile[]) {
-  const files = [...all].filter((f) => isCode(f.path)).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const files = [...all].filter((f) => isCode(f.path)).sort(byPath);
   const sources = files.filter((f) => !isTest(f.path));
   const tests = files.filter((f) => isTest(f.path));
   const s = measure(sources);
