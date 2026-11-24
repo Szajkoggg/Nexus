@@ -40,9 +40,11 @@ steps:
       change). For each note: does what it says still hold? Check the files, functions, flags and states it names
       against the project, and what it says is pending against the git history and the queues (`nexus status`). Name
       the stale ones (what is no longer true, the evidence), those that say what the code or the history already
-      says, and notes that contradict each other. Or say there were none. Change nothing, commit nothing, in any mode.
+      says, and notes that contradict each other. Name also each measured number a note states (a run's time, a
+      count) without where it is read (the command, the file, the view): the number goes stale, the place does not.
+      Or say there were none. Change nothing, commit nothing, in any mode.
     acceptance:
-      - Each stale or contradicting memory note with the evidence, or that there were none.
+      - Each stale or contradicting memory note with the evidence, and each number without where it is measured, or that there were none.
       - The memory folder as it was.
     review:
       level: 2

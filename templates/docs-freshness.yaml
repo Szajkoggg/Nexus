@@ -28,12 +28,14 @@ steps:
       Read {{docs}} against {{code}}. List each place where a document says something the code no longer does (a
       renamed command or option, a changed format, a removed feature, an example that no longer works, a path that
       does not exist) or leaves out something the code now does: the document and the place, what the code does
-      instead, how much it matters and whether the fix is small (a typo) or not. Or say there were none. Change
-      nothing, commit nothing.
+      instead, how much it matters and whether the fix is small (a typo) or not. In the plan documents among them (a
+      backlog, a roadmap), list also each item that still stands as a plan although it was built or dropped: the item,
+      the commit or queue that built it or the decision that dropped it. Or say there were none. Change nothing,
+      commit nothing.
       The report ends with "Recommended additions" (not counted among the findings): what the project could add to
       keep documents true (a link checker, a docs build, a test of the examples), each with its reason.
     acceptance:
-      - Each difference with its weight and whether the fix is small, or that there were none.
+      - Each difference with its weight and whether the fix is small, and each plan item built or dropped but standing as a plan, or that there were none.
       - The report ends with "Recommended additions", each with its reason (or says there are none).
       - The working tree as it was (no commit, no leftover files).
     review:
