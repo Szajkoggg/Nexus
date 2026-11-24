@@ -27,8 +27,7 @@ export interface FlakyGroup {
  */
 export function flakyReport(sources: FlakySource[], since?: string): FlakyGroup[] {
   const projects = new Set(sources.map((s) => s.project));
-  const groups = new Map<string, FlakyGroup & { seen: Set<string> }>();
-  const records: { at: string; key: string; test: string; byCheck: boolean; check: string; where: string }[] = [];
+  const records: { at: string; test: string; byCheck: boolean; check: string; where: string }[] = [];
   for (const s of sources) {
     for (const [step, entry] of Object.entries(s.checks.steps)) {
       for (const set of entry.sets) {
@@ -38,24 +37,27 @@ export function flakyReport(sources: FlakySource[], since?: string): FlakyGroup[
           const at = first?.started_at ?? set.ended_at ?? set.requested_at;
           if (since && at < since) continue;
           const where = projects.size > 1 ? `${s.project}/${s.queue}/${step}` : `${s.queue}/${step}`;
-          const tests = first?.failed_tests?.length ? [...new Set(first.failed_tests)] : undefined;
-          if (tests) for (const t of tests) records.push({ at, key: `t:${t}`, test: t, byCheck: false, check: c.name, where });
-          else records.push({ at, key: `c:${c.name}`, test: c.name, byCheck: true, check: c.name, where });
+          const tests = new Set(first?.failed_tests ?? []);
+          if (tests.size) for (const test of tests) records.push({ at, test, byCheck: false, check: c.name, where });
+          else records.push({ at, test: c.name, byCheck: true, check: c.name, where });
         }
       }
     }
   }
+  // Oldest first, so each group's places come in order and its last record is its latest.
   records.sort((a, b) => a.at.localeCompare(b.at));
+  const groups = new Map<string, FlakyGroup>();
   for (const r of records) {
-    let g = groups.get(r.key);
-    if (!g) { g = { test: r.test, byCheck: r.byCheck, count: 0, checks: [], steps: [], last: r.at, seen: new Set() }; groups.set(r.key, g); }
+    const key = `${r.byCheck ? "c" : "t"}:${r.test}`;
+    const g = groups.get(key) ?? { test: r.test, byCheck: r.byCheck, count: 0, checks: [], steps: [], last: r.at };
+    groups.set(key, g);
     g.count++;
+    g.last = r.at;
     if (!g.checks.includes(r.check)) g.checks.push(r.check);
-    if (!g.seen.has(r.where)) { g.seen.add(r.where); g.steps.push(r.where); }
-    if (r.at > g.last) g.last = r.at;
+    if (!g.steps.includes(r.where)) g.steps.push(r.where);
   }
   return [...groups.values()]
-    .map(({ seen: _seen, ...g }) => ({ ...g, checks: g.checks.sort() }))
+    .map((g) => ({ ...g, checks: g.checks.sort() }))
     .sort((a, b) => b.count - a.count || b.last.localeCompare(a.last) || a.test.localeCompare(b.test));
 }
 
