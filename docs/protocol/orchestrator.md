@@ -83,7 +83,7 @@ user-message behaviour remain.
   workers' and the thinking partners' briefings say the same.
 
 - `nexus queue draft <file|->` sends a queue definition (YAML) as `queue.drafted`. The server writes it: a new queue
-  becomes `proposed` (or `draft`); a change to an existing queue's steps, checks or stop conditions makes a new
+  becomes `proposed` (or `draft`); a change to an existing queue's steps, checks, stop conditions or any other part an approval pins (queues.md, `queue.yaml`) makes a new
   revision, which needs the user's approval again. A revision changes only what has not started (see "A revision
   changes only what has not started" under `queue.yaml`); a refused draft prints the reason.
 - `nexus run <queue> start|pause|resume|stop --reason … [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>... | --next | --at <time>]`

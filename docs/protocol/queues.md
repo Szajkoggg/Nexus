@@ -8,12 +8,14 @@ Part of [the protocol](../PROTOCOL.md).
 protocol: 1
 id: W
 title: Variant B made a system
+description: |                         # optional: the context every worker of the queue gets; the checks' runs read it too
+  Why the queue exists, in a few lines.
 track: cliffs-v2
 worktree: C:/Code/GameDev/ProjectHoneycomb      # where the worker runs; `auto` = Nexus creates one
 branch: v2/cliffs                      # with `worktree: auto`, the new branch's name
 base: null                             # with `worktree: auto`, the commit or branch to start from
 revision: 3                            # increases on every change to steps, criteria or stop conditions
-status: running                        # mirrors the derived state; the event logs are authoritative for progress
+status: running                        # the baseline state before any event; a draft's is draft or proposed (anything else is refused), the server writes approved; the derived state, from the event logs, is authoritative for progress
 review_level: 2                        # optional: the level of steps that set none (see "Review")
 coding: true                           # optional: the queue contains coding; Nexus adds a closing refactoring step (below)
 maintenance: survey                    # optional: a maintenance queue's mode, survey or fix_small (see "Recurring queues"); pinned by the approval
@@ -50,7 +52,7 @@ steps:
     title: Bodies shaped
     goal: ...
     acceptance: [...]
-    review: { prepare: ..., rounds: 3 }
+    review: { prepare: ... }
   - id: W3
     title: Fixture sheet
     goal: ...
@@ -62,7 +64,7 @@ approvals:
   - revision: 3
     at: 2026-11-12T09:14:00Z
     words: "Rendben, előrehozhatjuk a shadert, illetve a kettes ponttal is egyet tudok érteni."
-    hash: sha256:...                   # of the revision's steps (with their drafted levels), checks and stop conditions
+    hash: sha256:...                   # of the revision's steps (with their drafted levels), checks, stop conditions, coding, maintenance, the queue's tags, runtime, model, effort and fallback, and the note references of its source
 withdrawals:                           # approvals the user took back before the queue ever ran
   - revision: 3
     at: 2026-11-12T10:02:00Z
@@ -100,6 +102,8 @@ changes:                               # status changes made through Nexus; writ
 A step's `runtime`, `model` and `effort` are part of what is approved. Each one a step leaves out is the run's
 (see ["Runtime, model and effort per step"](runtimes.md#runtime-model-and-effort-per-step)). A draft is refused when a step names Claude Code with an effort it does
 not take (`ultra`); an effort without a runtime is checked when a run starts.
+
+**What a draft must be.** A queue id is 1-32 letters, digits, dots, dashes or underscores, starting with a letter or digit; a queue has at least one step, and step ids are unique; a drafted queue's `status› is `draft› or `proposed›. A draft that breaks one is refused, with the reason.
 
 **A revision changes only what has not started.** A draft may add, change, remove or reorder pending steps (a skipped
 step that never ran counts as pending here). A *started* step is one that has segments (it has been at work) or whose

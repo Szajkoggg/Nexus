@@ -73,7 +73,7 @@ that can be checked (tests, measurements, numbers) give 2, a criterion that is t
 feel) gives 1.
 
 **The user's level** of a step (`PUT …/steps/:s/level`, `setStepLevel`) goes into the queue's `user_levels`, written
-only by the server. It is not part of what an approval pins (the `hash` in `approvals`: steps, checks and stop conditions), so it asks for no new approval; a
+only by the server. It is not part of what an approval pins (the `hash` in `approvals`: steps, checks, stop conditions and the queue's other drafted parts, see `queue.yaml` in queues.md), so it asks for no new approval; a
 later revision keeps it for the steps it keeps, and a draft cannot bring levels of the user's (its `user_levels` is
 ignored). `null` clears it: the step's drafted level applies again. The queue's own `review_level` (`PATCH
 …/queues/:q`) is not pinned either. Both change also after approval, until the step's review is over: a step that is

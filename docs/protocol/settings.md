@@ -80,7 +80,7 @@ Two settings say which language what is written is in. Each is one of the offere
 
 - **`languages.reader`, the reader's language** (global, with a project override): what everything written to the
   user is in: chat replies, step summaries, questions, progress lines, notifications, and the text of queues (title,
-  description, goals, acceptance; ids and YAML keys stay English). It has no default: none means "the language the
+  description, goals, acceptance, stop conditions, checks, review notes; ids and YAML keys stay English). It has no default: none means "the language the
   user writes in", today's behaviour. A project's own `null` is that too, where the global value names a language.
 - **`languages.working`, the working language** (project only, default `en`): what the project's agents work in:
   files, code, comments, commits, context cards, notes. It must agree with the project's own rules (its AGENTS.md):

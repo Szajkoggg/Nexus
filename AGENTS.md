@@ -62,7 +62,7 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   (`apps/server/test/fake-claude.ts`, `fake-codex.ts`, steered by `fake-behaviour.ts`); protocol logic gets a unit
   test. Tests never call a model. The fakes run in the test's own process (`inProcessRuntime()` from
   `apps/server/test/in-process-runtime.ts` as the `spawn` option) and the CLI as a function
-  (`packages/cli/test/run-cli.ts`); a test file that starts them, a server or the CLI as processes is listed in
+  (`packages/cli/test/run-cli.ts`); a test file that starts them, a server or the CLI as processes, or runs in a Node process of its own, is listed in
   `scripts/real-process-tests.ts` with why (`scripts/test/real-process-tests.test.ts` checks it).
 - **Real runtimes**, only when a fake cannot answer the question (a new CLI flag, a protocol detail): the smallest probe,
   with a small model (Claude: `haiku`; Codex: `gpt-6-luna`), in a temporary directory, and say what it cost.
@@ -73,7 +73,7 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   or `nexus doc docs/DESIGN.md` or `nexus doc docs/PROTOCOL.md` and the file named there). A new topic goes into a new file, listed in the
   contents. A topic file that has grown past about 40 KB is split along its headings, and the contents with it.
   `scripts/test/doc-layout.test.ts` checks the contents and every relative link and anchor, and warns about a
-  large file; it also checks the prose (outside code blocks): a backticked repository path (`scripts/capture.ts`) must exist,
+  large file (`KNOWN_LARGE` in `scripts/doc-layout.ts` exempts one deliberately, docs/protocol/api.md: a closing refactoring does not split it); it also checks the prose (outside code blocks): a backticked repository path (`scripts/capture.ts`) must exist,
   and a backticked `nexus <command> [<subcommand>]` must be one the CLI's help names. A name the text means although it
   does not exist (another project's file, a layout not taken) goes into `ABSENT_ON_PURPOSE` in `scripts/doc-layout.ts`,
   with why. Cite a section as `docs/protocol/<file>.md, "Section"` (or docs/design/) or `<file>#anchor`, never by line number.
@@ -109,12 +109,12 @@ split only moved text.
   unreadable one is an error or a warning with its path, and is never overwritten (set aside as `<file>.corrupt`):
   docs/design/state.md, "Missing and unreadable files".
 - **One writer per file.** A session appends only to its own logs; the server writes queue definitions, inboxes and
-  the runtime files. Do not add a second writer to any file.
+  the runtime files, and the CLI is the one writer of what it writes itself (a queue's report and review files, notes, drafts, the setup files: docs/protocol/files.md). Do not add a second writer to any file.
 - **Agents never call the server.** They use the `nexus` CLI, which writes files. Only `nexus server …` talks HTTP.
 - **Unattended means unasked.** Nothing may wait for a human prompt inside an agent: permissions are set so that a
   refusal is reported, never asked.
 - **Remote access stays closed.** Requests that do not come straight from this machine need the access token; writes
-  are JSON-only and same-origin. Do not weaken either.
+  are JSON-only and same-origin (the one exception is `nexus server …`, which writes without an `Origin`: docs/protocol/api.md, "Writes"). Do not weaken either.
 - **Windows first.** The user's machine is Windows: paths with backslashes, PowerShell and Git Bash, `npm.cmd`, CRLF.
   `.gitattributes` keeps LF in the repository.
 

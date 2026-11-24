@@ -102,8 +102,8 @@ each entry it has seen with `message.read`; `nexus status` shows the unread ones
 ```
 
 The schema and the engine also know an inbox entry of type `stop` (delivered even to a run held at its limit), but nothing writes one today: the dashboard's Stop goes through the server directly.
-`delivered_at` is recorded by the server in `state.json` once the runtime has accepted the message (stdin write,
-`turn/steer` result, or a hook's output).
+The server records a delivery in the session's `delivered.jsonl` (`kind`, `id`, `via`) once the runtime has accepted the message (stdin write,
+`turn/steer` result, or a hook's output); the dashboard shows it as read.
 
 ## `session.yaml`
 
@@ -114,6 +114,11 @@ project: honeycomb
 role: worker                           # worker | orchestrator | conversation | user | nexus | helper
 runtime: claude                        # claude | codex | external
 native_id: 6f1c...                     # Claude session uuid / Codex thread id
+title: ...                             # optional
+queue: W                               # optional: the queue a worker (or hand-attached session) works for
+model: claude-opus-5-5                 # optional: what Nexus launched it with, kept for resuming
+effort: high                           # optional, likewise
+archived: true                         # optional: a conversation the user put away
 cwd: C:/Code/GameDev/ProjectHoneycomb
 branch: v2/cliffs
 launched_by: nexus                     # nexus | external
