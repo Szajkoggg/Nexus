@@ -98,6 +98,11 @@ user-message behaviour remain.
   and the project's, with the renames and the proposals waiting. `nexus tags accept|decline` is refused: the
   decision is the user's (see ["Tags"](stats.md#tags)).
   Starting an unapproved revision is refused.
+- **The wait for the server's result** (`waitApplied`, `packages/cli/src/main.ts`). The server carries out an
+  orchestrator's request when it sees the event; the CLI waits up to 15 s for the result in the session's applied
+  file, then reads it once more at the deadline (an answer written during the last pause is the answer). Only if
+  there is still none does it print `sent; the Nexus server has not answered yet (is it running?). Check later with
+  nexus status.`: the request is in the files and may still be carried out, and `nexus status` shows it.
 - `nexus review accept <queue> <step> [--note <text>]`, `nexus review send-back <queue> <step> <what to fix>` and
   `nexus review ask-user <queue> <step> <why>` write `review.accepted` (the note as its `text`), `review.sent_back`
   and `review.asked_user`; `nexus review provisional <queue> <step> [--note <text>]` writes `review.provisional`

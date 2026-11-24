@@ -233,7 +233,19 @@ queue's, one after another) before the step goes to its review; the worker does 
 step reads **checks running** (with the check and since when under it), or **checks queued** while another project's
 checks have the machine (one heavy operation at a time on the computer; its box says what it waits behind: which project's queue and step holds the machine, or a full test run outside Nexus, and its place in line), and the queue says the same ("checks running ·
 SF3"). The step's panel has a **Checks by Nexus** box listing each check: passed, flaky (failed, then passed on its
-second run), failed, running, or waiting its turn. A check that fails twice goes back to the same worker with its
+second run), failed, running, or waiting its turn. What you see in the cases that differ from a plain failure:
+
+- *A check that ran into its time limit* (60 minutes) is not run again: it counts as failed at once, and the worker
+  gets its check-fix round, told that the check ended at its time limit.
+- *A check that failed while Windows made a disk snapshot* (a volume shadow copy, which can stall the disk) is run
+  once more; if it passes, the box says "passed (rerun after a disk snapshot)", not flaky.
+- *A cause on the machine, not in the work* (the check's command is not on the server's PATH, an npm script is missing,
+  or the worktree's setup failed twice) is not the worker's to fix: the run halts, the step reads "checks by Nexus:
+  cannot run" with the reason, and no check-fix round or fix queue follows. Fix the cause, then **Resume** runs the
+  checks again.
+
+The details are in the protocol, [Checks run by Nexus](docs/protocol/checks.md#checks-run-by-nexus). A check that fails
+twice goes back to the same worker with its
 output: the step reads **check fix 1 of 3**, a round of its own and no send-back, so the review round and its pictures
 keep their number. After the last round (**Check-fix rounds** in Settings, under Defaults: global, or a project's own; 3 by default) the run halts
 for the orchestrator; Resume gives one more. A failure the worker says is not its work's is run on the queue's base
