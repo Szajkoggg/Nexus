@@ -6,12 +6,12 @@
 // long-lived cookie. The token lives in <NEXUS_HOME>/auth.json; rotating it signs every device out.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { IncomingMessage } from "node:http";
 import webpush from "web-push";
 import QRCode from "qrcode";
-import { attentionKey, knownTimeZone, nexusHome, notifySettingsOf, now, parseNotifySettings, shouldNotify, type AttentionItem, type NotificationKind, type NotifyKind, type NotifySettings } from "@nexus/protocol";
+import { attentionKey, knownTimeZone, nexusHome, notifySettingsOf, now, parseNotifySettings, shouldNotify, writeJson, type AttentionItem, type NotificationKind, type NotifyKind, type NotifySettings } from "@nexus/protocol";
 
 const COOKIE = "nexus_auth";
 const authFile = () => join(nexusHome(), "auth.json");
@@ -29,9 +29,8 @@ export function auth(): Auth {
 }
 
 export function rotateToken(): Auth {
-  mkdirSync(nexusHome(), { recursive: true });
   const a = { token: randomBytes(24).toString("base64url"), created_at: now() };
-  writeFileSync(authFile(), JSON.stringify(a, null, 2), "utf8");
+  writeJson(authFile(), a);
   return a;
 }
 
@@ -138,8 +137,7 @@ function pushStore(): PushFile {
   return p;
 }
 function savePush(p: PushFile): void {
-  mkdirSync(nexusHome(), { recursive: true });
-  writeFileSync(pushFile(), JSON.stringify(p, null, 2), "utf8");
+  writeJson(pushFile(), p);
 }
 
 export const pushKey = () => pushStore().vapid.publicKey;

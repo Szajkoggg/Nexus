@@ -3,9 +3,9 @@
 // the dashboard shows it until the user closes it, and every project's orchestrator is told once (its applied.jsonl
 // records `notify:crash:<at>`). One record, the latest: a later crash replaces it. Writers: the server that crashes
 // (the record) and the server that runs after it (the user's dismissal), never at once.
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { nexusHome } from "@nexus/protocol";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { nexusHome, writeJson } from "@nexus/protocol";
 
 export interface CrashRecord {
   /** When the exception ended the server (ISO). */
@@ -28,10 +28,7 @@ function crashText(err: unknown): string {
 }
 
 function write(r: CrashRecord): void {
-  const f = crashFile();
-  mkdirSync(dirname(f), { recursive: true });
-  writeFileSync(`${f}.tmp`, JSON.stringify(r, null, 2) + "\n");
-  renameSync(`${f}.tmp`, f);
+  writeJson(crashFile(), r);
 }
 
 /** Records the exception that ends this server. Synchronous (the process exits next) and never throws. */

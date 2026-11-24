@@ -21,9 +21,9 @@
 // - The plan stays across a plain restart of the server. The hand-over of the update it started ends it, so the
 //   successor never deploys again.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { newId, nexusHome, notMergedBack, now, pendingProvisional, renameRetrying, stepClosed, type NotifyKind, type ProjectState } from "@nexus/protocol";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { newId, nexusHome, notMergedBack, now, pendingProvisional, stepClosed, writeJson, type NotifyKind, type ProjectState } from "@nexus/protocol";
 import type { UpdateAsker } from "./handover.ts";
 import type { UpdateStatus } from "./lifecycle.ts";
 import { gitLabel, perf } from "./perf.ts";
@@ -84,9 +84,7 @@ function validPlan(p: unknown): DeployPlan | undefined {
 }
 
 function writePlanFile(f: PlanFile, file = deployPlanFile()): void {
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file + ".tmp", JSON.stringify(f, null, 2) + "\n");
-  renameRetrying(file + ".tmp", file);
+  writeJson(file, f);
 }
 
 /** A time as the user reads it, on this machine: "2026-11-15 06:00". */

@@ -4,8 +4,9 @@
 // The server is the folder's only writer. The type is judged from the bytes, never from a name or a declared type, and
 // the file is named by the server: no client-supplied name ever reaches the disk.
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { writeFileAtomic } from "@nexus/protocol";
 
 /** The largest picture taken, decoded. */
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -106,10 +107,6 @@ export function saveUpload(nexusDir: string, data: unknown, at = new Date()): { 
   mkdirSync(dir, { recursive: true });
   const path = join(dir, uploadName(bytes, type, at));
   // The same picture in the same second has the same name and the same bytes: the file is already there.
-  if (!existsSync(path)) {
-    const tmp = `${path}.tmp`;
-    writeFileSync(tmp, bytes);
-    renameSync(tmp, path);
-  }
+  if (!existsSync(path)) writeFileAtomic(path, bytes);
   return { path: path.replaceAll("\\", "/"), type, bytes: bytes.length };
 }

@@ -132,8 +132,34 @@ export function useHomeReader(r: Reader): void { home = r; }
 let readerFor: ((nexusDir: string) => Reader | undefined) | undefined;
 export function useProjectReaders(f: ((nexusDir: string) => Reader | undefined) | undefined): void { readerFor = f; }
 
-/** How long a rename is tried again while Windows refuses it (see renameRetrying). */
+/**
+ * How long a rename is tried again while Windows refuses it (see renameRetrying). Longer than a read's open is retried
+ * (model.ts, OPEN_RETRY_MS, 200 ms) on purpose: a write that gives up loses the change, a read that gives up is only
+ * taken again at the next read, so the write waits out a slower reader (an antivirus scan, the other server of an update).
+ */
 const RENAME_RETRY_MS = 2_000;
+
+/** A rename fault a test set (faultRenames): the file it names, how many renames onto it still fail, with what code. */
+interface RenameFault { file: string; code: string; left: number; failed: number }
+let renameFault: RenameFault | undefined;
+/**
+ * Test seam: the next `times` renames onto the file named by its path's end (`file`, as namesFile reads it) fail with
+ * `code` (EPERM by default: what Windows gives while another process holds the file), in this process, until `clear`.
+ * `failed` counts the renames refused.
+ */
+export function faultRenames(o: { file: string; code?: string; times?: number }): { failed(): number; clear(): void } {
+  const f: RenameFault = { file: o.file.replaceAll("\\", "/"), code: o.code ?? "EPERM", left: o.times ?? 1, failed: 0 };
+  renameFault = f;
+  return { failed: () => f.failed, clear: () => { if (renameFault === f) renameFault = undefined; } };
+}
+function renameOnce(from: string, to: string): void {
+  const f = renameFault;
+  if (f && f.left > 0 && namesFile(to, f.file)) {
+    f.left--; f.failed++;
+    throw Object.assign(new Error(`${f.code}: operation not permitted, rename '${from}' -> '${to}'`), { code: f.code });
+  }
+  renameSync(from, to);
+}
 
 /**
  * renameSync, tried again while Windows refuses it for a moment. Windows does not replace (or move) a file that
@@ -147,7 +173,7 @@ export function renameRetrying(from: string, to: string): void {
   try { faultCheck(to); } catch (e) { try { unlinkSync(from); } catch { /* already gone */ } throw e; }
   const start = Date.now();
   for (let wait = 5; ; wait = Math.min(wait * 2, 200)) {
-    try { renameSync(from, to); wrote(from); wrote(to); return; }
+    try { renameOnce(from, to); wrote(from); wrote(to); return; }
     catch (e) {
       const code = (e as NodeJS.ErrnoException).code;
       if ((code !== "EPERM" && code !== "EACCES" && code !== "EBUSY") || Date.now() - start >= RENAME_RETRY_MS) throw e;
@@ -156,12 +182,32 @@ export function renameRetrying(from: string, to: string): void {
   }
 }
 
-/** Atomic replace: write a temporary file next to the target, then rename it over the target. */
-export function writeYaml(file: string, data: unknown): void {
+/**
+ * Atomic replace: creates the folder, writes the whole text to a temporary file next to the target (named by this
+ * process's id, so two processes writing the same file never share one), then renames it over the target
+ * (renameRetrying). A reader sees the old content or the new one, never half of it. When the write or the rename
+ * fails, the temporary file is removed and the error thrown; the target is untouched.
+ */
+export function writeFileAtomic(file: string, text: string | Uint8Array): void {
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, YAML.stringify(data, { lineWidth: 120 }), "utf8");
-  renameRetrying(tmp, file);
+  try {
+    if (typeof text === "string") writeFileSync(tmp, text, "utf8"); else writeFileSync(tmp, text);
+    renameRetrying(tmp, file);
+  } catch (e) {
+    try { unlinkSync(tmp); } catch { /* not written, or already gone */ }
+    throw e;
+  }
+}
+
+/** writeFileAtomic of the data as YAML. */
+export function writeYaml(file: string, data: unknown): void {
+  writeFileAtomic(file, YAML.stringify(data, { lineWidth: 120 }));
+}
+
+/** writeFileAtomic of the value as indented JSON with a final newline. */
+export function writeJson(file: string, value: unknown): void {
+  writeFileAtomic(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 /** A JSONL file read: its valid entries, and for each the index of its line in the file (from 0); what was wrong. */
@@ -332,11 +378,7 @@ export class ProjectStore {
   get orchestratorSummaryFile(): string { return join(this.dir, "orchestrator", "summary.md"); }
   /** Written only by the server (src/orchestrator.ts), replaced whole. */
   writeOrchestratorSummary(text: string): void {
-    const f = this.orchestratorSummaryFile;
-    mkdirSync(dirname(f), { recursive: true });
-    const tmp = `${f}.${process.pid}.tmp`;
-    writeFileSync(tmp, text, "utf8");
-    renameRetrying(tmp, f);
+    writeFileAtomic(this.orchestratorSummaryFile, text);
   }
   /**
    * Turns a project.yaml from before global settings into the stored form, once (settings.ts, migrateStored): values
@@ -387,9 +429,7 @@ export class ProjectStore {
 
   writeNote(queueId: string, meta: NoteMeta, body: string): string {
     const file = join(this.queueDir(queueId), "notes", meta.step, `${meta.id}.md`);
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, `---\n${YAML.stringify(NoteMeta.parse(meta)).trimEnd()}\n---\n${body.trimEnd()}\n`, "utf8");
-    wrote(file);
+    writeFileAtomic(file, `---\n${YAML.stringify(NoteMeta.parse(meta)).trimEnd()}\n---\n${body.trimEnd()}\n`);
     return file;
   }
 
@@ -564,10 +604,7 @@ export class ProjectStore {
   writeClock(): void {
     const at = clockMark();
     if (!at) return;
-    const file = join(this.dir, "clock.json");
-    const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify({ protocol: 1, at })}\n`, "utf8");
-    renameRetrying(tmp, file);
+    writeFileAtomic(join(this.dir, "clock.json"), `${JSON.stringify({ protocol: 1, at })}\n`);
   }
   /** Takes up the server's clock mark (a missing or unreadable file: none, as before the file existed). */
   observeClock(): void {
@@ -584,11 +621,7 @@ export class ProjectStore {
     try { return this.reader.has(f) ? PinsFile.parse(this.reader.parsed(f, JSON.parse)) : { pins: [] }; } catch { return { pins: [] }; }
   }
   writePins(sessionId: string, p: PinsFile): void {
-    const f = join(this.sessionDir(sessionId), "pins.json");
-    mkdirSync(dirname(f), { recursive: true });
-    const tmp = `${f}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(PinsFile.parse(p)), "utf8");
-    renameRetrying(tmp, f);
+    writeFileAtomic(join(this.sessionDir(sessionId), "pins.json"), JSON.stringify(PinsFile.parse(p)));
   }
 
   readRuntime(sessionId: string): RuntimeFile | undefined {
@@ -596,10 +629,7 @@ export class ProjectStore {
     try { return this.reader.has(f) ? RuntimeFile.parse(this.reader.parsed(f, JSON.parse)) : undefined; } catch { return undefined; }
   }
   writeRuntime(sessionId: string, r: RuntimeFile): void {
-    const f = join(this.sessionDir(sessionId), "runtime.json");
-    const tmp = `${f}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(RuntimeFile.parse(r)), "utf8");
-    renameRetrying(tmp, f);
+    writeFileAtomic(join(this.sessionDir(sessionId), "runtime.json"), JSON.stringify(RuntimeFile.parse(r)));
   }
 }
 
@@ -648,9 +678,7 @@ function legacyMaxRunning(): number | undefined {
 export function writeGlobalSettings(g: GlobalSettings): void {
   const parsed = GlobalSettings.parse(g);
   writeYaml(globalSettingsFile(), parsed);
-  const f = limitsFile();
-  writeFileSync(`${f}.tmp`, `${JSON.stringify({ max_running: parsed.defaults.max_running }, null, 2)}\n`);
-  renameRetrying(`${f}.tmp`, f);
+  writeJson(limitsFile(), { max_running: parsed.defaults.max_running });
 }
 /**
  * At the server's start: the global settings file exists, the first time with the built-in defaults. A settings file
@@ -696,10 +724,7 @@ export function readUsage(): UsageFile | undefined {
   try { return exists(usageFile()) ? UsageFile.parse(JSON.parse(readText(usageFile()))) : undefined; } catch { return undefined; }
 }
 export function writeUsage(u: UsageFile): void {
-  mkdirSync(nexusHome(), { recursive: true });
-  const tmp = `${usageFile()}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(UsageFile.parse(u)), "utf8");
-  renameRetrying(tmp, usageFile());
+  writeFileAtomic(usageFile(), JSON.stringify(UsageFile.parse(u)));
 }
 
 function subdirs(dir: string): string[] {
