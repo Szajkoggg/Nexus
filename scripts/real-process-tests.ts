@@ -18,6 +18,10 @@ export const REAL_PROCESS_TESTS: Readonly<Record<string, string>> = {
   "apps/server/test/runtime-records.test.ts": "the runtime record keeps the process id (pid) of the runtime's process",
   "apps/server/test/conversation-saved.test.ts": "waits for the runtime's process id in its record before it ends the process, as a deploy or a restart does",
   "apps/server/test/scenario.test.ts": "its golden files hold the server's frozen clock; the CLI and the runtimes, as processes, keep the system clock",
+  // Moved in, they failed under load (node scripts/load-tests.mjs, queue IPR2): kept real until a fix queue finds why.
+  "apps/server/test/integration-free.test.ts": "in-process under load, 'a server that stopped while the integration step's check ran, its done and merge not recorded' failed 3 of 20 runs: the check failed through its fix rounds, as if it ran more often than planned",
+  "apps/server/test/engine-checks.test.ts": "in-process under load, 'a restart while a check runs' failed: the check ran once instead of twice in 80 s, as if the old server's check lived on past the stop and the next server took its result",
+  "apps/server/test/review.test.ts": "in-process under load, 'a send-back reaches the worker as round 2' failed 2 of 20 runs: nexus review send-back did not see the server's answer within its 15 s, though the send-back was carried out",
   // One adapter test per runtime over a real stdio JSON stream.
   "apps/server/test/claude-settling.test.ts": "Claude's adapter over a real process's stdio: output that arrives while the server's event loop stalls",
   "apps/server/test/codex-exit.test.ts": "Codex's adapter over a real process's stdio: a line read after the process's exit",
