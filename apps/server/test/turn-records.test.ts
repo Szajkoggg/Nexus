@@ -3,20 +3,16 @@
 // turn's start and end. Against the fake runtimes; no model.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { ProjectStore, approveQueue, loadProjectState, readTurns, readUsage, routeAnswers, type StepDef, type TurnRecord } from "@nexus/protocol";
+import { join } from "node:path";
+import { ProjectStore, approveQueue, loadProjectState, readTurns, readUsage, routeAnswers, wrote, type StepDef, type TurnRecord } from "@nexus/protocol";
 import { Conversations } from "../src/conversations.ts";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 function setup(behaviours: string[] = ["done"]) {
   const root = mkdtempSync(join(tmpdir(), "nexus-turns-"));
@@ -26,9 +22,9 @@ function setup(behaviours: string[] = ["done"]) {
   const steps: StepDef[] = behaviours.map((b, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${b}`, acceptance: [] }));
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => tick(), { ...QUICK_ENGINE, retryBaseMs: 60_000, usageMarginMs: 100 });
-  const orchestrator = new Orchestrator(store, engine, () => tick());
-  const conversations = new Conversations(store, orchestrator, () => tick());
+  const engine: Engine = new Engine(store, () => tick(), { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 60_000, usageMarginMs: 100 });
+  const orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn: inProcessRuntime() });
+  const conversations = new Conversations(store, orchestrator, () => tick(), { spawn: inProcessRuntime() });
   function tick() { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; turns: ${JSON.stringify(readTurns().entries)}`);
@@ -89,6 +85,36 @@ test("a failed turn is recorded with its kind and code; a turn its process does 
     const [t] = turnsOf("worker");
     assert.deepEqual([t!.outcome, t!.tokens, t!.cost_usd, t!.step], ["interrupted", undefined, undefined, "Q1"]);
   } finally { b.stop(); delete process.env.FAKE_SLOW_MS; }
+});
+
+test("a turn a crashed server left open is recorded as interrupted by the next server, and dropped from the runtime record (queue CK)", async () => {
+  process.env.FAKE_SLOW_MS = "5000";
+  const a = setup(["slow"]);
+  let next: Engine | undefined;
+  try {
+    a.engine.start("Q", { runtime: "claude" });
+    await a.until("the step's turn under way", () => !!a.store.readRun("Q") && !!a.store.readRuntime(a.store.readRun("Q")!.session)?.turn_open, LONGER.step);
+    const session = a.store.readRun("Q")!.session;
+    const left = a.store.readRuntime(session)!;
+    assert.deepEqual([left.state, left.turn_open?.queue, left.turn_open?.step], ["working", "Q", "Q1"], "the record keeps the open turn");
+    // A crash: the server ends without recording the turn. Here it ends in order, so what it wrote then is taken back:
+    // the runtime record as it was mid-turn, and no turn record.
+    a.stop();
+    await a.until("the old server's record", () => turnsOf("worker").length === 1);
+    a.store.writeRuntime(session, left);
+    const file = join(process.env.NEXUS_HOME!, "turns.jsonl");
+    writeFileSync(file, "");
+    wrote(file);
+    assert.equal(turnsOf("worker").length, 0);
+    next = new Engine(a.store, () => {}, { retryBaseMs: 60_000, usageMarginMs: 100 });
+    const [t] = turnsOf("worker");
+    assert.deepEqual([t?.outcome, t?.started_at, t?.queue, t?.step, t?.session, t?.duration_ms], ["interrupted", left.turn_open!.started_at, "Q", "Q1", session, undefined]);
+    const after = a.store.readRuntime(session)!;
+    assert.deepEqual([after.state, after.turn_open], ["exited", undefined], "closed once: the record keeps no open turn");
+    next.shutdown();
+    next = new Engine(a.store, () => {}, { retryBaseMs: 60_000, usageMarginMs: 100 });
+    assert.equal(turnsOf("worker").length, 1, "a later restart records it no more");
+  } finally { next?.shutdown(); a.stop(); delete process.env.FAKE_SLOW_MS; }
 });
 
 test("an orchestrator's turn's usage windows reach usage.json, the usage pause sees them, and the records carry them", async () => {

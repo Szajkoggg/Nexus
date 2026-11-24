@@ -41,13 +41,13 @@ export function RetryLine({ queue, step }: InQueue) {
 }
 
 const ROW: Record<CheckRowState, { mark: string; tone: string }> = {
-  passed: { mark: "✓", tone: "text-ok" }, flaky: { mark: "✓", tone: "text-warn" }, failed: { mark: "✗", tone: "text-danger" },
+  passed: { mark: "✓", tone: "text-ok" }, snapshotRerun: { mark: "✓", tone: "text-ok" }, flaky: { mark: "✓", tone: "text-warn" }, failed: { mark: "✗", tone: "text-danger" },
   running: { mark: "●", tone: "text-accent" }, waiting: { mark: "○", tone: "text-fg-3" }, interrupted: { mark: "–", tone: "text-fg-3" },
-  notCommand: { mark: "–", tone: "text-warn" },
+  notOnPath: { mark: "✗", tone: "text-danger" }, missingScript: { mark: "✗", tone: "text-danger" },
 };
 
 /** A reported check outcome's mark and tone, as the rows of a check set show them. */
-const checkMark = (c: CheckView) => ROW[c.not_command ? "notCommand" : c.ok ? "passed" : "failed"];
+const checkMark = (c: CheckView) => ROW[c.ok ? "passed" : "failed"];
 
 /**
  * The checks Nexus runs after the step's done (docs/protocol/checks.md, "Checks run by Nexus"), while they decide the step:
@@ -63,13 +63,14 @@ export function CheckRunBox({ project, queue, step }: InQueue & { project: strin
   if (!c && !fixing) return null;
   const disputed = set?.dispute;
   const time = c && formatClock(c.since, new Date());
-  const text = c?.phase === "queued" ? queuedText(capacityWait(capacity, project, queue.id, step.id), project, c.since) ?? t("checks.queued", { time: time! })
+  const text = c?.unrunnable ? t("checks.unrunnable", { reason: c.unrunnable })
+    : c?.phase === "queued" ? queuedText(capacityWait(capacity, project, queue.id, step.id), project, c.since) ?? t("checks.queued", { time: time! })
     : c?.phase === "running" ? t("checks.running", { time: time! })
     : c?.phase === "base" ? t("checks.base", { check: c.check ?? disputed?.name ?? t("checks.disputed"), evidence: disputed?.evidence ?? "…", time: time! })
     : c?.phase === "decision" ? t("checks.decision", { check: disputed?.name ?? t("checks.disputed"), evidence: disputed?.evidence ?? "…" })
     : t("checks.fix", { fix: step.check_fix!, limit: step.check_fix_limit ?? "?", round: set?.round ?? 1 });
   const rows = set ? checkRows(set, stepChecks(queue.run?.checks, queue.checks)) : [];
-  const warn = c?.phase === "decision" || fixing;
+  const warn = c?.phase === "decision" || fixing || !!c?.unrunnable;
   return (
     <div className={`mt-4 rounded-lg border p-3 text-sm ${warn ? "border-warn/30 bg-warn/10" : "border-accent/30 bg-accent/5"}`}>
       <p className="text-xs font-semibold uppercase tracking-wider text-fg-3">{t("checks.title")}</p>

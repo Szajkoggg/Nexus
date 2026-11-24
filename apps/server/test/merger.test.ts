@@ -5,10 +5,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   ProjectStore, approveQueue, loadProjectState, newId, now, planLines, routeAnswers, updateSettings, type Event, type GitFile, type QueueFile, type SessionFile, type StepDef,
 } from "@nexus/protocol";
@@ -19,10 +18,7 @@ import { judgePlan } from "../src/deploy-plan.ts";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { LONGER, QUICK_ENGINE, holdWork, sleep, until as waitUntil } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 /** The system's temporary folder, read once: each project sets TEMP to a folder of its own (the report's folder). */
 const TMP = tmpdir();
@@ -182,6 +178,35 @@ test("steps waiting for review, or unconfirmed provisional work with provisional
   y.emit(y.user, { type: "review.confirmed", queue: "Q", step: "Q1" });
   p.look();
   assert.equal(y.main(), p.sha);
+});
+
+test("a worktree folder that stays locked is tried again without the retries' synchronous waits (queue CWA)", () => {
+  const x = project();
+  const q = finished(x);
+  q.merger.shutdown();
+  // The worktree's own folder is locked (Windows: a process whose working directory it is): rmdir says EBUSY.
+  let locked = true;
+  const tries: number[] = [];
+  const rmdir = (path: Parameters<typeof rmdirSync>[0]) => {
+    if (String(path).replaceAll("\\", "/").toLowerCase() === q.wt.replaceAll("\\", "/").toLowerCase()) {
+      tries[tries.length - 1]! += 1;
+      if (locked) throw Object.assign(new Error(`EBUSY: resource busy or locked, rmdir '${String(path)}'`), { code: "EBUSY" });
+    }
+    rmdirSync(path);
+  };
+  const merger = new Merger(x.store, { start: () => {}, release: () => {}, busy: () => false, serverRoot: join(x.base, "elsewhere"), removal: { rmdir, retries: 2 } });
+  const look = () => { tries.push(0); merger.onChange(loadProjectState(x.store)); };
+  look(); // the fast-forward
+  assert.equal(x.main(), q.sha);
+  look(); // the first cleanup: with its retries (a lock that goes away at once)
+  assert.match(x.store.readGit("Q")!.merge!.waiting!.reason, /its cleanup waits: EBUSY/);
+  look(); look(); // again, while it stays locked: one try each, no synchronous wait
+  locked = false;
+  look();
+  assert.deepEqual(tries, [0, 3, 1, 1, 1], "tries of rmdir on the worktree's folder per look");
+  assert.ok(x.store.readGit("Q")!.cleaned);
+  assert.ok(!existsSync(q.wt));
+  merger.shutdown();
 });
 
 test("unconfirmed provisional work (counting as accepted) is merged, but the cleanup waits until it is confirmed", () => {
@@ -517,7 +542,7 @@ function wired(steps: { W: StepDef[]; M?: StepDef[]; B?: StepDef[] }, o: { merge
     merger!.onChange(s);
     engine.onChange(loadProjectState(x.store));
   };
-  const engine: Engine = new Engine(x.store, tick, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, boundary: (q, step, state) => merger!.atBoundary(q, step, state) });
+  const engine: Engine = new Engine(x.store, tick, { spawn: inProcessRuntime(), retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, boundary: (q, step, state) => merger!.atBoundary(q, step, state) });
   merger = new Merger(x.store, { start: (q) => void engine.start(q, { runtime: "claude" }), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining, serverRoot: join(x.base, "elsewhere"), poke: tick, pollMs: 200 });
   const until = (what: string, pred: () => boolean, ms: number = LONGER.processes) =>
     waitUntil(what, pred, ms, () => ["W", ...(steps.B ? ["B"] : [])].map((id) => `; ${id} ${JSON.stringify(x.queue(id).run)} ${x.queue(id).steps.map((s) => `${s.id}=${s.status}`).join(" ")}; git ${JSON.stringify(x.store.readGit(id)?.merge)}`).join(""));

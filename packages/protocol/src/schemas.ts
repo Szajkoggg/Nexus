@@ -1381,6 +1381,14 @@ export const RuntimeFile = z.object({
    * step runs in a fresh session. Absent before the first turn ended (and in records written before queue FI).
    */
   last_turn: z.object({ started_at: Time, ended_at: Time }).optional(),
+  /**
+   * The turn under way (queue CK): when it began and the step it works on, from its start until its end is recorded in
+   * turns.jsonl. A server that crashed leaves it; the next server records that turn as `interrupted` and drops it.
+   */
+  turn_open: z.object({
+    started_at: Time, queue: Id.optional(), step: Id.optional(),
+    fallback: z.object({ from: z.string(), reason: z.string() }).optional(),
+  }).optional(),
   updated_at: Time,
 });
 export type RuntimeFile = z.infer<typeof RuntimeFile>;
@@ -1462,15 +1470,23 @@ const CheckRun = z.object({
   name: z.string(),
   command: z.string(),
   runs: z.array(CheckAttempt).default([]),
-  /** Its outcome in the set: passed on the first run or the second (then also `flaky`). */
+  /** Its outcome in the set: passed on the first run or the second (then also `flaky`, or `snapshot_rerun`). */
   ok: z.boolean().optional(),
   flaky: z.boolean().optional(),
   /**
-   * Not a command (queue EF, P1): its first word is no program on the PATH nor a file in the checkout (commands.ts), as
-   * a check of an older queue written in words. Not run, neither passed nor failed: the set goes on without it, and the
-   * orchestrator is told to convert the queue's check.
+   * Passed on the second run, which ran because the first ended at its time limit while Windows made a volume shadow
+   * copy (queue CK): the machine's cause, not flaky. A time limit without a copy is not run again.
+   */
+  snapshot_rerun: z.boolean().optional(),
+  /**
+   * Not a command (queue EF, P1): its first word is no program on the server's PATH nor a file in the checkout
+   * (commands.ts), as a check of an older queue written in words. Not run, and failed (`ok: false`): the machine's
+   * cause, which the worker cannot fix, so the set stops (`unrunnable`) and the run halts (the user's decision of
+   * 2026-11-23, queue CK); the orchestrator is told to convert the queue's check.
    */
   not_command: z.boolean().optional(),
+  /** Its npm script does not exist ("Missing script:"): failed after its first run, the set stops as for `not_command`. */
+  missing_script: z.boolean().optional(),
 });
 export type CheckRun = z.infer<typeof CheckRun>;
 
@@ -1516,10 +1532,16 @@ const CheckSet = z.object({
   fix_queue: z.object({ id: z.string(), created: z.boolean() }).optional(),
   /**
    * The worktree setup, run first in the set's grant because its inputs changed since it last ran (queue MI): like a
-   * check (run once more after a failure; failing twice, the set fails and its checks do not run); `reason`: what
-   * changed.
+   * check (run once more after a failure; failing twice, the set stops as `unrunnable` and its checks do not run);
+   * `reason`: what changed.
    */
   setup: CheckRun.extend({ reason: z.string() }).optional(),
+  /**
+   * Why the set could not run, a cause outside the checkout the worker cannot fix (queue CK): no checkout, a check not
+   * on the server's PATH, a missing script, the worktree setup failing twice. The set is `interrupted` and the run
+   * halted with this reason; a Resume runs the set again.
+   */
+  unrunnable: z.string().optional(),
 });
 export type CheckSet = z.infer<typeof CheckSet>;
 

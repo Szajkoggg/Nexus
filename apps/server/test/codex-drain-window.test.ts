@@ -8,6 +8,7 @@
 // test opens a gate (fake-behaviour.ts, exitHeld), so the window is open when the turn ends whatever the machine's load.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -19,6 +20,10 @@ import { Orchestrator } from "../src/orchestrator.ts";
 import { FAST, activityOf, setup } from "./engine-setup.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, LONGER, WAIT_MS, sleep, until as waitUntil } from "./wait.ts";
+
+// The fake runtimes as processes of their own (scripts/real-process-tests.ts).
+process.env.NEXUS_CLAUDE = fileURLToPath(new URL("./fake-claude.ts", import.meta.url));
+process.env.NEXUS_CODEX = fileURLToPath(new URL("./fake-codex.ts", import.meta.url));
 
 /** Long past every wait here: the window ends when the fake's held stdout does, not by the adapter's limit. */
 const DRAIN_MS = 60_000;

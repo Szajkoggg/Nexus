@@ -8,15 +8,14 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, approveQueue, ensureUserSession, loadProjectState, newId, now, routeAnswers, type Event } from "@nexus/protocol";
 import { Engine, SURVEY_CONDITION } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, until as waitUntil, LONGER } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
 
 /** A template whose one step does what `what` says to the fake; `maintenance` makes it a maintenance template. */
@@ -40,8 +39,16 @@ ${maintenance ? `  - id: "{{id}}2"
     size: S
 ` : ""}`;
 
+/** The system's temporary folder as it was: each test points TEMP at a folder of its own, which must not nest. */
+const TMP = tmpdir();
+
 function setup(opts: { orchestrator?: boolean; git?: boolean } = {}) {
-  const root = mkdtempSync(join(tmpdir(), "nexus-recurring-m-"));
+  const root = mkdtempSync(join(TMP, "nexus-recurring-m-"));
+  // The reports' folder is <temp>/nexus-reports/<project>: copies of this file running side by side (the load tool)
+  // have the same project id, and one's `nexus report` was refused for the other's file. A temporary folder of its own.
+  const temp = join(root, "temp");
+  mkdirSync(temp);
+  process.env.TEMP = temp; process.env.TMP = temp; process.env.TMPDIR = temp;
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_LOG = join(root, "fake.log");
   process.env.FAKE_REVIEW_ACCEPT = "1";
@@ -60,8 +67,8 @@ function setup(opts: { orchestrator?: boolean; git?: boolean } = {}) {
   let orchestrator: Orchestrator | undefined;
   const reviews = { accept: true };
   const tick = () => { routeAnswers(store); if (reviews.accept) acceptReviews(store); const s = loadProjectState(store); orchestrator?.onChange(s); engine.onChange(s); };
-  const engine = new Engine(store, tick, { ...QUICK_ENGINE, retryBaseMs: 30, startupMs: 20 });
-  if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick);
+  const engine = new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, startupMs: 20 });
+  if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick, {}, { spawn: inProcessRuntime() });
   const timer = setInterval(tick, 150);
   const state = () => loadProjectState(store);
   const runs = (id: string) => state().queues.filter((q) => q.id.startsWith(`${id}-`));
@@ -107,7 +114,7 @@ test("after the 5th done queue it runs; a removed queue and the recurring runs d
   } finally { x.stop(); }
 });
 
-test("one that has run counts from its run through a new set and approval, and runs at the next change once N are done; one that never ran counts from the approval", async () => {
+test("one that has run counts from its run through a new set; once a count passed without a run it counts from its approval (queue CK); one that never ran counts from the approval", async () => {
   const x = setup();
   try {
     const counted = (id: string) => x.state().recurring.find((r) => r.id === id)?.counted;
@@ -128,12 +135,71 @@ test("one that has run counts from its run through a new set and approval, and r
     assert.equal(counted("N"), 0);
     // R's 2nd queue came without its approval: that count passes without a run.
     await x.until("R's count to pass without a run", () => x.store.readRecurring("R")!.skipped?.kind === "approval");
-    // The approval counts from the run again (Q3 and Q4), and is a change: R runs at once.
+    // Skipped, it counts from the approval (the user's decision of 2026-11-23, queue CK): Q3 and Q4 do not start it.
     x.engine.approveRecurring("R");
-    await x.until("R's second run done", () => x.runs("R").length === 2 && x.runs("R").every((q) => q.status === "done"));
+    assert.equal(counted("R"), 0, "counted from the approval");
     await sleep(600);
-    assert.deepEqual([x.runs("R").length, x.runs("N").length], [2, 0]);
+    assert.equal(x.runs("R").length, 1, "not run at once");
+    x.doneQueue("Q5");
+    await sleep(600);
+    assert.deepEqual([x.runs("R").length, counted("R"), counted("N")], [1, 1, 1]);
+    x.doneQueue("Q6"); // N queues after the approval, for both
+    await x.until("R's second run done", () => x.runs("R").length === 2 && x.runs("R").every((q) => q.status === "done"));
+    await x.until("N's first run done", () => x.runs("N").length === 1 && x.runs("N")[0]!.status === "done");
+    await sleep(600);
+    assert.deepEqual([x.runs("R").length, x.runs("N").length], [2, 1]);
     assert.deepEqual([counted("R"), counted("N")], [0, 0], "the runs count for neither");
+  } finally { x.stop(); }
+});
+
+test("a paused one let go on counts from then, also through a set and an approval: what was done while it was paused does not start it (queue CK)", async () => {
+  const x = setup();
+  try {
+    const counted = (id: string) => x.state().recurring.find((r) => r.id === id)?.counted;
+    x.engine.setRecurring({ id: "P", template: "tiny", params: {}, after_queues: 2, by: "orchestrator" });
+    x.engine.approveRecurring("P");
+    x.doneQueue("Q1"); x.doneQueue("Q2");
+    await x.until("P's first run done", () => x.runs("P").length === 1 && x.runs("P")[0]!.status === "done");
+    x.engine.pauseRecurring("P", true);
+    x.doneQueue("Q3");
+    await sleep(600);
+    // Let go on: Q3, done while paused, does not count.
+    x.engine.pauseRecurring("P", false);
+    assert.equal(counted("P"), 0, "counted from the moment it goes on");
+    x.doneQueue("Q4");
+    await sleep(600);
+    assert.deepEqual([x.runs("P").length, counted("P")], [1, 1], "one queue since it went on: no run");
+    // Paused again, set and approved while paused, then let go on: the count starts at each of them again.
+    x.engine.pauseRecurring("P", true);
+    x.doneQueue("Q5");
+    x.engine.setRecurring({ id: "P", template: "tiny", params: {}, after_queues: 2, by: "orchestrator" });
+    assert.equal(counted("P"), 0, "a set of a paused one counts from the set");
+    x.engine.approveRecurring("P");
+    x.doneQueue("Q6");
+    x.engine.pauseRecurring("P", false);
+    assert.equal(counted("P"), 0);
+    await sleep(600);
+    assert.equal(x.runs("P").length, 1, "not run at once");
+    x.doneQueue("Q7"); x.doneQueue("Q8");
+    await x.until("P's second run done, N queues after it went on", () => x.runs("P").length === 2 && x.runs("P")[1]!.status === "done");
+  } finally { x.stop(); }
+});
+
+test("one never paused nor skipped keeps counting from its run through a set and an approval: the queues done since its run count (the rule before queue CK)", async () => {
+  const x = setup();
+  try {
+    x.engine.setRecurring({ id: "K", template: "tiny", params: {}, after_queues: 2, by: "orchestrator" });
+    x.engine.approveRecurring("K");
+    x.doneQueue("Q1"); x.doneQueue("Q2");
+    await x.until("K's first run done", () => x.runs("K").length === 1 && x.runs("K")[0]!.status === "done");
+    x.doneQueue("Q3");
+    x.engine.setRecurring({ id: "K", template: "tiny", params: {}, after_queues: 3, by: "orchestrator" });
+    x.doneQueue("Q4");
+    assert.equal(x.store.readRecurring("K")!.skipped, undefined, "below N: nothing passed without a run");
+    x.engine.approveRecurring("K");
+    assert.equal(x.state().recurring.find((r) => r.id === "K")?.counted, 2, "Q3 and Q4, done since its run");
+    x.doneQueue("Q5");
+    await x.until("K's second run done", () => x.runs("K").length === 2 && x.runs("K")[1]!.status === "done");
   } finally { x.stop(); }
 });
 
@@ -186,7 +252,8 @@ test("a maintenance run with findings tells the orchestrator once, with the repo
     const nexusLines = () => x.orchestrator.view().chat.filter((c) => c.from === "nexus").map((c) => c.text);
     queue("NONE", 0);
     x.engine.start("NONE");
-    await x.until("NONE to finish", () => x.state().queues.find((q) => q.id === "NONE")?.run?.state === "finished");
+    // The report comes after the last step's done (as the prompt asks it), so the run may finish before it.
+    await x.until("NONE to finish, with its report", () => { const q = x.state().queues.find((y) => y.id === "NONE"); return q?.run?.state === "finished" && q.report !== undefined; });
     assert.equal(x.state().queues.find((q) => q.id === "NONE")!.report?.findings, 0);
     queue("SOME", 3);
     x.engine.start("SOME");

@@ -14,18 +14,15 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { orchestratorOverview } from "@nexus/protocol";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { INTEGRATION_CONDITION, NEXUS_SESSION, ProjectStore, approveQueue, wrote, loadProjectState, readCapacity, routeAnswers, setStepLevel, updateSettings, type StepDef } from "@nexus/protocol";
 import { Capacity } from "../src/capacity.ts";
 import { Engine, type EngineOptions } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { gatedCleanup } from "./gated-cleanup.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 import { LONGER, QUICK_ENGINE, holdWork, until as waitUntil } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { cliOut } from "../../../packages/cli/test/run-cli.ts";
 
 const step = (id: string, behaviour: string): StepDef => ({ id, title: `Step ${id}`, goal: `FAKE: ${behaviour}`, acceptance: [] });
 /** The system's temporary folder as it was: each test points TEMP at a folder of its own, which must not nest. */
@@ -34,19 +31,23 @@ const G = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "com
 
 /**
  * Stand-in checks (and setup): `node check.cjs <name>` logs its name and exits with the next planned code of <name>
- * (`plan`; the last one stays; none planned: 0), after an optional wait ("<ms>ms:<code>").
+ * (`plan`; the last one stays; none planned: 0), after an optional wait ("<ms>ms:<code>"); the run is logged once its
+ * plan is written.
  */
 function standIns() {
   const dir = mkdtempSync(join(TMP, "nexus-free-checks-"));
   const script = join(dir, "check.cjs");
   writeFileSync(script, `const fs = require("fs"), path = require("path");
 const name = process.argv[2];
-fs.appendFileSync(path.join(__dirname, "runs.log"), name + "\\n");
+const log = () => fs.appendFileSync(path.join(__dirname, "runs.log"), name + "\\n");
 const plan = path.join(__dirname, name);
-if (!fs.existsSync(plan)) process.exit(0);
+if (!fs.existsSync(plan)) { log(); process.exit(0); }
 const lines = fs.readFileSync(plan, "utf8").split("\\n").filter(Boolean);
 const next = lines.length > 1 ? lines.shift() : lines[0];
 fs.writeFileSync(plan, lines.join("\\n") + "\\n");
+// Logged once the plan is written: a test that stops the server as soon as it sees the run cannot end it between the
+// plan's truncation and its write, which left the plan empty and every later run failing (queue CK3).
+log();
 const [wait, code] = next.includes("ms:") ? next.split("ms:").map(Number) : [0, Number(next)];
 setTimeout(() => {
   if (code) { console.log("✖ " + name + " breaks (2ms)"); process.exit(code); }
@@ -65,7 +66,7 @@ setTimeout(() => {
  * cleanup limit (15 s, worker-process.ts): a cleanup asked of a process before its first turn fails as it would there,
  * "worker cleanup timed out" (queue CI8). Later cleanups work as usual.
  */
-const slowHosts = () => gatedCleanup({ failBeforeTurn: "worker cleanup timed out" }).spawn;
+const slowHosts = () => gatedCleanup({ make: inProcessRuntime(), failBeforeTurn: "worker cleanup timed out" }).spawn;
 
 function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean; jobs?: boolean; slowHosts?: boolean } = {}) {
   const base = mkdtempSync(join(TMP, "nexus-free-"));
@@ -95,7 +96,7 @@ function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean; jobs?
   // Objects where a test ends a check mid-run (else its child keeps running).
   const server = () => {
     const cap = new Capacity({ testLock: join(mkdtempSync(join(TMP, "nexus-free-lock-")), "full-test.lock"), pollMs: 20, jobs: !!o.jobs });
-    const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store, free()); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, checkDrainWaitMs: 300, capacity: cap, ...(o.slowHosts ? { spawn: slowHosts() } : {}) });
+    const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store, free()); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, spawn: o.slowHosts ? slowHosts() : inProcessRuntime(), checkDrainWaitMs: 300, capacity: cap });
     return { engine, cap };
   };
   let now = server();
@@ -243,6 +244,26 @@ test("a merge that changes the lockfile runs the worktree setup before the check
   } finally { hold.done(); x.stop(); }
 });
 
+test("the worktree setup before the checks failing twice halts the run with its output, without a check-fix round (queue CK)", async () => {
+  const hold = holdWork();
+  const x = setup([step("Q1", "slow")]);
+  // The first setup (the new worktree) passes; the one before the integration's checks fails, and once more.
+  x.plan("setup", [0, 1, 1]);
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q1 at work", () => x.queue().steps[0]!.status === "running");
+    x.onMain("package-lock.json", "{ \"lockfileVersion\": 3 }\n");
+    hold.release();
+    await x.until("the run to halt", () => x.queue().run?.state === "halted");
+    const reason = x.queue().run!.reason!;
+    assert.match(reason, /^step Q\.integrate: the checks cannot run, for a cause outside the checkout the worker cannot fix: the worktree setup \(.*check\.cjs" setup\) failed twice: exit code 1; its output ends: .*setup breaks/);
+    const set = x.store.readChecks("Q")?.steps["Q.integrate"]?.sets[0];
+    assert.deepEqual([set?.state, set?.setup?.ok, set?.setup?.runs.length, set?.checks.every((c) => !c.runs.length)], ["interrupted", false, 2, true], "tried once more; the checks did not run");
+    assert.deepEqual(x.runs(), ["setup", "unit", "setup", "setup"]);
+    assert.equal(x.received().filter((r) => r.text.startsWith("[Nexus] The checks Nexus ran")).length, 0, "no check-fix round");
+  } finally { hold.done(); x.stop(); }
+});
+
 test("at a step boundary a base that merges cleanly is merged into the branch, one that conflicts is not", async () => {
   const hold = holdWork();
   const x = setup([step("Q1", "slow"), step("Q2", "slow"), step("Q3", "slow")]);
@@ -284,8 +305,7 @@ test("nexus status names a base Nexus did not merge at a step boundary because i
     const line = `  base: main (${main.slice(0, 12)}) conflicts with the queue's branch in Q1.txt (found before step Q2, `;
     const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: x.store.dir };
     delete env.NEXUS_SESSION;
-    const cli = join(here, "../../../packages/cli/bin/nexus.js");
-    const out = execFileSync(process.execPath, [cli, "status"], { env, encoding: "utf8" });
+    const out = await cliOut(["status"], { env });
     assert.ok(out.includes(line), out);
     assert.ok(out.includes("Nexus did not merge it, the integration step will"), out);
     assert.ok(orchestratorOverview(loadProjectState(x.store)).includes(line), "the orchestrator's overview too");

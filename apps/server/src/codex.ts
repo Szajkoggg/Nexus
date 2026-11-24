@@ -187,7 +187,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     const bin = process.env.NEXUS_CODEX ?? "codex";
     const script = /\.(m?[jt]s)$/.test(bin);
     const args = ["app-server"];
-    this.proc = spawnRuntimeChild(script ? process.execPath : bin, script ? [bin, ...args] : args, {
+    this.proc = (options.spawnChild ?? spawnRuntimeChild)(script ? process.execPath : bin, script ? [bin, ...args] : args, {
       cwd: options.cwd, env: agentEnv(options.env), owned: options.ownProcesses, agent: options.agentRole,
     });
     this.proc.on("spawn", () => { if (this.proc.pid) this.emit("facts", { pid: this.proc.pid }); });

@@ -58,7 +58,7 @@ function checkBlock(cli: Cli, block: string[]): Result {
 
 // ---------------------------------------------------------------- the tests
 
-const cli = readHelp(helpText());
+const cli = readHelp(await helpText());
 
 test("nexus help is read: its usages, the flags of all commands and the topics", () => {
   assert.ok(cli.usages.length > 40, `${cli.usages.length} usages`);

@@ -46,6 +46,23 @@ twice, the worker gets a check-fix round: a message to its session with the fail
 format is known), the end of the output and the full log's path **(P15)**. It fixes, commits and ends with `nexus
 step done` again, and the checks run again, all of them.
 
+**A check at its time limit is not run once more** (the user's decision of 2026-11-23, queue CK, on the LY survey's
+question). An hour's run ended by the limit would most likely end the same way, and holds the machine another hour:
+the worker gets its check-fix round at once, the text saying the check ended at its time limit. The one exception is
+the machine's own: when Windows made a volume shadow copy while it ran (src/snapshots.ts), which stops the volume's
+writes and can make every waiting test run long, it runs once more. Passing then, it is not flaky (the tests did not
+waver; the disk stood still) but recorded as `snapshot_rerun`, and the dashboard's row and the reviewer's packet say
+"passed (rerun after a disk snapshot)". A plain failure keeps its one rerun, whether or not a copy was made meanwhile.
+
+**What the worker cannot fix is not its round** (the user's decision of 2026-11-23, queue CK, on the LY survey's
+questions 2 to 4). A check that cannot even start for a cause outside the checkout (the checkout's folder has gone, the
+command's first word is not on the server's PATH, as an older queue's check in words, an npm script that does not
+exist) and a worktree setup that fails twice (an `npm ci` without the network) are the machine's: a check-fix round
+would have the worker guess at what it cannot change, and spend the round limit on it. The set stops, the run halts with
+the reason, as any halt shows it, and a Resume, once the cause is fixed, runs the set again. Before, such a check went
+through silently (not a command, no checkout) or became the worker's round (the setup). A check that ran and ended with
+an error stays the worker's, the `--unrelated` way included.
+
 **The check-fix round is not a send-back.** It has its own limit, 3 by default (decided "like
 `review_send_back_limit`") **(P4)**, and is counted apart: the step's review round (send-backs, the round of
 its review pictures) stays as it is, and the fix round is numbered within it **(P13)**. After the limit the run halts

@@ -163,6 +163,15 @@ orchestrator cannot keep an approval alive across its own edits; only the user's
 carries a normal approval of its own revision hash, marked `standing` with the recurring and the approval it came
 from, so the queue's record shows where its consent came from.
 
+**Counting "after N queues" again after a pause or a skip** (the user's decision of 2026-11-23, queue CK, on the LY
+survey's question 5). The count of a recurring that has run goes on from its last run through a set and an approval,
+so the queues done since its run are not thrown away. That rule surprised once the recurring had stood still: one
+paused for a week, or one whose N-th queue came without its approval, brought back every queue done meanwhile and ran
+at once on being let go on or approved. Now the moment the user brings it back is where the count starts: letting a
+paused one go on, and a set or an approval of one that is paused or has `skipped` set. One that never stood still keeps
+the old rule. While paused, its count already began anew at each N-th queue, so this mainly concerns the approval
+after a skip and the queues done between the last N-th and the resume.
+
 ## A closing refactoring step kept by Nexus
 
 Decided by the user on 2026-11-14 (docs/ideas/refactor-step.md, queue RF); the protocol is in PROTOCOL.md, "The

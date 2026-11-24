@@ -32,7 +32,8 @@ export function reviewRound(q: Pick<QueueView, "check_runs">, st: Pick<StepView,
 /** One check's outcome in a few words: "passed", "passed on the second run (flaky)", "exit code 1; 2 tests failed". */
 function checkRunSummary(c: CheckRun): string {
   const last = c.runs.at(-1);
-  if (c.ok) return c.flaky ? "failed, then passed on the second run (flaky)" : "passed";
+  if (c.ok) return c.flaky ? "failed, then passed on the second run (flaky)" : c.snapshot_rerun ? "passed (rerun after a disk snapshot)" : "passed";
+  if (c.missing_script) return "missing script";
   if (!last) return "not run";
   const why = last.timed_out ? "ended at its time limit" : last.exit_code === null || last.exit_code === undefined ? "ended" : `exit code ${last.exit_code}`;
   const tests = last.failed_tests?.length ? `; ${last.failed_tests.length} test${last.failed_tests.length === 1 ? "" : "s"} failed` : "";
@@ -136,8 +137,8 @@ export function applyCheckSets(q: QueueView, st: StepView, limit?: number): void
   if (!entry) return;
   st.checks_by = entry.by;
   for (const set of entry.sets) for (const c of set.checks) {
-    // Not a command (an older queue's check in words, queue EF): not run, and it holds nothing up.
-    if (c.not_command) { st.checks.push({ name: c.name, ok: true, not_command: true, summary: "not a command: not run", at: set.ended_at ?? set.requested_at, by: "nexus" }); continue; }
+    // Not a command (not on the server's PATH, or an older queue's check in words): not run, and failed (queue CK).
+    if (c.not_command) { st.checks.push({ name: c.name, ok: false, not_command: true, summary: "not on the server's PATH: not run", at: set.ended_at ?? set.requested_at, by: "nexus" }); continue; }
     const last = c.runs.at(-1);
     if (!last?.ended_at || last.interrupted || c.ok === undefined) continue;
     st.checks.push({ name: c.name, ok: c.ok, summary: checkRunSummary(c), duration: last.duration, at: last.ended_at, by: "nexus", ...(c.flaky ? { flaky: true } : {}) });
@@ -162,7 +163,10 @@ export function applyCheckSets(q: QueueView, st: StepView, limit?: number): void
   };
   if (!set || set.state === "queued" || set.state === "running" || set.state === "interrupted") {
     const running = set?.state === "running" ? set.checks.find((c) => c.runs.at(-1) && !c.runs.at(-1)!.ended_at) : undefined;
-    st.checking = { phase: set?.state === "running" ? "running" : "queued", since: (set?.state === "running" ? set.granted_at : undefined) ?? set?.requested_at ?? done.at, ...(running ? { check: running.name } : {}) };
+    st.checking = {
+      phase: set?.state === "running" ? "running" : "queued", since: (set?.state === "running" ? set.granted_at : undefined) ?? set?.requested_at ?? done.at,
+      ...(running ? { check: running.name } : {}), ...(set?.state === "interrupted" && set.unrunnable ? { unrunnable: set.unrunnable } : {}),
+    };
     return reopen("checking");
   }
   if (set.state !== "failed") return toReview(); // passed or accepted: its review

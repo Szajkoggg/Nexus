@@ -60,7 +60,10 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   it is Nexus's tool for reproducing a failure under load, and the one Nexus's own fix queues use.
 - **Tests**: behaviour in the engine, orchestrator, conversations or lifecycle gets a test against the fake runtimes
   (`apps/server/test/fake-claude.ts`, `fake-codex.ts`, steered by `fake-behaviour.ts`); protocol logic gets a unit
-  test. Tests never call a model.
+  test. Tests never call a model. The fakes run in the test's own process (`inProcessRuntime()` from
+  `apps/server/test/in-process-runtime.ts` as the `spawn` option) and the CLI as a function
+  (`packages/cli/test/run-cli.ts`); a test file that starts them, a server or the CLI as processes is listed in
+  `scripts/real-process-tests.ts` with why (`scripts/test/real-process-tests.test.ts` checks it).
 - **Real runtimes**, only when a fake cannot answer the question (a new CLI flag, a protocol detail): the smallest probe,
   with a small model (Claude: `haiku`; Codex: `gpt-6-luna`), in a temporary directory, and say what it cost.
 - **Documentation**: a change to a file format, event, API or CLI updates the protocol in the same commit; a design

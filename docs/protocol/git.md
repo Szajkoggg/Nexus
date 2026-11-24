@@ -114,11 +114,12 @@ setup run again; by default (`WORKTREE_SETUP_INPUTS`) `**/package-lock.json`, `*
 
 - before a check set (any step's), the setup runs first within the set's grant, recorded on the set (`setup`: `name`
   ["worktree setup"](files.md#server-owned-runtime-files), `command`, `reason`, `runs` as a check's, logs `checks/<step>/r<round>f<fix>-0-setup.<run>.log`,
-  `ok`, `flaky`); it fails like a check (run once more; failing twice the set is `failed`, its checks are not run, and
-  the check-fix round's text begins "The worktree setup (<command>) ran first, because <reason>, and failed twice; the
-  checks did not run."). Passing, `setup.sha` becomes HEAD;
+  `ok`, `flaky`); it is run once more after a failure; failing twice, its checks are not run, and the set stops as a
+  machine cause, which the worker cannot fix: `interrupted` with `unrunnable`, the run halted with its output, no
+  check-fix round (queue CK; docs/protocol/checks.md, "Checks run by Nexus"). Passing, `setup.sha` becomes HEAD;
 - after a merge at a step boundary (below), before the step opens: `setup` loses its `done_at` and gets the reason, so
-  the engine runs it as a first setup (a failure halts the run, and it runs again when the run goes on).
+  the engine runs it as a first setup (a failure is tried once more, a second halts the run, and it runs again when
+  the run goes on).
 
 **Merging the base at a step boundary (M9, M10).** In a queue with an integration step, when the engine is about to
 open the next step after another (one of the queue's own steps, or the closing step; never the integration step, and
@@ -288,7 +289,9 @@ saved manifest, the canonical target and repository must still match, the branch
 changes them; directory identity is compared. Links are never traversed. The entire remainder is checked before
 deletion and each entry and its parents again before removal; nonrecursive rmdir refuses new children.
 Transient Windows removal errors get at most eight retries with increasing 250 ms delays, each preceded by a
-fresh proof check; exhaustion leaves the proof for a later Clean up.
+fresh proof check; exhaustion leaves the proof for a later Clean up. Nexus's own cleanup after a merge back (and a survey run's) retries
+only on its first try for a queue; once that failed, each later look (at most every 30 s) tries once, without the
+delays, which wait synchronously on the server's one loop (queue CWA).
 
 Missing files, a missing `.git` pointer or registration, and an entirely absent target are valid subsets. A missing
 branch is accepted only with saved proof; it lets a crash after `branch -d` finish writing `cleaned`. The final

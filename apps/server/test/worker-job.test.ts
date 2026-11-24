@@ -7,9 +7,13 @@ import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { until, LONGER } from "./wait.ts";
-import { setup, restart } from "./engine-setup.ts";
+import { setup, restart, REAL_PROCESSES } from "./engine-setup.ts";
 import { spawnRuntimeChild } from "../src/worker-process.ts";
 import { tempDir } from "./temp-dirs.ts";
+
+// The fake runtimes as processes of their own (scripts/real-process-tests.ts).
+process.env.NEXUS_CLAUDE = fileURLToPath(new URL("./fake-claude.ts", import.meta.url));
+process.env.NEXUS_CODEX = fileURLToPath(new URL("./fake-codex.ts", import.meta.url));
 
 const encode = (s: string) => Buffer.from(s, "utf8").toString("base64");
 function alive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch { return false; } }
@@ -51,7 +55,7 @@ setInterval(() => {}, 1000);
 }
 
 test("Windows worker recovery never terminates an unrelated process named by a stale PID", { skip: process.platform !== "win32" }, async () => {
-  const fixture = setup(["done"]);
+  const fixture = setup(["done"], REAL_PROCESSES);
   const sentinel = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", windowsHide: true });
   const closed = new Promise<void>((resolve) => sentinel.once("close", () => resolve()));
   let next: ReturnType<typeof restart> | undefined;
@@ -59,7 +63,7 @@ test("Windows worker recovery never terminates an unrelated process named by a s
     fixture.store.writeSession({ protocol: 1, id: "stale-worker", project: "p", role: "worker", runtime: "claude", cwd: tmpdir(), launched_by: "nexus", created_at: new Date().toISOString() });
     fixture.store.writeRuntime("stale-worker", { state: "idle", pid: sentinel.pid, turns: 0, updated_at: new Date().toISOString() });
     fixture.engine.shutdown();
-    next = restart(fixture.store);
+    next = restart(fixture.store, REAL_PROCESSES);
     assert.equal(fixture.store.readRuntime("stale-worker")?.state, "exited");
     assert.ok(alive(sentinel.pid!));
   } finally { fixture.engine.shutdown(); next?.shutdown(); sentinel.kill(); await closed; }

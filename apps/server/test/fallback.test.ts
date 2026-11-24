@@ -8,17 +8,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, approveQueue, ensureUserSession, loadProjectState, newId, now, readTurns, readUsage, routeAnswers, writeUsage, type StepDef } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 type Step = Partial<StepDef> & { fake: string };
 const iso = (ms: number) => new Date(Date.now() + ms).toISOString();
@@ -43,8 +39,8 @@ function setup(steps: Step[], o: { orchestrator?: boolean; level?: 1 | 2 | 3 } =
     }
   };
   const tick = () => { routeAnswers(store); acceptReviews(store); acceptOwn(); const s = loadProjectState(store); orchestrator?.onChange(s); engine.onChange(s); };
-  const engine: Engine = new Engine(store, tick, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
-  if (o.orchestrator) orchestrator = new Orchestrator(store, engine, tick);
+  const engine: Engine = new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
+  if (o.orchestrator) orchestrator = new Orchestrator(store, engine, tick, {}, { spawn: inProcessRuntime() });
   const timer = setInterval(tick, 150);
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const sessions = () => loadProjectState(store).sessions;

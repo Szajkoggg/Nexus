@@ -42,6 +42,7 @@ import { checkoutOf, patchGit } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
 import { cleanUp, fastForward, judgeMerge, leftText, reintegrate, stillEnding, withMergeLock, worktreeLeft } from "./mergeback.ts";
 import { samePath } from "./worktree.ts";
+import type { RemovalIO } from "./cleanup-proof.ts";
 
 export interface MergerOptions {
   /** Starts a queue's run (Engine.start); throws when it cannot start now. */
@@ -59,6 +60,13 @@ export interface MergerOptions {
   poke?: () => void;
   /** How long after a look that left something waiting it looks again (default POLL_MS). */
   pollMs?: number;
+  /** How a cleanup removes the worktree's files (a test's seam: a locked folder, fewer retries). */
+  removal?: RemovalIO;
+  /**
+   * Ends the queue's worker processes (Engine.endQueueProcesses); true when none is alive any more. A cleanup waits
+   * until then (queue PRC): a process that still runs in the worktree keeps its folder and may write into it.
+   */
+  processesEnded?: (queue: string) => boolean;
 }
 
 /** How often a merge back that waits is looked at again. */
@@ -82,6 +90,13 @@ export class Merger {
   private readonly trainHeld = new Set<string>();
   /** The merge trains at this look's start, by base (protocol train.ts). */
   private trains = new Map<string, Train>();
+  /**
+   * Queues whose cleanup by Nexus failed in an earlier look. The removal's retries wait synchronously (a Windows lock:
+   * 9 s in all), and every look runs on the server's one loop before the orchestrator's requests are carried out; a
+   * folder locked for hours blocked the loop for most of that time (queue CWA). Tried again without retries: the next
+   * look comes within POLL_MS anyway.
+   */
+  private readonly cleanupFailed = new Set<string>();
   /** The bases a queue moved, or claimed, in this look: one queue per base and look. */
   private moved = new Set<string>();
 
@@ -261,7 +276,8 @@ export class Merger {
       if (q.git.merge?.waiting) this.writeMerge(q, { ...q.git.merge, waiting: undefined });
       return; // the user's return batch shows it; a Fix it runs in the worktree
     }
-    try { cleanUp(this.store, q.id); }
+    if (!this.processesEnded(q)) return;
+    try { this.tryCleanUp(q.id); }
     catch (e) { this.wait(q, `queue ${q.id} is merged back, but its cleanup waits: ${(e as Error).message}`); }
   }
 
@@ -275,9 +291,10 @@ export class Merger {
     if (q.steps.some((s) => stillEnding(q, s))) { this.waits = true; return; }
     const path = checkoutOf(this.store, q);
     if (!path || samePath(path, state.project.root)) return;
+    if (!this.processesEnded(q)) return;
     let waiting: CleanupWaiting;
     try {
-      cleanUp(this.store, q.id);
+      this.tryCleanUp(q.id);
       return;
     } catch (e) {
       waiting = { reason: `survey run ${q.id} is done, but its worktree could not be cleaned up: ${firstLine(e)}`, since: now() };
@@ -297,6 +314,24 @@ export class Merger {
       }
     }
     patchGit(this.store, q.id, { cleanup: { waiting } });
+  }
+
+  /**
+   * The queue's worker processes have ended (asked to end now, if not): a cleanup may go. Else it waits a moment, looked
+   * at again (their exits change the runtime records, which brings a look too).
+   */
+  private processesEnded(q: QueueView): boolean {
+    if (!this.o.processesEnded || this.o.processesEnded(q.id)) return true;
+    this.waits = true;
+    return false;
+  }
+
+  /** A queue's cleanup: with the removal's retries the first time, without them once one failed (cleanupFailed). */
+  private tryCleanUp(queue: string): void {
+    const again = this.cleanupFailed.has(queue);
+    try { cleanUp(this.store, queue, again ? { ...this.o.removal, retries: 0 } : this.o.removal); }
+    catch (e) { this.cleanupFailed.add(queue); throw e; }
+    this.cleanupFailed.delete(queue);
   }
 
   /** Something keeps it waiting: recorded at the look's end (record). */

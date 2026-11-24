@@ -6,18 +6,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import { input, uploadedPictures } from "../src/codex.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 
@@ -31,9 +27,9 @@ function setup() {
   mkdirSync(uploads, { recursive: true });
   const picture = join(uploads, "20261114-120000-abcdef0123.png").replaceAll("\\", "/");
   writeFileSync(picture, PNG);
-  const engine = new Engine(store, () => {}, QUICK_ENGINE);
-  const orchestrator = new Orchestrator(store, engine, () => {});
-  const conversations = new Conversations(store, orchestrator, () => {});
+  const engine = new Engine(store, () => {}, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  const orchestrator = new Orchestrator(store, engine, () => {}, {}, { spawn: inProcessRuntime() });
+  const conversations = new Conversations(store, orchestrator, () => {}, { spawn: inProcessRuntime() });
   const lines = (file: string) => (existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>) : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms);
   const stop = () => { conversations.shutdown(); orchestrator.shutdown(); engine.shutdown(); };

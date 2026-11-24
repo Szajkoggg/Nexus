@@ -3,8 +3,7 @@
 // around the user's dependencies, proposes changes to them, and is told the user's answers.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   ProjectStore, acceptPlanProposal, applyDraft, approveQueue, declinePlanProposal, handBackPlan, loadProjectState, newId, routeAnswers,
   type Event, type StepDef,
@@ -15,8 +14,7 @@ import { acceptReviews } from "./fake-reviewer.ts";
 import { TestClock } from "./test-clock.ts";
 import { tempDir } from "./temp-dirs.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
-
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 /** Queues by id, each a list of fake behaviours (fake-behaviour.ts); all approved. `orchestrator`: one is set up too. */
 function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean } = {}) {
@@ -34,9 +32,9 @@ function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean 
   const clock = new TestClock();
   let orchestrator: Orchestrator | undefined;
   const tick = () => { routeAnswers(store); acceptReviews(store); const s = loadProjectState(store); orchestrator?.onChange(s); engines.at(-1)!.onChange(s); };
-  const newEngine = () => { const e = new Engine(store, tick, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100, undoMs: UNDO_MS, clock }); engines.push(e); return e; };
+  const newEngine = () => { const e = new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100, undoMs: UNDO_MS, clock }); engines.push(e); return e; };
   let engine = newEngine();
-  if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick);
+  if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick, {}, { spawn: inProcessRuntime() });
   const timer = setInterval(tick, 150);
   const queue = (id: string) => loadProjectState(store).queues.find((q) => q.id === id)!;
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; ${Object.keys(queues).map((id) => `${id}: ${queue(id).status} run=${JSON.stringify(queue(id).run?.state)} plan=${JSON.stringify(queue(id).plan?.after)} start=${JSON.stringify(queue(id).start)}`).join("; ")}${orchestrator ? `; chat: ${JSON.stringify(orchestrator.view().chat.slice(-3))}` : ""}`);

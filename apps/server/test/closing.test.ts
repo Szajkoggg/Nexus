@@ -9,17 +9,14 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, applyDraft, approveQueue, loadProjectState, now, routeAnswers, type StepDef } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { closingContext, hasRefactoringSection } from "../src/closing.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, LONGER, holdWork, until as waitUntil } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { cliOut } from "../../../packages/cli/test/run-cli.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const step = (id: string, behaviour: string): StepDef => ({ id, title: `Step ${id}`, goal: `FAKE: ${behaviour}`, acceptance: [] });
 const G = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
@@ -49,7 +46,7 @@ function setup(steps: StepDef[], o: { git?: boolean; rules?: boolean } = {}) {
   approveQueue(store, "Q");
   const engines: Engine[] = [];
   const engine = (): Engine => {
-    const e: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); e.onChange(loadProjectState(store)); }, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
+    const e: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); e.onChange(loadProjectState(store)); }, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
     engines.push(e);
     return e;
   };
@@ -106,7 +103,9 @@ test("the closing step runs last in a fresh session, with the queue's commit ran
     assert.ok(existsSync(join(x.store.queueDir("Q"), "report.md")));
     assert.ok(x.queue().report);
 
-    // Its round of commits begins where Q2's ended, and it made none.
+    // Its round of commits begins where Q2's ended, and it made none. The round ends with the turn that reported the
+    // step done, which may come in after the run finished (recordStepEnd).
+    await x.until("the closing round's end", () => x.store.readGit("Q")?.steps["Q.refactor"]?.at(-1)?.end !== undefined);
     const rounds = x.store.readGit("Q")!.steps["Q.refactor"]!;
     assert.equal(rounds.length, 1);
     assert.equal(rounds[0]!.start, head);
@@ -198,7 +197,7 @@ for (const skip of [true, false]) {
         assert.deepEqual([change.kind, change.by, change.step, change.to], ["status", "user_continue", "Q.refactor", "skipped"]);
         // Shown to the orchestrator in nexus status --all (the default only counts finished queues).
         x.store.writeSession({ protocol: 1, id: "orch", project: "p", role: "orchestrator", runtime: "external", cwd: x.root, launched_by: "external", created_at: now() });
-        const out = execFileSync(process.execPath, [join(here, "../../../packages/cli/bin/nexus.js"), "status", "--all"], { env: { ...process.env, NEXUS_DIR: x.store.dir, NEXUS_SESSION: "orch" }, encoding: "utf8" });
+        const out = await cliOut(["status", "--all"], { env: { ...process.env, NEXUS_DIR: x.store.dir, NEXUS_SESSION: "orch" } });
         assert.match(out, /finished: Q \(closing refactoring skipped by the user: the user skipped the closing refactoring at Continue; the stop was: fake condition: fake stop\)/);
       } else {
         assert.deepEqual(x.openings().map((o) => o.step), ["Q1", "Q2", "Q2", "Q.refactor"]);
@@ -231,7 +230,7 @@ for (const skip of [true, false]) {
         assert.deepEqual([change.by, change.to, change.revision], ["user_approval", "skipped", 2]);
         // Shown to the orchestrator in nexus status --all (the default only counts finished queues).
         x.store.writeSession({ protocol: 1, id: "orch", project: "p", role: "orchestrator", runtime: "external", cwd: x.root, launched_by: "external", created_at: now() });
-        const out = execFileSync(process.execPath, [join(here, "../../../packages/cli/bin/nexus.js"), "status", "--all"], { env: { ...process.env, NEXUS_DIR: x.store.dir, NEXUS_SESSION: "orch" }, encoding: "utf8" });
+        const out = await cliOut(["status", "--all"], { env: { ...process.env, NEXUS_DIR: x.store.dir, NEXUS_SESSION: "orch" } });
         assert.match(out, /finished: Q \(closing refactoring skipped by the user: the user skipped the closing refactoring with the approval of revision 2; the stop was: fake condition: fake stop\)/);
       } else {
         assert.deepEqual(x.openings().map((o) => o.step), ["Q1", "Q2", "Q2", "Q3", "Q.refactor"]);

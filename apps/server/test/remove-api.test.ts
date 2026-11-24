@@ -5,7 +5,6 @@
 // a remote request without the token is refused, and the nexus CLI has no command for it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -15,9 +14,9 @@ import { WebSocket } from "ws";
 import { ProjectStore, now, readRegistry, writeRegistry, type ProjectState, type ProjectSummary, type QueueFile, type RemovalView } from "@nexus/protocol";
 import { assertTempHome, spawnServer } from "./helpers.ts";
 import { LONGER, serverUp, sleep, untilAsync } from "./wait.ts";
+import { cliOut } from "../../../packages/cli/test/run-cli.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const CLI = join(here, "../../../packages/cli/bin/nexus.js");
 const freePort = () => new Promise<number>((resolve) => {
   const s = createServer();
   s.listen(0, "127.0.0.1", () => { const p = (s.address() as { port: number }).port; s.close(() => resolve(p)); });
@@ -80,7 +79,7 @@ test("Remove and Delete through the API: what goes, what stays, what keeps it, a
     assert.equal((await post("/api/projects/p/remove", {}, { ...page, "x-forwarded-for": "100.64.0.9" })).status, 401, "a remote request without the token");
     const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_HOME: home };
     delete env.NEXUS_DIR; delete env.NEXUS_SESSION;
-    assert.throws(() => execFileSync(process.execPath, [CLI, "project", "remove", "p"], { env, encoding: "utf8", stdio: "pipe" }), /nexus project add <path> \| nexus project list/);
+    await assert.rejects(async () => cliOut(["project", "remove", "p"], { env }), /nexus project add <path> \| nexus project list/);
     assert.deepEqual(await ids(), ["p", "q", "r"], "nothing was removed");
 
     // The orchestrator of p has a process (between turns); its pid, to see it stop.
@@ -129,7 +128,7 @@ test("Remove and Delete through the API: what goes, what stays, what keeps it, a
     assert.deepEqual(messages.filter((m) => m.includes('"project":"p"')), [], "no change of p is reported: its watcher is closed");
 
     // Added again with the CLI, under the id it had: its state is as it was.
-    const added = execFileSync(process.execPath, [CLI, "project", "add", p.root], { env, encoding: "utf8" });
+    const added = await cliOut(["project", "add", p.root], { env });
     assert.match(added, /^ok: project p /);
     await untilAsync("p to be back", async () => (await ids()).includes("p"));
     const after = await get<ProjectState>("/api/projects/p/state");

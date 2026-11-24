@@ -26,10 +26,11 @@ or a program on the PATH (on Windows with the `PATHEXT` extensions; a word with 
 name as written, so "Az összes teszt zöld" is no call of `az.cmd`). `queue.drafted` (`applyDraft`) refuses a draft
 with a check that does not, every check of it, also one an older queue already had, and says that the text belongs in
 a step's acceptance or its `review.prepare`. A check of a queue approved before the rule, run by Nexus, is looked at
-the same way in the queue's checkout before it would run: one that is no command is recorded with `not_command: true`
-and no runs, neither passed nor failed, so it starts no check-fix round and no fix queue, and the set goes on without
-it. The orchestrator is told once per queue and check (`notify:checknotcommand:<queue>:<check>`) to convert it with a
-revision. The step's checks show it as `not a command` (`CheckView.not_command`, `ok: true`).
+the same way in the queue's checkout before it would run: one that is no command (its first word is not on the
+server's PATH) is recorded with `not_command: true`, `ok: false` and no runs, and the set cannot run (below, "Machine
+causes"): no check-fix round, no fix queue, the run halts. The orchestrator is told once per queue and check
+(`notify:checknotcommand:<queue>:<check>`) to convert it with a revision. The step's checks show it as failed, "not on
+the server's PATH: not run" (`CheckView.not_command`, `ok: false`).
 
 The step's opening says under "Checks for every step"
 that Nexus runs them after `nexus step done`, that the worker neither runs nor reports them, and runs only the tests
@@ -47,16 +48,40 @@ of what it changes.
    to its log. The server writes the run (`started_at`, `log`) before it starts and its end (`ended_at`, `exit_code`,
    `duration`) after its tree has ended.
 3. The checks that failed run once more, in the same grant: the code has not changed. One that passes then is `ok`
-   and `flaky` **(P3)**.
+   and `flaky` **(P3)**. A check that ran into its time limit (`timed_out`) is not run again: it has failed, and the
+   worker's check-fix round says it ended at its time limit (the user's decision of 2026-11-23, queue CK). Only when
+   Windows made a volume shadow copy while it ran (its run has `snapshots`, below) does it run once more: passing then,
+   it is `ok` and `snapshot_rerun` (not `flaky`), shown as "passed (rerun after a disk snapshot)".
 4. The grant ends; the slot is free once the last tree has ended.
 5. Every check passed: the set is `passed`, and the step goes to its review as a `step.done` did before, with the
-   step's end handled there (the next step, context care, a plan or a deploy waiting for it). A check failed twice: the
-   set is `failed`, and the worker gets a check-fix round (below), unless the set's `fix` has reached
+   step's end handled there (the next step, context care, a plan or a deploy waiting for it). A check failed (twice, or
+   once at its time limit): the set is `failed`, and the worker gets a check-fix round (below), unless the set's `fix` has reached
    `defaults.check_fix_limit`: then the set gets `limit: true` and the run halts for the orchestrator **(P4, P5)**.
 
+**Machine causes** (the user's decision of 2026-11-23, queue CK). What the worker cannot fix, a cause outside the
+checkout, Nexus does not give it as a check-fix round: the set stops `interrupted` with `unrunnable: <reason>`, and the
+run halts with `step <step>: the checks cannot run, for a cause outside the checkout the worker cannot fix: <reason>`
+(`nexus status` and the dashboard show it as any halt's reason; the step stays `checking`, with
+`checking.unrunnable`, and its line reads "checks by Nexus: cannot run (the run halted): <reason>"). A Resume runs the
+set again. The causes:
+
+- **No checkout**: the queue's checkout does not exist (its worktree's folder has gone), or none is known: `no checkout:
+  the queue's checkout <path> does not exist`. A step with no checks at all still passes at once.
+- **Not on the PATH**: a check whose first word is no program on the server's PATH nor a file (an older queue's check in
+  words too): `check "<name>": "<word>" is not on the server's PATH (…)`; `not_command: true`. The checks after it do
+  not run.
+- **Missing script**: a check whose output has npm's `Missing script:` after its first run: `check "<name>": missing
+  script (<npm's line>)`; `missing_script: true`, `ok: false`, not run again.
+- **The worktree setup** run before the set (`setup`, below) failing twice: `the worktree setup (<command>) failed
+  twice: exit code <n>; its output ends: <output>`. The engine's setup of a new worktree before the first step is
+  tried once more the same way before it halts the run (docs/protocol/files.md, "Worktree setup").
+
+A check that ran and ended with an error stays the worker's: the check-fix round, or `--unrelated`.
+
 `nexus step failed` and `nexus stop` run no checks. A check longer than `CHECK_LIMIT_MS` (60 minutes) **(P10)** is
-ended with its tree and counts as failed (`timed_out`). After a check-fix round or a send-back (any new `step.done`)
-every check runs again, the ones that passed before too: an earlier result does not hold for new code **(P3)**.
+ended with its tree and counts as failed (`timed_out`), without a second run unless a shadow copy was made meanwhile
+(step 3). After a check-fix round or a send-back (any new `step.done`) every check runs again, the ones that passed
+before too: an earlier result does not hold for new code **(P3)**.
 
 **`queues/<id>/checks.yaml`** (server-owned, one writer: the engine's `CheckRunner`; `ChecksFile` in schemas.ts):
 
@@ -83,10 +108,14 @@ steps:
               - { started_at: ..., ended_at: ..., exit_code: 1, duration: 212, log: checks/W3/r1f0-1-npm-test.1.log,
                   failed_tests: ["engine › halts after the fix limit"], tail: "..." }
               - { started_at: ..., ended_at: ..., exit_code: 1, duration: 205, log: checks/W3/r1f0-1-npm-test.2.log }
-            ok: false              # its outcome in the set; flaky: true when it failed, then passed
-          - name: All tests green  # an older queue's check in words: not_command: true, no runs, neither ok nor failed
+            ok: false              # its outcome in the set; flaky: true when it failed, then passed;
+                                   # snapshot_rerun: true when it ran again after a time limit with a shadow copy, then passed
+          - name: All tests green  # an older queue's check in words: not_command: true, ok: false, no runs
             command: All tests green
             not_command: true
+            ok: false
+        # unrunnable: 'check "All tests green": "All" is not on the server''s PATH (…)'   with state: interrupted, when
+        #                          the set could not run (machine causes, above): the run halted
         dispute:                   # the worker's word that a failure is not its work's (below)
           event: 01JD...           # its check.disputed
           name: npm test
@@ -148,8 +177,8 @@ its fix queue gets the occurrence once.
 
 The review round (`reviewRound`) counts only the step.dones that reached review, so a check-fix round is no send-back
 round, and the review pictures keep their round **(P13)**. The engine's results join the step's `checks` (`by:
-"nexus"`, `flaky`; the summary "passed", "failed, then passed on the second run (flaky)", "exit code 1; 2 tests
-failed, twice") and its metrics (`check:<name>`), so `nexus status`, the dashboard, the review notice and the
+"nexus"`, `flaky`; the summary "passed", "failed, then passed on the second run (flaky)", "passed (rerun after a
+disk snapshot)", "ended at its time limit", "exit code 1; 2 tests failed, twice") and its metrics (`check:<name>`), so `nexus status`, the dashboard, the review notice and the
 statistics read both kinds alike. `nexus status` adds a line under a checking step (`checks by Nexus: waiting for the
 machine since …`, `running <check>`, `running <check> on the queue's base commit`, `a disputed failure waits for the
 orchestrator's decision`) and under a fix round (`check-fix round 1 of 3`).

@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import type { AgentEvents, AgentProcess, TurnTokens } from "../src/agent.ts";
 import { ClaudeSession } from "../src/claude.ts";
 import { CodexSession } from "../src/codex.ts";
+import { inProcessClaude, inProcessCodex } from "./in-process-runtime.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -37,7 +38,7 @@ const t = (input: number, output: number, cacheRead: number, cacheCreation: numb
 test("Claude Code: two turns in one session report each turn's tokens and cost, not the running totals", async () => {
   // One session: the fake resumes only a conversation it saved (as Claude Code does).
   const uuid = randomUUID();
-  const claude = (resume: boolean) => new ClaudeSession({ cwd, uuid, resume, permissionMode: "dontAsk", allowedTools: [], env: {} });
+  const claude = (resume: boolean) => new ClaudeSession({ cwd, uuid, resume, permissionMode: "dontAsk", allowedTools: [], env: {}, spawnChild: inProcessClaude });
   const ends = await turns(claude(false), ["hello", "again"]);
   assert.deepEqual(ends.map((e) => e.tokens), [t(10, 5, 100, 1), t(20, 10, 200, 2)], "the second turn's own, not 30/15/300/3");
   assert.deepEqual(ends.map((e) => e.costUsd), [0.01, 0.02], "the difference of the running total_cost_usd (0.01, 0.03)");
@@ -50,7 +51,7 @@ test("Claude Code: two turns in one session report each turn's tokens and cost, 
 });
 
 test("Codex: two turns in one thread report each turn's tokens (the running total's difference), and no cost", async () => {
-  const codex = (threadId?: string) => new CodexSession({ cwd, env: {}, threadId, sandbox: "read-only", approvalPolicy: "never", writableRoots: [] });
+  const codex = (threadId?: string) => new CodexSession({ cwd, env: {}, threadId, sandbox: "read-only", approvalPolicy: "never", writableRoots: [], spawnChild: inProcessCodex });
   // Turn n: 100n input (60n cached) and 3n output, then 120 input (50 cached) and 2n output (fake-codex.ts).
   const first = codex();
   let thread: string | undefined;

@@ -58,7 +58,8 @@ export function cleanupPath(path: string): string {
   return stat(path) ? realpathSync(path) : join(cleanupPath(dirname(path)), relative(dirname(path), path));
 }
 
-type RemovalIO = { unlink?: typeof unlinkSync; rmdir?: typeof rmdirSync; retries?: number };
+/** How a removal touches the files, and how often it retries a locked folder (a test's seam). */
+export type RemovalIO = { unlink?: typeof unlinkSync; rmdir?: typeof rmdirSync; retries?: number };
 
 export function removeVerifiedTree(path: string, proof: Proof, io: RemovalIO = {}): void {
   for (let attempt = 0; ; attempt++) {

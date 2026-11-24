@@ -24,6 +24,7 @@ import { isAlive } from "../src/handover.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { MAIN, assertTempHome } from "./helpers.ts";
 import { LONGER, QUICK_ENGINE, holdWork, until } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -75,9 +76,9 @@ for (const now of [false, true]) {
     }
     writeRegistry({ protocol: 1, projects: [{ id: "p", root }] });
 
-    const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, QUICK_ENGINE);
-    const orchestrator = new Orchestrator(store, engine, () => {});
-    const conversations = new Conversations(store, orchestrator, () => {});
+    const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+    const orchestrator = new Orchestrator(store, engine, () => {}, {}, { spawn: inProcessRuntime() });
+    const conversations = new Conversations(store, orchestrator, () => {}, { spawn: inProcessRuntime() });
     const conv = conversations.create({ runtime: "claude", title: "Ideas" });
     const part = projectPart({ id: "p", engine, orchestrator, conversations, merger: { shutdown() {} } });
     // The stand-in build: released by the test before the hand-over, or failed when the test ends first, so that an

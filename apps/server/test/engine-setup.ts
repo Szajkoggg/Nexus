@@ -6,16 +6,21 @@ import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers, type StepDef } from "@nexus/protocol";
 import { Engine, type EngineOptions } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 import { tempDir } from "./temp-dirs.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil } from "./wait.ts";
 
 export const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 export const WINDOW = { claude: 1000, codex: 2000 } as const;
 
-/** Short retries, usage margins and the engine's own waits, so the tests wait milliseconds where the server waits minutes. */
-export const FAST: EngineOptions = { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE };
+/**
+ * Short retries, usage margins and the engine's own waits, so the tests wait milliseconds where the server waits
+ * minutes; the fake runtimes as processes of their own (for the tests of real processes, scripts/real-process-tests.ts).
+ */
+export const REAL_PROCESSES: EngineOptions = { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE };
+
+/** REAL_PROCESSES with the fake runtimes in the test's own process (in-process-runtime.ts): every other engine test. */
+export const FAST: EngineOptions = { ...REAL_PROCESSES, spawn: inProcessRuntime() };
 
 export function setup(behaviours: string[], options: EngineOptions = FAST) {
   const root = tempDir("nexus-engine-");

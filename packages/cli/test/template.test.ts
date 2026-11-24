@@ -4,14 +4,12 @@
 // applies the orchestrator's queue.drafted events as the server does (applyDraft, then applied.jsonl).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, applyDraft, now } from "@nexus/protocol";
+import { cliOut, cliRun } from "./run-cli.ts";
 
-const CLI = join(dirname(fileURLToPath(import.meta.url)), "../bin/nexus.js");
 
 const MINE = `template:
   id: bugfix
@@ -35,13 +33,13 @@ function setup() {
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   store.writeSession({ protocol: 1, id: "o", project: "p", role: "orchestrator", runtime: "claude", cwd: root, launched_by: "nexus", created_at: now() });
   const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: store.dir, NEXUS_SESSION: "o", NEXUS_HOME: home };
-  const run = (...a: string[]) => {
-    try { return { out: execFileSync(process.execPath, [CLI, ...a], { cwd: root, env, encoding: "utf8", stdio: "pipe" }), err: "" }; }
+  const run = async (...a: string[]) => {
+    try { return { out: await cliOut([...a], { cwd: root, env }), err: "" }; }
     catch (e) { return { out: "", err: String((e as { stderr?: string }).stderr ?? e) }; }
   };
   /** `nexus queue draft <file>` while a stand-in for the server applies its queue.drafted events. */
   const upload = async (file: string): Promise<string> => {
-    const child = new Promise<string>((ok) => execFile(process.execPath, [CLI, "queue", "draft", file], { cwd: root, env, encoding: "utf8" }, (e, out, err) => ok(e ? `ERR ${err}` : out)));
+    const child = cliRun(["queue", "draft", file], { cwd: root, env }).then((r) => (r.status ? `ERR ${r.stderr}` : r.stdout));
     let done = false;
     void child.then(() => { done = true; });
     while (!done) {
@@ -61,7 +59,7 @@ function setup() {
 
 test("a draft from a template is written into .nexus/drafts/ and uploads through the draft path as any other", async () => {
   const x = setup();
-  const r = x.run("queue", "draft", "--template", "bugfix", "--set", "issue=the list crashes when empty", "--set", "area=the dashboard", "--id", "BF");
+  const r = await x.run("queue", "draft", "--template", "bugfix", "--set", "issue=the list crashes when empty", "--set", "area=the dashboard", "--id", "BF");
   assert.match(r.out, /^ok: draft \.nexus\/drafts\/BF\.yaml from template bugfix \(nexus\); complete it, then: nexus queue draft \.nexus\/drafts\/BF\.yaml/, r.err);
   const file = join(x.store.dir, "drafts", "BF.yaml");
   const text = readFileSync(file, "utf8");
@@ -77,42 +75,42 @@ test("a draft from a template is written into .nexus/drafts/ and uploads through
   assert.equal(q.title, "Fix: the list crashes when empty");
   assert.equal(q.coding, true);
   // The same id again: refused, the queue exists (and so does its draft file).
-  assert.match(x.run("queue", "draft", "--template", "bugfix", "--set", "issue=x", "--set", "area=y", "--id", "BF").err, /queue BF exists already/);
+  assert.match((await x.run("queue", "draft", "--template", "bugfix", "--set", "issue=x", "--set", "area=y", "--id", "BF")).err, /queue BF exists already/);
   // Without --id: the template's id in capitals, numbered past what is taken.
-  assert.match(x.run("queue", "draft", "--template", "spike", "--set", "question=Why?").out, /drafts\/SPIKE\.yaml/);
-  assert.match(x.run("queue", "draft", "--template", "spike", "--set", "question=Why not?").out, /drafts\/SPIKE2\.yaml/);
+  assert.match((await x.run("queue", "draft", "--template", "spike", "--set", "question=Why?")).out, /drafts\/SPIKE\.yaml/);
+  assert.match((await x.run("queue", "draft", "--template", "spike", "--set", "question=Why not?")).out, /drafts\/SPIKE2\.yaml/);
 });
 
-test("a missing or unknown parameter, an unknown template or a bad --set is refused, and nothing is written", () => {
+test("a missing or unknown parameter, an unknown template or a bad --set is refused, and nothing is written", async () => {
   const x = setup();
-  assert.match(x.run("queue", "draft", "--template", "bugfix", "--set", "issue=x", "--id", "A").err, /template bugfix needs area \(the part of the project where it shows\): give it with --set name=value/);
-  assert.match(x.run("queue", "draft", "--template", "bugfix", "--set", "issue=x", "--set", "area=y", "--set", "colour=red", "--id", "A").err, /has no parameter colour/);
-  assert.match(x.run("queue", "draft", "--template", "nope", "--id", "A").err, /no template nope \(nexus template list\)/);
-  assert.match(x.run("queue", "draft", "--template", "spike", "--set", "question", "--id", "A").err, /--set takes name=value/);
-  assert.match(x.run("queue", "draft", "x.yaml", "--set", "a=b").err, /--set goes with --template/);
+  assert.match((await x.run("queue", "draft", "--template", "bugfix", "--set", "issue=x", "--id", "A")).err, /template bugfix needs area \(the part of the project where it shows\): give it with --set name=value/);
+  assert.match((await x.run("queue", "draft", "--template", "bugfix", "--set", "issue=x", "--set", "area=y", "--set", "colour=red", "--id", "A")).err, /has no parameter colour/);
+  assert.match((await x.run("queue", "draft", "--template", "nope", "--id", "A")).err, /no template nope \(nexus template list\)/);
+  assert.match((await x.run("queue", "draft", "--template", "spike", "--set", "question", "--id", "A")).err, /--set takes name=value/);
+  assert.match((await x.run("queue", "draft", "x.yaml", "--set", "a=b")).err, /--set goes with --template/);
   assert.equal(existsSync(join(x.store.dir, "drafts", "A.yaml")), false);
 });
 
-test("template list and show: the three layers, a project's template over the global one over Nexus's", () => {
+test("template list and show: the three layers, a project's template over the global one over Nexus's", async () => {
   const x = setup();
-  const list = x.run("template", "list").out;
+  const list = (await x.run("template", "list")).out;
   for (const id of ["bugfix", "maintenance", "refactor", "spike", "ui-change"]) assert.match(list, new RegExp(`^${id} \\(nexus\\): `, "m"));
   assert.match(list, /^spike \(nexus\): Spike \(params: question \[timebox\]\)$/m);
   mkdirSync(join(x.home, "templates"));
   writeFileSync(join(x.home, "templates", "bugfix.yaml"), MINE);
   writeFileSync(join(x.home, "templates", "broken.yaml"), "title: no header\n");
-  assert.match(x.run("template", "list").out, /^bugfix \(global, over nexus\): My bug fix \(params: issue\)$/m);
+  assert.match((await x.run("template", "list")).out, /^bugfix \(global, over nexus\): My bug fix \(params: issue\)$/m);
   mkdirSync(join(x.root, "nexus-templates"));
   writeFileSync(join(x.root, "nexus-templates", "bugfix.yaml"), MINE.replace("My bug fix", "The project's bug fix"));
-  const now3 = x.run("template", "list").out;
+  const now3 = (await x.run("template", "list")).out;
   assert.match(now3, /^bugfix \(project, over nexus and global\): The project's bug fix \(params: issue\)$/m);
   assert.match(now3, /^not used: .*broken\.yaml \(global\): template:/m);
-  const show = x.run("template", "show", "bugfix").out;
+  const show = (await x.run("template", "show", "bugfix")).out;
   assert.match(show, /^bugfix: The project's bug fix \(project: .*nexus-templates.bugfix\.yaml; replaces the nexus and global one\)$/m);
   assert.match(show, /^ {2}issue: the bug \(required\)$/m);
   assert.match(show, /^title: "Mine: \{\{issue\}\}"$/m);
-  assert.match(x.run("template", "show", "broken").err, /template broken cannot be used: .*broken\.yaml: template:/);
+  assert.match((await x.run("template", "show", "broken")).err, /template broken cannot be used: .*broken\.yaml: template:/);
   // The project's template is the one a draft uses.
-  assert.match(x.run("queue", "draft", "--template", "bugfix", "--set", "issue=x", "--id", "M").out, /from template bugfix \(project\)/);
+  assert.match((await x.run("queue", "draft", "--template", "bugfix", "--set", "issue=x", "--id", "M")).out, /from template bugfix \(project\)/);
   assert.match(readFileSync(join(x.store.dir, "drafts", "M.yaml"), "utf8"), /^title: "Mine: x"$/m);
 });

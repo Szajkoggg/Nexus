@@ -9,14 +9,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, applyDraft, approveQueue, loadProjectState, newId, routeAnswers, updateSettings, type CheckSet, type Event } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { QUICK_ENGINE, LONGER, WAIT_MS, holdWork, until as waitUntil } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 // Not FAKE_REVIEW_ACCEPT: a notice that comes in while the held turn runs is read inside that turn, where the fake acts
 // on nothing but FAKE-NEXUS; whether it comes in during the turn or after it depends on the machine's load. The test
 // accepts as the orchestrator itself once the notice reached it.
@@ -29,8 +28,8 @@ function setup(o: { helper?: boolean } = {}) {
   process.env.FAKE_ARGS = join(root, "fake-args.log");
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   updateSettings(store, { review_helper: { model: "claude-haiku-5-5", effort: "low", ...(o.helper === false ? { enabled: false } : {}) } });
-  const engine: Engine = new Engine(store, () => tick(), QUICK_ENGINE);
-  const orchestrator: Orchestrator = new Orchestrator(store, engine, () => tick(), {}, { helpers: {} });
+  const engine: Engine = new Engine(store, () => tick(), { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  const orchestrator: Orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn: inProcessRuntime(), helpers: {} });
   function tick() { routeAnswers(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);
   const state = () => loadProjectState(store);

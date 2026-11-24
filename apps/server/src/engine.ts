@@ -377,6 +377,9 @@ export class Engine implements Member {
     const plan = openPlanFile(this.store.readPlan(queueId));
     if (plan) this.store.writePlan(queueId, { ...plan, started_at: now(), proposal: undefined });
     this.scheduler.disarm(queueId);
+    // The queue's earlier sessions are done with: a process one of them still has (a halted or paused run's) ends, so
+    // it works no turn beside the new run's and holds nothing in the checkout (queue PRC). A continued session is kept.
+    this.endProcesses((q) => q === queueId, { keep: session.id });
     this.ensureProcess(session);
     this.advance(queueId);
     return run;
@@ -686,6 +689,10 @@ export class Engine implements Member {
   /** Called after every change to the project's files (debounced by the server). */
   onChange(state: ProjectState): void {
     if (!this.stopped) this.pusher.onChange(state);
+    // A done or cancelled queue keeps no process (queue PRC): a halted run closed as finished, or cancelled, left its
+    // session's process idle; nothing would end it before the server stops.
+    const closed = new Set(state.queues.filter((q) => q.status === "done" || q.status === "cancelled").map((q) => q.id));
+    if (closed.size && !this.stopped) this.endProcesses((q) => closed.has(q), { state });
     for (const l of this.host.all()) this.deliverInbox(state, l);
     // Also a run held at the limit: a stop or a pause still reaches it.
     for (const q of state.queues) if (q.run?.state === "running" || q.run?.state === "pausing") this.advance(q.id, state);
@@ -1021,8 +1028,8 @@ export class Engine implements Member {
 
   /**
    * The project's worktree setup command, still to run in the queue's new worktree before a step opens: started here
-   * (once at a time); its success goes on, its failure halts the run with the reason, and it runs again when the run
-   * goes on. True while it runs (no step opens).
+   * (once at a time); its success goes on, a failure is tried once more, a second one halts the run with the reason
+   * (queue CK), and it runs again when the run goes on. True while it runs (no step opens).
    */
   private worktreeSetup(queueId: string, run: RunFile, q: QueueView): boolean {
     if (this.setups.has(queueId)) return true;
@@ -1031,14 +1038,21 @@ export class Engine implements Member {
     const cwd = q.worktree;
     this.setups.set(queueId, null);
     this.store.appendActivity(run.session, { at: now(), kind: "text", text: `Nexus runs the worktree setup command in ${cwd}: ${command}`, queue: queueId });
-    void runSetup(command, cwd, { started: (p) => { if (this.setups.has(queueId)) this.setups.set(queueId, p); } }).then((failure) => {
+    const once = () => runSetup(command, cwd, { started: (p) => { if (this.setups.has(queueId)) this.setups.set(queueId, p); } });
+    // Failing, it is tried once more (a network hiccup, a locked file), then the run halts with its output: the worker
+    // cannot fix the machine's install (the user's decision of 2026-11-23, queue CK).
+    void once().then((first) => {
+      if (!first || this.setupsEnded.has(queueId) || this.stopped) return first;
+      this.store.appendActivity(run.session, { at: now(), kind: "error", text: `The worktree setup command failed: ${first}; Nexus tries it once more`, queue: queueId });
+      return once();
+    }).then((failure) => {
       this.setups.delete(queueId);
       if (this.setupsEnded.delete(queueId) || this.stopped) return;
       recordSetup(this.store, queueId, command, failure, failure ? undefined : gitRead(cwd, ["rev-parse", "HEAD"]));
       const latest = this.store.readRun(queueId);
       this.store.appendActivity(run.session, { at: now(), kind: failure ? "error" : "text", text: failure ? `The worktree setup command failed: ${failure}` : "The worktree setup command succeeded", queue: queueId });
       if (!failure) return this.advance(queueId);
-      if (runCounted(latest)) this.halt(queueId, `the worktree setup command (${command}) failed: ${failure}`);
+      if (runCounted(latest)) this.halt(queueId, `the worktree setup command (${command}) failed twice: ${failure}`);
     });
     return true;
   }
@@ -1711,6 +1725,48 @@ export class Engine implements Member {
     live.proc.kill();
   }
 
+  /**
+   * Ends the worker processes AgentHost holds for a done or cancelled queue (Merger: before its worktree is cleaned up;
+   * the user's Clean up). True when none of them is alive any more; a queue not closed is left alone (true: its cleanup
+   * is refused anyway).
+   */
+  endQueueProcesses(queueId: string): boolean {
+    const state = loadProjectState(this.store);
+    const status = state.queues.find((q) => q.id === queueId)?.status;
+    if (status !== "done" && status !== "cancelled") return true;
+    return !this.endProcesses((q) => q === queueId, { state });
+  }
+
+  /**
+   * Ends the processes AgentHost holds for the worker sessions of the queues `of` names (a session belongs to the queue
+   * its file names), except `keep`'s and any session a going run works in (queue PRC). A process in the middle of a turn
+   * ends after that turn (its input closes: a done queue's last turn may still write its context summary), any other
+   * now; one Nexus is ending already (its run finished, its session switched) is left to end as it does. Each exits as
+   * one Nexus ended (no failure, nothing to retry) and its runtime record becomes `exited` (AgentHost's exit handler).
+   * Returns whether any of them is still alive. `state`: the project's state as it stands, when the caller has it (else
+   * the files are read).
+   */
+  private endProcesses(of: (queue: string) => boolean, o: { keep?: string; state?: ProjectState } = {}): boolean {
+    const { state } = o;
+    const sessionFile = (id: string) => (state ? state.sessions.find((x) => x.id === id) : this.store.readSession(id));
+    const runs = () => (state ? state.queues.map((q) => q.run) : this.store.queueIds().map((q) => this.store.readRun(q)));
+    let alive = false;
+    let going: Set<string> | undefined; // read once, and only when a process of the queues is found
+    for (const l of this.host.all()) {
+      if (l.session === o.keep || l.proc.state === "exited") continue;
+      let s: SessionFile | undefined;
+      try { s = sessionFile(l.session); } catch { continue; }
+      if (s?.role !== "worker" || !s.queue || !of(s.queue)) continue;
+      going ??= new Set(runs().flatMap((r) => (r && runGoing(r) ? [r.session] : [])));
+      if (going.has(l.session)) continue;
+      alive = true;
+      if (this.ending.has(l.session)) continue;
+      this.ending.add(l.session);
+      if (l.proc.state === "working") l.proc.close(); else l.proc.kill();
+    }
+    return alive;
+  }
+
   private ensureProcess(session: SessionFile): Live {
     const existing = this.host.running(session.id);
     if (existing) {
@@ -1944,6 +2000,8 @@ export class Engine implements Member {
       // alone is not ownership evidence: it may already refer to another program after a restart.
       const jobOwned = process.platform === "win32" && this.store.readSession(s).role === "worker";
       if (!jobOwned && r.pid && isAlive(r.pid)) { try { process.kill(r.pid); } catch { /* gone or not ours */ } }
+      // A turn the old server left open (it crashed): recorded as interrupted (queue CK).
+      this.host.closeLeftTurn(s);
       this.host.write(s, { state: "exited" });
     }
   }

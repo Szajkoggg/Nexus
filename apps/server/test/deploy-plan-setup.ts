@@ -15,6 +15,7 @@ import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { tempDir } from "./temp-dirs.ts";
 import { QUICK_ENGINE, until } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 export const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -89,7 +90,7 @@ export function setup(behaviours: string[], o: Options = {}) {
     orchestrator?.onChange(loadProjectState(store));
     engine.onChange(loadProjectState(store));
   };
-  let engine: Engine = new Engine(store, tick, { ...QUICK_ENGINE, boundary: (q, step, state) => planner.atBoundary("p", q, step, state) });
+  let engine: Engine = new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, boundary: (q, step, state) => planner.atBoundary("p", q, step, state) });
   const parts = () => [
     { id: "p", idle: () => engine.idle(), drain: (n: boolean) => { drains.push(queue().steps.map((s) => s.status)); return engine.drainForUpdate(n); }, cancel: () => engine.cancelDrain(), shutdown: () => engine.shutdown(), hurry: () => engine.hurryDrain() },
     // Another project whose step still runs: the drain waits for it.
@@ -103,7 +104,7 @@ export function setup(behaviours: string[], o: Options = {}) {
     release: async () => { engine.shutdown(); await until("the agent to exit", () => !engine.alive()); },
     // As main.ts: new engines (and orchestrators) recover the held runs, and the planner reads its file again.
     reacquire: async () => {
-      engine = new Engine(store, tick, { ...QUICK_ENGINE, boundary: (q, step, state) => planner.atBoundary("p", q, step, state) });
+      engine = new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, boundary: (q, step, state) => planner.atBoundary("p", q, step, state) });
       if (orchestrator) { orchestrator.shutdown(); orchestrator = newOrchestrator(); }
       planner.recover();
     },
@@ -112,7 +113,7 @@ export function setup(behaviours: string[], o: Options = {}) {
     exit: () => { exited = true; },
     ended: (id, how, reason) => planner.updateEnded(id, how, reason),
   });
-  const newOrchestrator = () => new Orchestrator(store, engine, tick, { plan: () => planner.notices(), update: () => lifecycle.notice() });
+  const newOrchestrator = () => new Orchestrator(store, engine, tick, { plan: () => planner.notices(), update: () => lifecycle.notice() }, { spawn: inProcessRuntime() });
   const planner = new DeployPlanner({
     lifecycle, state: (id) => (id === "p" ? loadProjectState(store) : undefined), projects: () => ["p"], root: checkout,
     push: (n) => pushed.push(n), release: (_p, q, reason) => engine.releaseHold(q, reason),
@@ -142,7 +143,7 @@ export function successor(t: ReturnType<typeof setup>) {
   const lifecycle = new Lifecycle(() => [{ id: "p", idle: () => engine.idle(), drain: (n) => engine.drainForUpdate(n), cancel: () => engine.cancelDrain(), shutdown: () => engine.shutdown() }], () => {}, { npm: async () => {}, exit: () => {} });
   const planner = new DeployPlanner({ lifecycle, state: () => loadProjectState(t.store), projects: () => ["p"], root: t.checkout, release: (_p, q, reason) => engine.releaseHold(q, reason) });
   const tick = () => { routeAnswers(t.store); acceptReviews(t.store); t.review(); planner.check("p", loadProjectState(t.store)); engine.onChange(loadProjectState(t.store)); };
-  engine = new Engine(t.store, tick, { ...QUICK_ENGINE, boundary: (q, step, state) => planner.atBoundary("p", q, step, state) });
+  engine = new Engine(t.store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, boundary: (q, step, state) => planner.atBoundary("p", q, step, state) });
   planner.recover();
   const timer = setInterval(tick, 150);
   return { engine, lifecycle, planner, tick, stop: () => { clearInterval(timer); engine.shutdown(); planner.shutdown(); } };

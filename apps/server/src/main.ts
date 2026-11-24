@@ -151,7 +151,7 @@ function refreshRegistry(): void {
     // Measured: making the engine recovers the project's runs after a restart (queue SV1 found it reading the whole
     // state once per queue).
     const engine = perf.measure(`engine start ${p.id}`, () => new Engine(store, () => changed(p.id), { coordinator, capacity, snapshots: readSnapshots, boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) || (merger?.atBoundary(q, step, state) ?? false) }));
-    merger = new Merger(store, { start: (q) => void engine.start(q), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining || lifecycle.busy, poke: () => changed(p.id) });
+    merger = new Merger(store, { start: (q) => void engine.start(q), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining || lifecycle.busy, poke: () => changed(p.id), processesEnded: (q) => engine.endQueueProcesses(q) });
     // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
     // for agents in each deploy since its session began (deploy-changes.jsonl).
     // Its routine reviews go to short-lived review helpers (src/review-helper.ts) while review_helper.enabled is on.
@@ -735,7 +735,11 @@ app.post("/api/projects/:id/queues/:queue/continue", act(async (st, b, p, e) => 
 app.post("/api/projects/:id/queues/:queue/steps/:step/send-back", act((st, b, p) => ({ message: sendBack(st, { queue: p("queue"), step: p("step"), from: "user", text: b.text }) })));
 // Merge back and clean up a finished worktree queue: the user's only (no CLI command or event leads here).
 app.post("/api/projects/:id/queues/:queue/merge", act((st, _b, p, e) => ({ message: mergeBack(st, p("queue"), undefined, (q) => void e.engine.start(q)) })));
-app.post("/api/projects/:id/queues/:queue/cleanup", act((st, _b, p) => ({ message: cleanUp(st, p("queue")) })));
+// The queue's worker processes end first (queue PRC): one still running keeps its folder and may write into it.
+app.post("/api/projects/:id/queues/:queue/cleanup", act((st, _b, p, e) => {
+  if (!e.engine.endQueueProcesses(p("queue"))) throw new ActionError(`queue ${p("queue")}'s worker process is still ending: clean up again in a moment`, 409);
+  return { message: cleanUp(st, p("queue")) };
+}));
 // Push again: the last failed push of an accepted step of this queue, tried again.
 // The fix of the rules files, as the user saw it (`version`): it changes the project's own files and commits nothing.
 app.post("/api/projects/:id/rules/fix", act((st, b) => ({ message: fixProjectRules(st, b.version) })));

@@ -278,7 +278,10 @@ updated_at: ...
   run was made), so the queues done since the run count, and when they reach N it runs at the next change (the
   approval is one). For a file written before `last.baseline` was recorded, that start is the countable queues that
   finished (the run's end, or the latest step's finish; a done queue with no finish time among them) no later than
-  the run was made (`last.at`). Only a recurring that never ran counts from the approval or the set. The server counts
+  the run was made (`last.at`). Only a recurring that never ran counts from the approval or the set. A recurring the
+  user brings back after it stood still counts from then instead (the user's decision of 2026-11-23, queue CK): letting
+  a paused one go on (`resume`) starts the count at that moment, and so does a set or the approval of one that is paused
+  or has a time that passed without a run (`skipped`); the queues done meanwhile do not start it at once. The server counts
   at every change of the project. `ProjectState.recurring` shows `counted` for it (and `nexus recurring list` "N
   counted"), and no `next_at`.
 - **Maintenance runs** (a queue with `maintenance`): the worker's prompt asks for the number of findings with the

@@ -5,14 +5,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, acceptTagProposal, loadProjectState, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil } from "./wait.ts";
-
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "nexus-tags-"));
@@ -20,8 +18,8 @@ function setup() {
   delete process.env.FAKE_LOG;
   const store = ProjectStore.init(root, { id: "p", name: "P", root, orchestrator: { notify: true } });
   const tick = () => { routeAnswers(store); const s = loadProjectState(store); orchestrator.onChange(s); engine.onChange(s); };
-  const engine = new Engine(store, tick, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
-  const orchestrator = new Orchestrator(store, engine, tick);
+  const engine = new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
+  const orchestrator = new Orchestrator(store, engine, tick, {}, { spawn: inProcessRuntime() });
   const timer = setInterval(tick, 150);
   const chat = () => orchestrator.view().chat.map((c) => c.text);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; chat: ${JSON.stringify(chat().slice(-3))}`);
@@ -70,6 +68,9 @@ test("a proposed area waits for the user; a draft using it is refused until the 
     acceptTagProposal(x.store, id);
     assert.equal(loadProjectState(x.store).attention.some((a) => a.kind === "tags"), false, "decided: no longer waiting");
     await x.until("told of the acceptance", () => x.said(/^The user accepted your tag proposal: area terrain is on the project's list\.$/));
+    // The notice shows in the chat as its turn starts. Sent before that turn ends, the draft would go into it, where
+    // the fake only acts on commands: the draft must be a turn of its own, so wait for the orchestrator to be idle.
+    await x.until("the notice's turn over", () => x.orchestrator.idle());
     x.orchestrator.say(DRAFT);
     await x.until("the draft accepted", () => x.said(/^ok: queue T created as proposed/m));
     assert.deepEqual(loadProjectState(x.store).queues.find((q) => q.id === "T")!.steps[0]!.tags, { kind: "code", area: "terrain", size: "M", origin: "user" });

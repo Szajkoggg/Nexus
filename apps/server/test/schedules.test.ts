@@ -5,8 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, applyDraft, approveQueue, formatClock, loadProjectState, routeAnswers, writeUsage, type StepDef } from "@nexus/protocol";
 import { Engine, MAX_TIMER_MS } from "../src/engine.ts";
 import { TestClock } from "./test-clock.ts";
@@ -14,8 +13,7 @@ import { MISSED_MS } from "../src/scheduler.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
-
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 
@@ -33,9 +31,9 @@ function setup(queues: Record<string, string[]>, opts: { orchestrator?: boolean 
   const engines: Engine[] = [];
   let orchestrator: Orchestrator | undefined;
   const tick = () => { routeAnswers(store); acceptReviews(store); const s = loadProjectState(store); orchestrator?.onChange(s); engines.at(-1)!.onChange(s); };
-  const newEngine = () => { const e = new Engine(store, tick, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100, clock }); engines.push(e); return e; };
+  const newEngine = () => { const e = new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100, clock }); engines.push(e); return e; };
   let engine = newEngine();
-  if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick);
+  if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick, {}, { spawn: inProcessRuntime() });
   const timer = setInterval(tick, 150);
   const queue = (id: string) => loadProjectState(store).queues.find((q) => q.id === id)!;
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; ${Object.keys(queues).map((id) => `${id}: ${queue(id).status} run=${JSON.stringify(queue(id).run?.state)} start=${JSON.stringify(queue(id).start)}`).join("; ")}`);

@@ -1,6 +1,6 @@
 // A Claude Code session run by Nexus: the unmodified `claude` binary in print mode, stream-json in and out, kept
 // alive across turns. Signed in with the user's own subscription (no API key, no Agent SDK).
-import { spawnRuntimeChild, type RuntimeChild } from "./worker-process.ts";
+import { spawnRuntimeChild, type RuntimeChild, type SpawnRuntimeChild } from "./worker-process.ts";
 import { EventEmitter } from "node:events";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -130,6 +130,8 @@ export interface ClaudeOptions {
    */
   lateTurnMs?: number;
   env: Record<string, string>;
+  /** Starts the process (spawnRuntimeChild); tests give a stand-in (AgentHostOptions.spawn). */
+  spawnChild?: SpawnRuntimeChild;
 }
 
 export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentProcess {
@@ -223,7 +225,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
     // NEXUS_CLAUDE replaces the binary (tests use a fake written in TypeScript or JavaScript, run by this Node).
     const bin = process.env.NEXUS_CLAUDE ?? "claude";
     const script = /\.(m?[jt]s)$/.test(bin);
-    const child = spawnRuntimeChild(script ? process.execPath : bin, script ? [bin, ...args] : args, {
+    const child = (this.options.spawnChild ?? spawnRuntimeChild)(script ? process.execPath : bin, script ? [bin, ...args] : args, {
       cwd: this.options.cwd,
       env: agentEnv(this.options.env),
       owned: this.options.ownProcesses,

@@ -3,18 +3,15 @@
 // told again; workers can do none of it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, addNote, applyDraft, approveQueue, commentOnPicture, loadProjectState, newId, now, routeAnswers, sendBack, setQueueSettings, setStepLevel, updateSettings } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
-
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
-const CLI = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/cli/bin/nexus.js");
+import { cliOut } from "../../../packages/cli/test/run-cli.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "nexus-review-"));
@@ -22,8 +19,8 @@ function setup() {
   process.env.FAKE_LOG = join(root, "fake.log");
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   let orchestrator: Orchestrator;
-  const engine: Engine = new Engine(store, () => tick(), QUICK_ENGINE);
-  orchestrator = new Orchestrator(store, engine, () => tick());
+  const engine: Engine = new Engine(store, () => tick(), { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn: inProcessRuntime() });
   function tick() { routeAnswers(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);
   const state = () => loadProjectState(store);
@@ -216,8 +213,8 @@ test("a worker can use neither the review commands nor their events", async () =
     await x.until("the review", () => x.step("W", "W1").review_with === "orchestrator");
     const worker = x.state().queues[0]!.run!.session;
     for (const cmd of [["accept", "W", "W1"], ["send-back", "W", "W1", "redo"], ["ask-user", "W", "W1", "why"]]) {
-      assert.throws(
-        () => execFileSync(process.execPath, [CLI, "review", ...cmd], { env: { ...process.env, NEXUS_SESSION: worker, NEXUS_DIR: x.store.dir }, stdio: "pipe" }),
+      await assert.rejects(
+        async () => cliOut(["review", ...cmd], { env: { ...process.env, NEXUS_SESSION: worker, NEXUS_DIR: x.store.dir } }),
         (e: { stderr: Buffer }) => /only an orchestrator session may do this/.test(e.stderr.toString()),
         cmd[0],
       );

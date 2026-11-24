@@ -17,9 +17,9 @@ import { Lifecycle } from "../src/lifecycle.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { deployChangesFile, parseAgentLines, readDeployChanges } from "../src/deploy.ts";
 import { QUICK_ENGINE, until, LONGER } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -59,8 +59,8 @@ function setup(opts: { projects: { id: string; notify?: boolean; orchestrator?: 
     mkdirSync(root);
     const store = ProjectStore.init(root, { id: o.id, name: o.id.toUpperCase(), root });
     const session = o.orchestrator === false ? undefined : addOrchestrator(store, o.notify ?? true);
-    const engine = new Engine(store, () => {}, QUICK_ENGINE);
-    const make = () => new Orchestrator(store, engine, () => {}, { update: () => lifecycle.notice(), changes: readDeployChanges });
+    const engine = new Engine(store, () => {}, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+    const make = () => new Orchestrator(store, engine, () => {}, { update: () => lifecycle.notice(), changes: readDeployChanges }, { spawn: inProcessRuntime() });
     return { id: o.id, store, engine, session, orchestrator: make(), make };
   });
   const onChange = () => { for (const p of projects) p.orchestrator.onChange(loadProjectState(p.store)); };

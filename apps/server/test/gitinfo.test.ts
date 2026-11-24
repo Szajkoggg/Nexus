@@ -6,8 +6,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { EventEmitter } from "node:events";
 import { ProjectStore, approveQueue, loadProjectState, newId, routeAnswers, type Event } from "@nexus/protocol";
 import type { AgentEvents, AgentProcess } from "../src/agent.ts";
@@ -16,8 +15,8 @@ import { branchState, checkoutStatus, headOnce, recordBase, recordStepEnd, recor
 import { perf } from "../src/perf.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, until, LONGER } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"];
 const git = (cwd: string, args: string[], env: Record<string, string> = {}) =>
   execFileSync("git", [...G, ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...env } }).trim();
@@ -48,7 +47,7 @@ test("the engine records HEAD when a step opens and when its outcome's turn ends
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], approvals: [], history: [],
     steps: [1, 2].map((i) => ({ id: `Q${i}`, title: `Step ${i}`, goal: "FAKE: commit", acceptance: [] })) });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, QUICK_ENGINE);
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
   const queue = () => loadProjectState(store).queues[0]!;
   try {
     const start = git(root, ["rev-parse", "HEAD"]);

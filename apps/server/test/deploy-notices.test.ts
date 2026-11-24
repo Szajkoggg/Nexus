@@ -20,10 +20,11 @@ import { Lifecycle } from "../src/lifecycle.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { serverEnv, spawnServer } from "./helpers.ts";
 import { QUICK_ENGINE, until, LONGER, untilAsync } from "./wait.ts";
+import { cliOut } from "../../../packages/cli/test/run-cli.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const REPO = join(here, "..", "..", "..");
-const CLI = join(REPO, "packages", "cli", "bin", "nexus.js");
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -158,10 +159,10 @@ test("a failed update tells the orchestrator that ran it why, and what still run
 
   const p = project(base, "p");
   const session = addOrchestrator(p.store);
-  const engine = new Engine(p.store, () => {}, QUICK_ENGINE);
+  const engine = new Engine(p.store, () => {}, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
   // Wired as main.ts wires it: the orchestrator reads the lifecycle's notice; a settled update runs its notices.
   let lifecycle!: Lifecycle;
-  const orchestrator = new Orchestrator(p.store, engine, () => {}, { update: () => lifecycle.notice() });
+  const orchestrator = new Orchestrator(p.store, engine, () => {}, { update: () => lifecycle.notice() }, { spawn: inProcessRuntime() });
   const onChange = () => orchestrator.onChange(loadProjectState(p.store));
   lifecycle = new Lifecycle(() => [{ id: "p", idle: () => true, drain: () => [], cancel: () => {}, shutdown: () => {} }], () => {}, {
     root: repo, successor: [process.execPath, join(here, "fake-successor.ts")], timeoutMs: 15_000,
@@ -248,8 +249,8 @@ test("nexus server status lists the running steps per project", async () => {
   const s = server(home, port, {});
   try {
     await until("the server", () => s.out().includes("Nexus server on"), LONGER.processes, () => s.out());
-    const out = execFileSync(process.execPath, [CLI, "server", "status"], {
-      env: { ...serverEnv({ NEXUS_HOME: home, NEXUS_PORT: String(port) }), NEXUS_SESSION: "", NEXUS_DIR: "" }, encoding: "utf8",
+    const out = await cliOut(["server", "status"], {
+      env: { ...serverEnv({ NEXUS_HOME: home, NEXUS_PORT: String(port) }), NEXUS_SESSION: "", NEXUS_DIR: "" },
     });
     assert.match(out, /running steps in P1 \(p1\):\n {2}Q\/Q1 Step Q1/);
     assert.match(out, /running steps in P2 \(p2\):\n {2}Q\/Q2 Step Q2/);

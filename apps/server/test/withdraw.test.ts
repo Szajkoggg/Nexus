@@ -11,6 +11,7 @@ import { ActionError, ProjectStore, approveQueue, loadProjectState, routeAnswers
 import { Engine } from "../src/engine.ts";
 import { spawnServer } from "./helpers.ts";
 import { QUICK_ENGINE, serverUp } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -35,7 +36,7 @@ function project() {
 test("the engine refuses to start a queue whose approval was withdrawn", () => {
   const { store } = project();
   withdrawApproval(store, "Q", "not yet");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); engine.onChange(loadProjectState(store)); }, QUICK_ENGINE);
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); engine.onChange(loadProjectState(store)); }, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
   try {
     assert.throws(() => engine.start("Q"), (e: ActionError) => e.status === 409 && /approve/.test(e.message));
     assert.equal(store.readRun("Q"), undefined, "no run was written");

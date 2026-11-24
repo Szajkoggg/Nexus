@@ -813,7 +813,7 @@ export function helperPacket(q: QueueView, st: StepView, c: HelperPacketContext)
     ? set.checks.map((x) => {
       const last = x.runs.at(-1);
       const unrelated = set.state === "accepted" && set.dispute?.name === x.name ? " (failed, accepted as unrelated to this step: it fails on the queue's base too, or the orchestrator accepted it)" : "";
-      return `${x.name}: ${x.ok ? "passed" : "FAILED"}${x.flaky ? " (flaky: failed, then passed on the second run)" : ""}${unrelated}${last?.duration !== undefined ? `, ${formatSeconds(last.duration)}` : ""}${last?.log ? `; log: ${`${c.queueDir}/${last.log}`.replaceAll("\\", "/")}` : ""}`;
+      return `${x.name}: ${x.ok ? "passed" : "FAILED"}${x.flaky ? " (flaky: failed, then passed on the second run)" : ""}${x.snapshot_rerun ? " (rerun after a disk snapshot)" : ""}${unrelated}${last?.duration !== undefined ? `, ${formatSeconds(last.duration)}` : ""}${last?.log ? `; log: ${`${c.queueDir}/${last.log}`.replaceAll("\\", "/")}` : ""}`;
     })
     : st.checks.filter((x) => x.at >= since).map((x) => `${x.name}: ${x.ok ? "ok" : "FAILED"} (reported by the worker)${x.summary ? ` - ${x.summary}` : ""}`);
   const items = st.review_items.filter((i) => i.at >= since)
@@ -975,13 +975,13 @@ export function checkAcceptedNotice(q: QueueView, st: StepView, set: CheckSet): 
 }
 
 /**
- * A check of the queue is no command (queue EF, P1): an older queue's check written in words. Nexus did not run it and
- * the step went on; the orchestrator converts it.
+ * A check of the queue is no command (queue EF, P1): not on the server's PATH, or an older queue's check written in
+ * words. Nexus did not run it and the run halted (queue CK); the orchestrator converts it.
  */
 export function checkNotCommandNotice(q: QueueView, st: StepView, check: string): Notice {
   return {
-    fact: `The check "${check}" of queue ${q.id} is not a command (its first word is no program on the PATH nor a file in the repository), so Nexus did not run it at step ${st.id}; it neither passed nor failed, and the step went on without it.`,
-    todo: `Convert it with a revision of queue ${q.id} (nexus queue draft): a check is a command Nexus runs in the queue's checkout; what it says in words goes into a step's acceptance, or what the user should see into its review.prepare. Tell the user in one sentence.`,
+    fact: `The check "${check}" of queue ${q.id} is not a command (its first word is no program on the PATH nor a file in the repository), so Nexus did not run it at step ${st.id}: the check failed, and the run halted, as the worker cannot fix it.`,
+    todo: `Convert it with a revision of queue ${q.id} (nexus queue draft), then the run can go on: a check is a command Nexus runs in the queue's checkout; what it says in words goes into a step's acceptance, or what the user should see into its review.prepare. Tell the user in one sentence.`,
   };
 }
 
