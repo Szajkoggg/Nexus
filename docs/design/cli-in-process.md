@@ -103,3 +103,27 @@ start a server, these stay real because their subject is the process: runtime-re
 conversation-saved.test.ts (it waits for the pid before it ends the process, as a deploy does), scenario.test.ts
 (its golden files hold the server's frozen clock, the runtimes and the CLI keep the system clock) and stopwork.test.ts
 (clock-steps.test.ts runs it with the server's clock stepped and its agents on the system clock).
+
+Measured on the same machine, each full run alone under the lock (`npm test`; the processes counted by a preload
+through `NODE_OPTIONS` that notes every Node start by what it runs), before IPR2 (its base, e941497) and after:
+
+| | before | after |
+|---|---|---|
+| wall clock | 526 s | 369 s |
+| the test runner's duration | 522 s | 365 s |
+| tests (pass, skipped) | 1627 (1625, 1; one failed) | 1630 (1629, 1): the 3 new ones of the list's check |
+| tests over 5 s / over 10 s | 361 / 148 | 232 / 62 |
+| processes of fake-claude.ts / fake-codex.ts | 802 / 170 | 129 / 52 |
+| servers started / bin/nexus.js | 55 / 11 | 50 / 10 |
+
+The run before had one failure, deploy-notices.test.ts ("the orchestrator that ran the update is told once, after the
+restart, which version is up"), in the base's code. The fake processes left are those of the listed tests.
+
+Under load (`node scripts/load-tests.mjs --copies 4 --rounds 5`, 12 busy loops, the ten slowest converted files at
+once) 14 of 20 runs passed. Four failures were tests that stop or restart the server while a check Nexus runs is
+running in its Windows job (integration-free.test.ts three times, engine-checks.test.ts once); two were
+review.test.ts, where `nexus review send-back` did not see the server's answer within its 15 s although the send-back
+had been carried out. With only the three files (`--copies 8 --rounds 2`) the base's code passed 16 of 16 runs and
+the change 15 of 16: engine-checks.test.ts ("a restart while a check runs") saw the check run once instead of twice
+and took 80 s, as if the old server's 60 s check had lived on past the stop and the next server had taken its result
+(not confirmed).
