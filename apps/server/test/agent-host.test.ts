@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ProjectStore, newId, now, readUsage, type SessionFile } from "@nexus/protocol";
@@ -234,4 +234,17 @@ test("a message read in the turn it was sent into is not quoted by the next one:
     host.cutOff();
     assert.deepEqual(store.readRuntime(s.id)?.interrupted?.asked, ["after it"], settles ? "settled" : "no settling");
   }
+});
+
+test("an unreadable runtime record is set aside with a warning, and the session starts on", (t) => {
+  const { store, s, start, proc } = setup(ROLE_RECORDS.conversation);
+  const file = join(store.sessionDir(s.id), "runtime.json");
+  writeFileSync(file, "{ half");
+  const warn = t.mock.method(console, "warn", () => {});
+  start();
+  assert.ok(proc(), "the process started");
+  assert.equal(readFileSync(`${file}.corrupt`, "utf8"), "{ half", "the old record is kept beside");
+  assert.equal(store.readRuntime(s.id)?.state, "idle", "a new record is written");
+  const lines = warn.mock.calls.map((c) => c.arguments.join(" "));
+  assert.ok(lines.some((l) => l.includes("runtime.json")), `warned with the path: ${lines.join(" | ")}`);
 });

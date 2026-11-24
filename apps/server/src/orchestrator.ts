@@ -151,8 +151,8 @@ export class Orchestrator {
 
   /** A session's file, if there is one. */
   private sessionFile(id: string | null | undefined): SessionFile | undefined {
-    if (!id) return undefined;
-    try { return this.store.readSession(id); } catch { return undefined; }
+    if (!id || !this.store.hasSession(id)) return undefined;
+    try { return this.store.readSession(id); } catch (e) { console.warn(`nexus: ${(e as Error).message}; taken as no session`); return undefined; }
   }
 
   view() {
@@ -670,7 +670,8 @@ ${n.text}` });
   private lineage(s: SessionFile): SessionFile[] {
     const out = [s];
     for (let x = s; x.continues && !out.some((y) => y.id === x.continues);) {
-      try { x = this.store.readSession(x.continues); } catch { break; }
+      if (!this.store.hasSession(x.continues)) break;
+      try { x = this.store.readSession(x.continues); } catch (e) { console.warn(`nexus: ${(e as Error).message}; the lineage ends before it`); break; }
       out.push(x);
     }
     return out;

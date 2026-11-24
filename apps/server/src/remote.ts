@@ -11,7 +11,7 @@ import { join } from "node:path";
 import type { IncomingMessage } from "node:http";
 import webpush from "web-push";
 import QRCode from "qrcode";
-import { attentionKey, knownTimeZone, nexusHome, notifySettingsOf, now, parseNotifySettings, shouldNotify, writeJson, type AttentionItem, type NotificationKind, type NotifyKind, type NotifySettings } from "@nexus/protocol";
+import { attentionKey, knownTimeZone, nexusHome, normPath, notifySettingsOf, now, renameRetrying, parseNotifySettings, shouldNotify, writeJson, type AttentionItem, type NotificationKind, type NotifyKind, type NotifySettings } from "@nexus/protocol";
 
 const COOKIE = "nexus_auth";
 const authFile = () => join(nexusHome(), "auth.json");
@@ -21,9 +21,21 @@ const pushFile = () => join(nexusHome(), "push.json");
 
 interface Auth { token: string; created_at: string }
 
+/**
+ * The access token, made the first time. An auth.json that is there but cannot be read is not replaced silently: it is
+ * set aside as auth.json.corrupt, with a warning, and a new token is made (every device signs in again).
+ */
 export function auth(): Auth {
-  if (existsSync(authFile())) {
-    try { return JSON.parse(readFileSync(authFile(), "utf8")) as Auth; } catch { /* rewrite below */ }
+  const f = authFile();
+  if (existsSync(f)) {
+    try {
+      const a = JSON.parse(readFileSync(f, "utf8")) as Partial<Auth> | null;
+      if (typeof a?.token === "string" && a.token) return a as Auth;
+      throw new Error("it holds no token");
+    } catch (e) {
+      renameRetrying(f, `${f}.corrupt`);
+      console.warn(`nexus: ${normPath(f)} cannot be read (${(e as Error).message}); set aside as auth.json.corrupt, and a new access token made: every device signs in again`);
+    }
   }
   return rotateToken();
 }

@@ -96,7 +96,7 @@ export class Conversations {
 
   list() {
     return this.store.sessionIds()
-      .map((id) => { try { return this.store.readSession(id); } catch { return undefined; } })
+      .map((id) => { try { return this.store.readSession(id); } catch (e) { console.warn(`nexus: ${(e as Error).message}; left out of the conversations`); return undefined; } })
       .filter((s): s is SessionFile => s?.role === "conversation")
       .map((s) => this.itemOf(s))
       .sort(byConversationOrder);
@@ -104,8 +104,9 @@ export class Conversations {
 
   /** A conversation's line in the list, or undefined when the session is no conversation (the live stream's item). */
   item(id: string) {
-    let s: SessionFile | undefined;
-    try { s = this.store.readSession(id); } catch { return undefined; }
+    if (!this.store.hasSession(id)) return undefined;
+    let s: SessionFile;
+    try { s = this.store.readSession(id); } catch (e) { console.warn(`nexus: ${(e as Error).message}; no conversation item`); return undefined; }
     return s.role === "conversation" ? this.itemOf(s) : undefined;
   }
 
@@ -413,8 +414,8 @@ ${text}`;
   // ---------------------------------------------------------------- processes
 
   private session(id: string): SessionFile {
-    let s: SessionFile;
-    try { s = this.store.readSession(id); } catch { throw new ActionError("no such conversation", 404); }
+    if (!this.store.hasSession(id)) throw new ActionError("no such conversation", 404);
+    const s = this.store.readSession(id);
     if (s.role !== "conversation") throw new ActionError("no such conversation", 404);
     return s;
   }

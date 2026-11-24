@@ -596,7 +596,7 @@ export class CheckRunner {
   private recover(): void {
     for (const queue of this.store.queueIds()) {
       let file: ChecksFile | undefined;
-      try { file = this.store.readChecks(queue); } catch { continue; }
+      try { file = this.store.readChecks(queue); } catch (e) { console.warn(`nexus: ${(e as Error).message}; its checks are not recovered`); continue; }
       if (!file) continue;
       let changed = false;
       for (const entry of Object.values(file.steps)) for (const s of entry.sets) {

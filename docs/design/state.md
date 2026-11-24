@@ -195,3 +195,35 @@ on every change, and were left.
 Measured again under load on 2026-11-20 (queue SV1; [performance.md](performance.md#the-first-measurement-2026-11-20)): 260 ms on a
 generated project of 139 queues, 940 ms beside the full test suite, and 139 rebuilds in a row when the engine starts.
 Queue SM replaces the rebuilds with a model kept in memory and fed line by line ([model.md](model.md)).
+
+## Missing and unreadable files (queue CHA)
+
+A file that is not there and a file that is there but cannot be read are two cases, and only the first has a default.
+Before queue CHA the store's readers and their callers caught every error as "no such file": a `queue.yaml` that did
+not parse (damaged, or a newer schema's after an update was rolled back) became a new queue when a draft came, its
+approvals and history lost; an unreadable `session.yaml` was made again; an unreadable `auth.json` silently became a
+new access token; an unreadable `runtime.json` made a session start its conversation afresh, without a word.
+
+The rule, kept by `packages/protocol/src/store.ts`:
+
+- **A default only for a missing file.** A reader asks whether the file is there (`reader.has`, `hasQueue`,
+  `hasSession`, or the read's `ENOENT`), never takes the read's error for its absence.
+- **An unreadable file is an error naming it** (`UnreadableFileError`: the path, and why: the parse, the schema, or
+  the system's refusal). A caller that acts on the file stops there: `applyDraft` refuses the draft (409) rather than
+  write over the file, `ensureServerSession` does not make the session again, an action on an unreadable queue or
+  session fails with the file's name instead of "unknown" (404). A caller that lists many (the conversations, the
+  search, the checks recovered at a start, a session's lineage) leaves the one out and warns with its path
+  (`console.warn`, the server's log).
+- **Where the server goes on with a default** (the files it writes for itself: `runtime.json`, `pins.json`,
+  `clock.json`, `away.yaml`, `capacity.yaml`, `usage.json`, `limits.json`, `auth.json`) an unreadable file gives the
+  default with a warning: into the project state's `warnings` where `deriveProjectState` reads it (`away.yaml`,
+  `runtime.json`; the dashboard shows them), else `console.warn`, once per file. A session whose `runtime.json` cannot
+  be read starts on as one without a record, with the warning.
+- **Nothing overwrites an unreadable file.** Its writer first moves it aside as `<file>.corrupt` (the latest one;
+  `writeFileAtomic` does this for every file a reader with a default found unreadable in its content, and tells the
+  log), so the damage can still be looked at. A file the system only refused for a moment (another process holding
+  it) is not set aside. `auth.json` is set aside at once, before the new token is made: every device signs in again,
+  and the log says why.
+
+A reader in another process (an agent's `nexus`) warns but never sets a file aside: the server is the files' only
+writer.

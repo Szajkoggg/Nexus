@@ -1,7 +1,7 @@
 // Who may use the dashboard from where, and which news is pushed.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IncomingMessage } from "node:http";
@@ -93,4 +93,16 @@ test("the sign-in cookie survives opening the app from the home screen (SameSite
   assert.match(c, /Max-Age=31536000/);
   assert.match(c, /HttpOnly/);
   assert.match(c, /Secure/);
+});
+
+test("an unreadable auth.json is not replaced silently: a warning, and the old file set aside", (t) => {
+  const file = join(process.env.NEXUS_HOME!, "auth.json");
+  writeFileSync(file, "{ half");
+  const warn = t.mock.method(console, "warn", () => {});
+  const token = remote.auth().token;
+  assert.ok(token.length > 10, "a new token");
+  assert.equal(readFileSync(`${file}.corrupt`, "utf8"), "{ half", "the old file is kept beside");
+  const lines = warn.mock.calls.map((c) => c.arguments.join(" "));
+  assert.ok(lines.some((l) => l.includes("auth.json")), `warned with the path: ${lines.join(" | ")}`);
+  assert.equal(remote.auth().token, token, "read again, the same token");
 });

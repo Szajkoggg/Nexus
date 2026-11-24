@@ -23,8 +23,10 @@ export class ActionError extends Error {
   constructor(message: string, status = 400) { super(message); this.status = status; }
 }
 
+/** The queue: unknown (404) when it has no queue.yaml; an unreadable one is an error naming the file. */
 function queueOf(store: ProjectStore, id: string): QueueFile {
-  try { return store.readQueue(id); } catch { throw new ActionError(`unknown queue ${id}`, 404); }
+  if (!store.hasQueue(id)) throw new ActionError(`unknown queue ${id}`, 404);
+  return store.readQueue(id);
 }
 
 function stepOf(store: ProjectStore, queue: string, step: string): QueueFile {
@@ -51,9 +53,12 @@ export function ensureNexusSession(store: ProjectStore): SessionFile {
   return ensureServerSession(store, NEXUS_SESSION, "nexus", "Nexus (without a model)");
 }
 
-/** A session the server keeps itself (no process): read, or made the first time it is needed. */
+/**
+ * A session the server keeps itself (no process): read, or made the first time it is needed. An unreadable
+ * session.yaml is not made again: the error names it.
+ */
 function ensureServerSession(store: ProjectStore, id: string, role: SessionFile["role"], title: string): SessionFile {
-  try { return store.readSession(id); } catch { /* create it */ }
+  if (store.hasSession(id)) return store.readSession(id);
   const p = store.readProject();
   const s: SessionFile = { protocol: 1, id, project: p.id, role, runtime: "external", title, cwd: p.root, launched_by: "nexus", created_at: now() };
   store.writeSession(s);
@@ -86,8 +91,8 @@ export function deleteNote(store: ProjectStore, queue: string, step: string, id:
 }
 
 export function sendMessage(store: ProjectStore, session: string, text: unknown, about?: { queue?: string; step?: string }): string {
-  let s: SessionFile;
-  try { s = store.readSession(session); } catch { throw new ActionError(`unknown session ${session}`, 404); }
+  if (!store.hasSession(session)) throw new ActionError(`unknown session ${session}`, 404);
+  const s = store.readSession(session);
   if (s.role === "user") throw new ActionError("cannot message the dashboard's own session");
   const entry: InboxEntry = { v: 1, id: newId(), at: now(), from: "user", type: "message", text: nonEmpty(text, "the message"), queue: about?.queue, step: about?.step };
   store.appendInbox(session, entry);
@@ -440,8 +445,12 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   const queueIssues = [...(queueEffort ? [queueEffort] : []), ...fallbackIssues(draft.fallback)];
   if (queueIssues.length) throw new ActionError(`queue ${draft.id}: ${queueIssues.join("; ")}`);
 
+  // An unreadable queue.yaml (damaged, or a newer schema's after an update was rolled back) is not a new queue: the
+  // draft is refused rather than written over it, which would lose its approvals and history.
   let old: QueueFile | undefined;
-  try { old = store.readQueue(draft.id); } catch { old = undefined; }
+  if (store.hasQueue(draft.id)) {
+    try { old = store.readQueue(draft.id); } catch (e) { throw new ActionError(`${(e as Error).message}; the draft is not written over it: repair the file, or move it away, and draft again`, 409); }
+  }
   const tagged = draftTagIssues(store, draft, old);
   if (tagged.length) throw new ActionError(tagged.join("; "));
   const sourced = draftSourceIssues(store, draft, old);

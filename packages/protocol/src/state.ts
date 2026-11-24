@@ -311,7 +311,7 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
   countRebuild();
   const warnings: string[] = [];
   const project = store.readProject();
-  const away = readAway(store.env);
+  const away = readAway(store.env, (w) => warnings.push(w));
   let tags: TagsFile;
   try { tags = store.readTags(); } catch (e) { warnings.push(`tags.yaml: ${(e as Error).message}`); tags = { protocol: 1, areas: [], activities: [], renames: [], proposals: [], decisions: [] }; }
   let metrics: MetricsFile;
@@ -360,7 +360,7 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
       const handed = new Map(delivered.entries.filter((d) => d.kind === "inbox").map((d) => [d.id, d.at]));
       for (const d of delivered.entries) if (d.kind === "note") noteDeliveries.set(d.id, d.at);
       sessions.set(id, {
-        ...s, event_count: r.entries.length, live: store.readRuntime(id),
+        ...s, event_count: r.entries.length, live: store.readRuntime(id, (w) => warnings.push(w)),
         // Copies: the model's entries are frozen, and message.read sets read_at on the view's own.
         inbox: inbox.entries.map((m) => (handed.has(m.id) ? { ...m, read_at: handed.get(m.id) } : { ...m })),
       });

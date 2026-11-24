@@ -30,8 +30,7 @@ export function chatView(store: ProjectStore, sessionId: string, last: number): 
 
 /** A session whose chat the dashboard shows: the project's orchestrator or one of its conversations. */
 function chatSession(store: ProjectStore, sessionId: string): SessionFile {
-  let s: SessionFile | undefined;
-  try { s = store.readSession(sessionId); } catch { s = undefined; }
+  const s = store.hasSession(sessionId) ? store.readSession(sessionId) : undefined;
   if (!s || (s.role !== "orchestrator" && s.role !== "conversation")) throw new ActionError("no such chat", 404);
   return s;
 }

@@ -2,7 +2,7 @@
 // Rules (docs/protocol/files.md, "Rules"): one writer per file, JSONL is append-only, YAML is replaced atomically.
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { monotonicFactory } from "ulid";
@@ -182,6 +182,68 @@ export function renameRetrying(from: string, to: string): void {
   }
 }
 
+// ---------------------------------------------------------------- missing and unreadable files
+// The rule (docs/design/state.md, "Missing and unreadable files"): a reader gives its default only for a missing
+// file. A file that is there but cannot be read is an error naming it, or, where the server goes on with a default,
+// a warning with its path; nothing overwrites it: its writer sets it aside as <file>.corrupt first.
+
+/** A file that is there but cannot be read (it does not parse, its schema refuses it, or the system refuses it). */
+export class UnreadableFileError extends Error {
+  readonly file: string;
+  /** Its content is at fault (not a refusal of the system, such as a file another process holds). */
+  readonly content: boolean;
+  constructor(file: string, cause: unknown) {
+    super(`${normPath(file)} cannot be read: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = "UnreadableFileError";
+    this.file = normPath(file);
+    this.content = typeof (cause as { syscall?: unknown } | undefined)?.syscall !== "string";
+  }
+}
+const isMissing = (e: unknown): boolean => (e as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+const unreadable = (file: string, e: unknown): UnreadableFileError => e instanceof UnreadableFileError ? e : new UnreadableFileError(file, e);
+
+/** Reads a file through `read`: a missing file's error goes through as it is, any other names the file. */
+function named<T>(file: string, read: () => T): T {
+  try { return read(); } catch (e) { throw isMissing(e) ? e : unreadable(file, e); }
+}
+
+/** Where a reader with a default tells of an unreadable file (console.warn, once per file, when none is given). */
+export type Warn = (message: string) => void;
+/** The unreadable files this process's readers with a default met, by path: their writer sets them aside. */
+const metUnreadable = new Map<string, UnreadableFileError>();
+
+/**
+ * A reader with a default, for a file the server writes and goes on without: `read`'s value; `fallback` for a missing
+ * file; for one that is there but cannot be read, `fallback` too, told to `warn` with the file's path, and the file
+ * remembered so that writeFileAtomic sets it aside before replacing it.
+ */
+function orDefault<T>(file: string, read: () => T, fallback: T, warn?: Warn): T {
+  const key = normPath(file);
+  try {
+    const value = read();
+    metUnreadable.delete(key);
+    return value;
+  } catch (e) {
+    if (isMissing(e)) return fallback;
+    const err = unreadable(file, e);
+    const message = `${err.message}; going on as if it were missing until it is written again (then it is set aside as ${basename(file)}.corrupt)`;
+    if (warn) warn(message); else if (!metUnreadable.has(key)) console.warn(`nexus: ${message}`);
+    metUnreadable.set(key, err);
+    return fallback;
+  }
+}
+
+/** Before a file is replaced: if a reader with a default found its content unreadable, it is moved to <file>.corrupt. */
+function setAsideUnreadable(file: string): void {
+  const key = normPath(file);
+  const met = metUnreadable.get(key);
+  if (!met) return;
+  metUnreadable.delete(key);
+  if (!met.content || !existsSync(file)) return;
+  renameRetrying(file, `${file}.corrupt`);
+  console.warn(`nexus: ${key} could not be read; set aside as ${basename(file)}.corrupt before it is written anew`);
+}
+
 /**
  * Atomic replace: creates the folder, writes the whole text to a temporary file next to the target (named by this
  * process's id, so two processes writing the same file never share one), then renames it over the target
@@ -190,6 +252,7 @@ export function renameRetrying(from: string, to: string): void {
  */
 export function writeFileAtomic(file: string, text: string | Uint8Array): void {
   mkdirSync(dirname(file), { recursive: true });
+  setAsideUnreadable(file);
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     if (typeof text === "string") writeFileSync(tmp, text, "utf8"); else writeFileSync(tmp, text);
@@ -316,7 +379,7 @@ export class ProjectStore {
   constructor(nexusDir: string, reader?: Reader, env: NodeJS.ProcessEnv = process.env) {
     this.dir = normPath(nexusDir); this.reader = reader ?? readerFor?.(this.dir) ?? fileReader; this.env = env;
   }
-  private yaml<S extends z.ZodType>(file: string, schema: S): z.infer<S> { return schema.parse(this.reader.parsed(file, YAML.parse)); }
+  private yaml<S extends z.ZodType>(file: string, schema: S): z.infer<S> { return named(file, () => schema.parse(this.reader.parsed(file, YAML.parse))); }
 
   static forRoot(root: string, env: NodeJS.ProcessEnv = process.env): ProjectStore { return new ProjectStore(join(root, NEXUS_DIRNAME), undefined, env); }
 
@@ -409,7 +472,12 @@ export class ProjectStore {
   reviewDir(queue: string, step: string): string { return join(this.queueDir(queue), "review", step); }
   queueIds(): string[] { return this.reader.dirs(join(this.dir, "queues")).filter((q) => this.reader.has(join(this.queueDir(q), "queue.yaml"))); }
   /** queue.yaml in the present form (parseQueue: old review policies read as levels, their approvals kept). */
-  readQueue(id: string): QueueFile { return parseQueue(this.reader.parsed(join(this.queueDir(id), "queue.yaml"), YAML.parse)); }
+  readQueue(id: string): QueueFile {
+    const f = join(this.queueDir(id), "queue.yaml");
+    return named(f, () => parseQueue(this.reader.parsed(f, YAML.parse)));
+  }
+  /** Whether the queue has a queue.yaml (readable or not: readQueue tells). */
+  hasQueue(id: string): boolean { return this.reader.has(join(this.queueDir(id), "queue.yaml")); }
   writeQueue(q: QueueInput): void { writeYaml(join(this.queueDir(q.id), "queue.yaml"), QueueFile.parse(q)); }
 
   readNotes(queueId: string): { notes: Note[]; errors: string[] } {
@@ -437,6 +505,8 @@ export class ProjectStore {
   sessionDir(id: string): string { return join(this.dir, "sessions", id); }
   sessionIds(): string[] { return this.reader.dirs(join(this.dir, "sessions")).filter((s) => this.reader.has(join(this.sessionDir(s), "session.yaml"))); }
   readSession(id: string): SessionFile { return this.yaml(join(this.sessionDir(id), "session.yaml"), SessionFile); }
+  /** Whether the session has a session.yaml (readable or not: readSession tells). */
+  hasSession(id: string): boolean { return this.reader.has(join(this.sessionDir(id), "session.yaml")); }
   writeSession(s: SessionFile): void { writeYaml(join(this.sessionDir(s.id), "session.yaml"), SessionFile.parse(s)); }
 
   // The logs other writers append to and this process reads: what it stamps afterwards comes after their times
@@ -606,27 +676,29 @@ export class ProjectStore {
     if (!at) return;
     writeFileAtomic(join(this.dir, "clock.json"), `${JSON.stringify({ protocol: 1, at })}\n`);
   }
-  /** Takes up the server's clock mark (a missing or unreadable file: none, as before the file existed). */
+  /** Takes up the server's clock mark (a missing file: none, as before the file existed; an unreadable one: none, warned). */
   observeClock(): void {
-    try { observe((JSON.parse(readText(join(this.dir, "clock.json"))) as { at?: string }).at); } catch { /* none */ }
+    const f = join(this.dir, "clock.json");
+    observe(orDefault(f, () => (JSON.parse(readText(f)) as { at?: string }).at, undefined));
   }
   appendApplied(sessionId: string, a: Applied): void { appendJsonl(join(this.sessionDir(sessionId), "applied.jsonl"), Applied.parse(a)); }
 
   readChat(sessionId: string): JsonlRead<ChatEntry> { return this.reader.jsonl(join(this.sessionDir(sessionId), "chat.jsonl"), ChatEntry, false); }
   appendChat(sessionId: string, c: z.input<typeof ChatEntry>): void { appendJsonl(join(this.sessionDir(sessionId), "chat.jsonl"), ChatEntry.parse(c)); }
 
-  /** The chat's pinned messages (none when the file is missing or broken). Written only by the server. */
-  readPins(sessionId: string): PinsFile {
+  /** The chat's pinned messages (none when the file is missing; unreadable: none, warned). Written only by the server. */
+  readPins(sessionId: string, warn?: Warn): PinsFile {
     const f = join(this.sessionDir(sessionId), "pins.json");
-    try { return this.reader.has(f) ? PinsFile.parse(this.reader.parsed(f, JSON.parse)) : { pins: [] }; } catch { return { pins: [] }; }
+    return orDefault(f, () => this.reader.has(f) ? PinsFile.parse(this.reader.parsed(f, JSON.parse)) : { pins: [] }, { pins: [] }, warn);
   }
   writePins(sessionId: string, p: PinsFile): void {
     writeFileAtomic(join(this.sessionDir(sessionId), "pins.json"), JSON.stringify(PinsFile.parse(p)));
   }
 
-  readRuntime(sessionId: string): RuntimeFile | undefined {
+  /** The session's runtime record (none when the file is missing; unreadable: none, warned). */
+  readRuntime(sessionId: string, warn?: Warn): RuntimeFile | undefined {
     const f = join(this.sessionDir(sessionId), "runtime.json");
-    try { return this.reader.has(f) ? RuntimeFile.parse(this.reader.parsed(f, JSON.parse)) : undefined; } catch { return undefined; }
+    return orDefault(f, () => this.reader.has(f) ? RuntimeFile.parse(this.reader.parsed(f, JSON.parse)) : undefined, undefined, warn);
   }
   writeRuntime(sessionId: string, r: RuntimeFile): void {
     writeFileAtomic(join(this.sessionDir(sessionId), "runtime.json"), JSON.stringify(RuntimeFile.parse(r)));
@@ -667,11 +739,10 @@ export function readGlobalSettings(env: NodeJS.ProcessEnv = process.env): Global
  * the global settings, so that an older server (an update rolled back) still reads the current limit.
  */
 const limitsFile = () => join(nexusHome(), "limits.json");
-/** The limit limits.json holds, if it holds a valid one. */
+/** The limit limits.json holds, if it holds a valid one (an unreadable file: none, warned). */
 function legacyMaxRunning(): number | undefined {
-  try {
-    return MaxRunning.safeParse((JSON.parse(readText(limitsFile())) as { max_running?: unknown }).max_running).data;
-  } catch { return undefined; }
+  const f = limitsFile();
+  return orDefault(f, () => MaxRunning.safeParse((JSON.parse(readText(f)) as { max_running?: unknown }).max_running).data, undefined);
 }
 
 /** Written only by the server; limits.json gets the limit's copy (see limitsFile). */
@@ -696,10 +767,11 @@ export function ensureGlobalSettings(): GlobalSettings {
 }
 
 const awayFile = (env: NodeJS.ProcessEnv = process.env) => join(nexusHome(env), "away.yaml");
-/** The away mode (missing: never turned on). */
-export function readAway(env: NodeJS.ProcessEnv = process.env): AwayFile {
+/** The away mode (missing: never turned on; unreadable: off, warned). */
+export function readAway(env: NodeJS.ProcessEnv = process.env, warn?: Warn): AwayFile {
   const f = awayFile(env);
-  try { return home.has(f) ? AwayFile.parse(home.parsed(f, YAML.parse)) : AwayFile.parse({ protocol: 1 }); } catch { return AwayFile.parse({ protocol: 1 }); }
+  const off = AwayFile.parse({ protocol: 1 });
+  return orDefault(f, () => home.has(f) ? AwayFile.parse(home.parsed(f, YAML.parse)) : off, off, warn);
 }
 /** Only the server writes it, from the user's action or at its end (away.ts). */
 export function writeAway(a: AwayFile): void {
@@ -708,10 +780,10 @@ export function writeAway(a: AwayFile): void {
 }
 
 const capacityFile = (env: NodeJS.ProcessEnv = process.env) => join(nexusHome(env), "capacity.yaml");
-/** The capacity coordinator's state; undefined when there is none, or it cannot be read (nothing is shown then). */
+/** The capacity coordinator's state; undefined when there is none, or it cannot be read (warned; nothing is shown then). */
 export function readCapacity(env: NodeJS.ProcessEnv = process.env): CapacityFile | undefined {
   const f = capacityFile(env);
-  try { return exists(f) ? readYaml(f, CapacityFile) : undefined; } catch { return undefined; }
+  return orDefault(f, () => exists(f) ? readYaml(f, CapacityFile) : undefined, undefined);
 }
 /** Only the server writes it (apps/server/src/capacity.ts). */
 export function writeCapacity(c: CapacityFile): void {
@@ -720,8 +792,10 @@ export function writeCapacity(c: CapacityFile): void {
 }
 
 const usageFile = () => join(nexusHome(), "usage.json");
+/** The usage windows; undefined when the file is missing, or cannot be read (warned). */
 export function readUsage(): UsageFile | undefined {
-  try { return exists(usageFile()) ? UsageFile.parse(JSON.parse(readText(usageFile()))) : undefined; } catch { return undefined; }
+  const f = usageFile();
+  return orDefault(f, () => exists(f) ? UsageFile.parse(JSON.parse(readText(f))) : undefined, undefined);
 }
 export function writeUsage(u: UsageFile): void {
   writeFileAtomic(usageFile(), JSON.stringify(UsageFile.parse(u)));

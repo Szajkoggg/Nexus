@@ -50,7 +50,7 @@ export function searchProject(store: ProjectStore, q: SearchQuery): SearchResult
 
   for (const id of store.queueIds()) {
     if (wants("queue")) {
-      try { for (const item of queueItems(store.readQueue(id))) hits.add(item); } catch { /* a queue.yaml that does not parse offers nothing */ }
+      try { for (const item of queueItems(store.readQueue(id))) hits.add(item); } catch (e) { console.warn(`nexus: search: ${(e as Error).message}; the queue offers nothing`); }
     }
     const report = join(store.queueDir(id), "report.md");
     if (wants("report") && existsSync(report) && changedSince(report, q.since)) {
@@ -75,7 +75,7 @@ export function searchProject(store: ProjectStore, q: SearchQuery): SearchResult
       const file = join(dir, "chat.jsonl");
       if (!changedSince(file, q.since)) continue;
       let s: SessionFile;
-      try { s = store.readSession(id); } catch { continue; }
+      try { s = store.readSession(id); } catch (e) { console.warn(`nexus: search: ${(e as Error).message}; its chat is left out`); continue; }
       if (s.role !== "orchestrator" && s.role !== "conversation") continue;
       eachLine(file, (line, index) => {
         if (!lineMayMatch(line, q)) return;
@@ -88,7 +88,8 @@ export function searchProject(store: ProjectStore, q: SearchQuery): SearchResult
   // The kept hits' places: an answer's question, and the title of each hit's queue.
   const titles = new Map<string, string | undefined>();
   const titleOf = (queue: string) => {
-    if (!titles.has(queue)) { try { titles.set(queue, store.readQueue(queue).title); } catch { titles.set(queue, undefined); } }
+    // A queue without a readable queue.yaml has no title to show (an unreadable one was warned of above).
+    if (!titles.has(queue)) { try { titles.set(queue, store.hasQueue(queue) ? store.readQueue(queue).title : undefined); } catch { titles.set(queue, undefined); } }
     return titles.get(queue);
   };
   for (const item of hits.items()) {

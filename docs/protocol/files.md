@@ -13,6 +13,9 @@ Part of [the protocol](../PROTOCOL.md).
 4. **Ids**: queues and steps have short human ids unique in their scope (`W`, `W2b`); sessions, events, notes,
    messages and questions have ULIDs (sortable by time). Times are ISO 8601 UTC.
 5. **Versioned.** Every YAML file has `protocol: 1`; every event carries `v: 1`. Readers reject a higher major version.
+   A file that is there but cannot be read is never taken for a missing one, nor written over: the reader names it in
+   an error or a warning, and the server sets it aside as `<file>.corrupt` before writing it anew
+   ([design/state.md](../design/state.md#missing-and-unreadable-files-queue-cha)).
 6. **English** in every file Nexus writes itself. The dashboard shows the user's words verbatim in whatever language
    they were written. What agents write is in the languages of the settings (see ["Languages"](settings.md#languages)).
 
