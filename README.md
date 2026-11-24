@@ -244,6 +244,9 @@ second run), failed, running, or waiting its turn. What you see in the cases tha
   cannot run" with the reason, and no check-fix round or fix queue follows. Fix the cause, then **Resume** runs the
   checks again.
 
+`nexus stats --flaky [--since <date>] [--project <id>]` lists the flaky checks of every queue by the test that failed
+on the first run: how often, in which queues and steps, when last.
+
 The details are in the protocol, [Checks run by Nexus](docs/protocol/checks.md#checks-run-by-nexus). A check that fails
 twice goes back to the same worker with its
 output: the step reads **check fix 1 of 3**, a round of its own and no send-back, so the review round and its pictures
