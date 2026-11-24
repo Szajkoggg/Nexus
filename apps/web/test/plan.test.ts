@@ -176,3 +176,16 @@ test("the first wait for the user's review: the earliest by the estimates, else 
   assert.equal(firstUserWait(l, all, { orchestrating: true, away: true }, {})?.step, "CL2", "away mode does not touch level 1");
   assert.equal(firstUserWait(l, all, { orchestrating: false, away: false })?.step, "RN1", "without an orchestrator RN's own steps go to the user");
 });
+
+test("the first wait for the user's review: a predecessor without an estimate makes the time unknown, not 0", () => {
+  const all = [
+    q("RN", { status: "running", run: { state: "running", step: "RN1" }, steps: [step("RN1", "running", 2), step("RN2", "pending", 2)] }),
+    q("CL", { plan: after(["RN", "user"]), steps: [step("CL1", "pending", 2), step("CL2", "pending", 1), step("CL3", "pending", 1)] }),
+  ];
+  const l = planLayout(all);
+  const h = 3_600_000;
+  assert.deepEqual(firstUserWait(l, all, who, { CL: { steps: 3, ms: 3 * h } }),
+    { queue: "CL", step: "CL2", title: "Step CL2", now: false }, "RN has no estimate at all: CL2's time is unknown");
+  assert.deepEqual(firstUserWait(l, all, who, { RN: { steps: 2, ms: 2 * h }, CL: { steps: 3, ms: 3 * h } }),
+    { queue: "CL", step: "CL2", title: "Step CL2", now: false, ms: 4 * h }, "with RN's estimate: RN's 2 h, then CL1 and CL2");
+});
