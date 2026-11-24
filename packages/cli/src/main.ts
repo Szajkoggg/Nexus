@@ -10,7 +10,7 @@ import {
   Event, isOpenQuestion, runGoing, orchestratorOverview, planLines, stopLines, switchLines, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, stepValuesText, newId, normPath, now, readRegistry, writeRegistry,
   PICTURE_ROLES, REVIEW_HELP, checkPicture, levelNow, pictureSize, recommendedOption, stepDefs,
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
-  STAT_DIMENSIONS, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
+  STAT_DIMENSIONS, flakyReport, flakyText, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
   CHECK_METRIC, isCheckMetric, metricDef, metricDefText, metricRequestIssues, metricValueText,
   lacksStaticAnalysis, projectStaticAnalysis, staticReminderDue,
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateDirs, templateQueueId, unusableTemplate, type MergedTemplates,
@@ -52,13 +52,16 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus metric record <name> <value> [--step <step>]   (worker only) a value of one of the project's metrics, for your
                     step at work, with the HEAD commit; a negative value goes after --: nexus metric record delta -- -5
   nexus metric list                   the project's metrics: unit, how shown, target, warning threshold
-  nexus stats [--project <id>] [--since <date>] [--by model|effort|kind|activity|area|size|origin] [--reviews] [--switches]
+  nexus stats [--project <id>] [--since <date>] [--by model|effort|kind|activity|area|size|origin] [--reviews] [--switches] [--flaky]
                                       how steps went, by group: steps, accepted in the first round, average rounds,
                                       stops and failures, median working time, estimated use of the usage windows
                                       (default: every registered project, by model); --reviews instead: the reviews'
                                       quality (the user's signals, send-backs, the review helper's passed-on share,
                                       the audit); --switches instead: the steps after a context switch
-                                      against those that went on in the same session
+                                      against those that went on in the same session; --flaky instead: the
+                                      checks Nexus ran that failed, then passed, from the queues' checks.yaml, by
+                                      failing test (the check's name when unknown): how often, in which queues and
+                                      steps, when last, which check
   nexus stop <step> --condition <text> --reason <text>   the condition met, as the queue words it; the reason, short
   nexus ask <text> [--step <step>] [--option <text>]... [--recommend <option>] [--can-continue]
   nexus withdraw <qid> --reason <text>
@@ -208,7 +211,7 @@ const parseLine = (argv: string[]) => commandLine(argv, {
     unit: { type: "string" }, show: { type: "string" }, target: { type: "string" }, "warn-above": { type: "string" }, "warn-below": { type: "string" },
     set: { type: "string", multiple: true }, template: { type: "string" }, every: { type: "string" }, "after-queues": { type: "string" },
     maintenance: { type: "string" }, findings: { type: "string" }, why: { type: "string" }, "continued-in": { type: "string" },
-    help: { type: "boolean", short: "h" }, full: { type: "boolean" }, all: { type: "boolean" }, reviews: { type: "boolean" }, switches: { type: "boolean" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
+    help: { type: "boolean", short: "h" }, full: { type: "boolean" }, all: { type: "boolean" }, reviews: { type: "boolean" }, switches: { type: "boolean" }, flaky: { type: "boolean" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
 });
 
 /** Where a call's output goes: process.stdout and process.stderr, or a test's collector. */
@@ -1214,6 +1217,15 @@ const commands: Record<string, () => void | Promise<void>> = {
     });
     // --reviews: the reviews' quality on three levels (queue RH), instead of the steps by a dimension.
     if (o().reviews) return say(reviewStatsText(reviewStats(states, { project: o().project, since })));
+    // --flaky: the checks that failed, then passed on the second run, by test (queue NKR).
+    if (o().flaky) {
+      const sources = [...stores].filter(([id]) => !project || id === project).flatMap(([id, st]) =>
+        st.queueIds().flatMap((queue) => {
+          try { const checks = st.readChecks(queue); return checks ? [{ project: id, queue, checks }] : []; }
+          catch (e) { warn(`nexus: ${id}/${queue}/checks.yaml left out: ${(e as Error).message}`); return []; }
+        }));
+      return say(flakyText(flakyReport(sources, since), sinceArg));
+    }
     // --switches: the steps after context care's switch against those that went on in the same session (queue CT).
     if (o().switches) return say(switchReportText(switchReport(stepStats(states, []), { project: o().project, since })));
     say(statsText(statsReport(stepStats(states, readTurns(env()).entries), { by, project: o().project, since })));

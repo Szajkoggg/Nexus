@@ -26,6 +26,7 @@ nexus metric list                              # the project's metrics (any sess
 nexus stats [--by model|effort|kind|activity|area|size|origin] [--project <id>] [--since <date>]   # see "Statistics"
 nexus stats --reviews [--project <id>] [--since <date>]   # the reviews' quality on three levels (see "The review helper")
 nexus stats --switches [--project <id>] [--since <date>]  # steps after a context switch against those without one (see "Context care")
+nexus stats --flaky [--project <id>] [--since <date>]     # the flaky checks from the queues' checks.yaml, by failing test (below)
 nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c] [--activities feature,test]   # warns at an unclean end; --activities: what was actually done (refused: a name on no list)
 nexus step failed W3 --reason "..."
 nexus stop W3 --condition "user decision" --reason "..."   # the condition as the queue words it; the reason short (shown first)
@@ -93,6 +94,14 @@ A command line the CLI cannot take (an unknown option, an option without its val
 ends with `nexus: <what is wrong>` on stderr and exit code 2, as every refusal does, never with a stack trace. A
 negative number reads as an option: a positional one goes after `--` (`nexus metric record delta -- -5`), an option's
 with `=` (`--warn-below=-5`); the message says so.
+
+`nexus stats --flaky` lists the checks Nexus ran that failed, then passed when run again (`flaky: true` in a queue's
+`checks.yaml`, docs/protocol/checks.md, "Checks run by Nexus"), grouped by the test that failed on the first run (its
+`failed_tests`); a first run whose failing tests are unknown counts under the check's name, marked "(the check; its
+failing tests unknown)". Each group gives how many times, when last (the first run's start, UTC), which check, and the
+queues and steps it happened in (`<queue>/<step>`, with `<project>/` in front when several projects are read), most
+frequent first. `--since` counts only first runs from that date or time; `--project` reads one project (by default,
+like `nexus stats`, every registered project and the one it runs in). It reads only.
 
 `nexus status` prints each step of a queue on a line of its own (id, status, title); a step that names its own
 runtime, model or effort ends with them, `[on Codex · gpt-6-luna · low effort]` (what it leaves out is the run's).
