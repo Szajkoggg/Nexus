@@ -8,12 +8,17 @@ The only interface agents use. It finds its session from the `NEXUS_SESSION` and
 (set by Nexus when it launches a session; for a session started by hand `nexus attach` prints the id, to be given as
 `NEXUS_SESSION` or as `--session <id>` to every command), validates the arguments against the protocol and appends one event.
 
+`--queue <id>` names the queue whenever it is given, over the session's own queue (a worker's step id is looked up in it);
+`nexus status` heeds it only in an orchestrator's or a thinking partner's session. A text argument given as `-`
+(`ask`, `answer`, `note`, `context`) is read from standard input. A command that takes a subcommand and gets none runs the
+first of its own: `ideas` runs `matches`; `metric`, `template` and `recurring` run `list`; `server` runs `status`.
+
 ```
 nexus status                                   # the current queue, step, notes and unanswered questions, as text
 nexus status [--all] [--queue <id>]            # in an orchestrator's (or partner's) session: the open queues, the finished ones only counted, the open questions, of the worker sessions the live ones, those of open queues and the 10 latest others (cards cut to 300 characters), Waiting for the user, then the machine's lines; --all: every queue (the finished ones named, with a skipped closing step's reason) and every session, cards whole (what a fresh orchestrator session starts from); --queue <id>: that queue (finished too), its sessions, its questions and what waits about it; an unknown queue is refused
 nexus step start W3
-nexus step progress W3 "Support graph built; probing fixtures"
-nexus review add W3 $TEMP/nexus-review/W3/sheet.png --label "Sheet, round 1"   # copied into .nexus/queues/<q>/review/W3/
+nexus step progress W3 "Support graph built; probing fixtures" [--pct 40]
+nexus review add W3 $TEMP/nexus-review/W3/sheet.png --label "Sheet, round 1" [--kind image|sheet|doc|data|link] [--round 2]   # copied into .nexus/queues/<q>/review/W3/
 nexus review add W3 $TEMP/nexus-review/W3/cliff@1280.before.png --key cliff-lit@1280 --role before --label "Cliff, before"
 nexus review add W3 $TEMP/nexus-review/W3/cliff@1280.png --key cliff-lit@1280 --role after --label "Cliff, lit"   # pairs by key
 nexus review add W3 $TEMP/nexus-review/W3/lit.png --before $TEMP/nexus-review/W3/unlit.png --label "Lighting"   # older: no key
@@ -30,9 +35,9 @@ nexus stats --flaky [--project <id>] [--since <date>]     # the flaky checks fro
 nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c] [--activities feature,test]   # warns at an unclean end; --activities: what was actually done (refused: a name on no list)
 nexus step failed W3 --reason "..."
 nexus stop W3 --condition "user decision" --reason "..."   # the condition as the queue words it; the reason short (shown first)
-nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--recommend <option>] [--can-continue]
-                                               # --recommend: one of the --option values, by text or number (1 = first)
-nexus context "summary text" --topics rock,support --files Runtime/Core/Rock/*   # the text as the argument, or - to read it from stdin (... <<< "text"); its shape: nexus help context (beyond 2000 words it warns)
+nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--recommend <option>] [--can-continue] [--step W3]
+                                               # the text, or - to read it from stdin; --recommend: one of the --option values, by text or number (1 = first)
+nexus context "summary text" --topics rock,support --files Runtime/Core/Rock/a.cs,Runtime/Core/Rock/b.cs [--step W3]   # a comma list, not a glob (a shell expands it and the rest is lost); the text as the argument, or - to read it from stdin (... <<< "text"); its shape: nexus help context (beyond 2000 words it warns)
 nexus report W --file <temp>/nexus-reports/<project>/W.md --summary "..." [--findings 3]   # copied to .nexus/queues/W/report.md; --findings: a maintenance queue's
 nexus withdraw <qid> --reason "..."            # a question no longer needed (question.withdrawn)
 nexus log "Retrying the probe" [--level info|warn|error]   # a line into the session's own log
@@ -61,31 +66,31 @@ nexus review ask-user <queue> <step> <why>     # hand the review to the user
 nexus review provisional <queue> <step> [--note "..."]   # level 3 (or 2 while the user is away): accept provisionally
 nexus run <queue> cancel-start --reason "..."   # takes a queue the orchestrator planned out of the plan
 nexus plan propose <queue> [--after <queue>]... --reason "..."   # propose to the user a new list of predecessors that changes ones the user set (see "The plan")
-nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF]   # writes .nexus/drafts/BF.yaml to complete and upload
+nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF] [--maintenance survey|fix_small]   # writes .nexus/drafts/BF.yaml to complete and upload
 nexus recurring set weekly --template maintenance [--set scope=...] (--every "mon 03:00" | --after-queues 5) [--maintenance survey|fix_small] [--reason ...]   # through the server; the user approves it
 nexus static-analysis decline --reason "..."  # the user's no to the static-analysis template: no reminder for 90 days
 nexus review audit W W2 agree|disagree --reason "..."   # an audit of the review helper's acceptance a notice gave it
 nexus check decide W W3 accept|fix --reason "..."   # a disputed check Nexus could not run on the base (see "Checks run by Nexus")
 nexus answer <qid> "..." [--escalate [--recommend <option>]] [--continue|--wait]
-                                               # --recommend only with --escalate: one of the question's options
+                                               # the text, or - to read it from stdin; --recommend only with --escalate: one of the question's options
 nexus run <queue> start|pause|resume|stop --reason "..." [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>... | --next | --at "YYYY-MM-DD HH:MM" | --at usage-reset]   # see "The orchestrator" and "The plan"
 nexus tags propose --area <name> | --activity <prefix:name> [--reason ...]   # a proposal for the project's tag lists
 nexus tags rename <old> <new> [--reason ...]    # the user accepts it (see "Tags"); `nexus tags` lists them (any session)
 nexus metric define bundle-kb --unit KB [--show line|bar|number] [--target 400] [--warn-above 500 | --warn-below=-1]
                                                # a project metric, or a change to one (see "Project metrics")
 # setup
-nexus attach [--role worker|orchestrator] [--runtime claude|codex|external]   # register a hand-started session (default: a worker, external: it sets up the session itself); a role or runtime the protocol does not know is refused
+nexus attach [--role worker|orchestrator] [--runtime claude|codex|external] [--queue <id>] [--title <text>]   # register a hand-started session (default: a worker, external: it sets up the session itself); a role or runtime the protocol does not know is refused
 nexus project list                             # the registered projects
 nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring), registers the project, prints the rules files' check;
                                                # a kept .nexus/ (a project removed from Nexus) brings it back under its id
-nexus import <file.md> [--prefix X]            # one-time import of queues written as Markdown tables
-nexus note <queue> <step> <text> [--from user|orchestrator]   # writes the same note the dashboard's "Add note" does; the way for an agent or a script
+nexus import <file.md> [--prefix X] [--dry-run] [--replace]   # one-time import of queues written as Markdown tables
+nexus note <queue> <step> <text|-> [--from user|orchestrator]   # (- reads the text from stdin) writes the same note the dashboard's "Add note" does; the way for an agent or a script
 nexus server status                            # the version, the steps running in each project, and an update in progress
 nexus server perf                              # the server's measurements since its start: event loop delay, requests by route, measured operations, the latest blocks over 200 ms
 nexus server away [on --until <8:00|ISO> | off]  # the user's away mode (refused from any agent session); no argument: its state
 nexus server update --after <queue>[/<step>] [--ref <ref>]   # plan a deploy for after a step or queue of this project (the user, or an orchestrator the user asked)
 nexus server update --at <HH:MM|"YYYY-MM-DD HH:MM"> [--deadline <time>] [--ref <ref>]   # plan a deploy for a time, with an optional deadline
-nexus server cancel-plan                       # cancel the planned deploy (and the drain it started)
+nexus server cancel-plan                       # cancel the planned deploy (and the drain it started); same rule as `server update`
 nexus server update [--now] [--ref <ref>]      # deploy now: let running steps finish (--now: stop them), move the live worktree to <ref> (default main), build, restart; every `server update` and `server cancel` form: only the user, or an orchestrator the user asked in the chat and then only that (AGENTS.md); workers and thinking partners are refused
 nexus server cancel                            # give up waiting for a deploy; the held queues go on (same rule as `server update`)
 ```
@@ -149,7 +154,7 @@ alone prints the commands and the topics, as do `nexus --help` and `nexus` witho
 | `commits` | A clean working tree at every step's end: everything the step did committed (its own files only) and named with `nexus step done --commit`, so every commit belongs to one step |
 | `tests` | Running tests while working: only the affected test files, stopping at the first failure (in Nexus's repository `npm run test:files -- <files>`); the whole suite once at the step's end, as the queue's checks (run by Nexus after `nexus step done` where the step's opening says so, else by the worker and reported with `nexus check`); a test that fails now and then is fixed at its cause, not run again until it passes |
 
-The briefings carry these in a few lines each with the pointer: the worker's all six; the orchestrator's the refusal
+The briefings carry these in a few lines each with the pointer: the worker's all seven; the orchestrator's the refusal
 rule and the summary and question shapes as it reads them (and escalates in); the thinking partner's the refusal
 rule.
 

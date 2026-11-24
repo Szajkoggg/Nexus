@@ -86,7 +86,7 @@ test("the check handles the block's harder lines: comments, role headings, conti
     "nexus tags propose --area <name> | --activity <prefix:name> [--reason ...]",
     "nexus run <queue> start|pause --reason \"...\" [--after <queue>... | --next | --at \"YYYY-MM-DD HH:MM\"]",
     "nexus metric define bundle-kb --unit KB [--warn-above 500 | --warn-below=-1]",
-    "nexus context --topics rock,support --files Runtime/Core/Rock/* <<< \"summary --not-a-flag\"",
+    "nexus context --topics rock,support --files Runtime/Core/Rock/a.cs,Runtime/Core/Rock/b.cs <<< \"summary --not-a-flag\"",
     "nexus covers tags.md#2026-11-14 docs/ideas/plan.md#2026-11-15",
     "nexus static-analysis [status]",
     "nexus answer <qid> \"...\" [--escalate [--recommend <option>]] [--continue|--wait]",

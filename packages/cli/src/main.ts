@@ -55,7 +55,7 @@ Agent commands (session from NEXUS_SESSION or --session):
   nexus stats [--project <id>] [--since <date>] [--by model|effort|kind|activity|area|size|origin] [--reviews] [--switches] [--flaky]
                                       how steps went, by group: steps, accepted in the first round, average rounds,
                                       stops and failures, median working time, estimated use of the usage windows
-                                      (default: every registered project, by model); --reviews instead: the reviews'
+                                      (default: every registered project and the one it runs in, by model); --reviews instead: the reviews'
                                       quality (the user's signals, send-backs, the review helper's passed-on share,
                                       the audit); --switches instead: the steps after a context switch
                                       against those that went on in the same session; --flaky instead: the
@@ -63,7 +63,7 @@ Agent commands (session from NEXUS_SESSION or --session):
                                       failing test (the check's name when unknown): how often, in which queues and
                                       steps, when last, which check
   nexus stop <step> --condition <text> --reason <text>   the condition met, as the queue words it; the reason, short
-  nexus ask <text> [--step <step>] [--option <text>]... [--recommend <option>] [--can-continue]
+  nexus ask <text|-> [--step <step>] [--option <text>]... [--recommend <option>] [--can-continue]
   nexus withdraw <qid> --reason <text>
   nexus context <text|-> [--topics a,b] [--files a,b] [--step <step>]
   nexus report <queue> --file <path> --summary <text> [--findings <n>]   (a maintenance queue: how many findings)
@@ -81,7 +81,7 @@ Agent commands (session from NEXUS_SESSION or --session):
                                       named by its heading or its anchor, or a date (tags.md#2026-11-14: that dated
                                       entry); the notes folder may be left out; an unknown section lists the sections
   nexus log <text> [--level info|warn|error]
-  nexus answer <qid> <text> [--escalate [--recommend <option>]] [--continue|--wait]     (orchestrator only)
+  nexus answer <qid> <text|-> [--escalate [--recommend <option>]] [--continue|--wait]     (orchestrator only)
   nexus queue draft <file.yaml|->                                 (orchestrator only) create or change a queue
   nexus queue draft --template <id> [--set name=value]... [--id <queue-id>] [--maintenance survey|fix_small]
                                       (orchestrator only) write a draft from a template into .nexus/drafts/<queue-id>.yaml
@@ -122,7 +122,7 @@ Agent commands (session from NEXUS_SESSION or --session):
                                       not running; propose that the user lift a stop. Done, approving and lifting are the
                                       user's. --continued-in FL4,FL5 (steps, QX/QX2, queues) with skipped: the step's own
                                       work is done and went on there, or they did it; also on a step skipped already
-  nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>]... | --next | --at "YYYY-MM-DD HH:MM" | --at usage-reset]   (orchestrator only; start --after: into the plan, when those queues are done (one --after for each); --next: into the plan with none before it; --at: at that local time, or when the runtime's usage window resets)
+  nexus run <queue> start|pause|resume|stop --reason <text> [--use-session <id>] [--runtime claude|codex] [--model <m>] [--effort <e>] [--after <queue>]... | --next | --at "YYYY-MM-DD HH:MM" | --at usage-reset   (orchestrator only; start --after: into the plan, when those queues are done (one --after for each); --next: into the plan with none before it; --at: at that local time, or when the runtime's usage window resets)
   nexus run <queue> cancel-start --reason <text>   (orchestrator only: takes the queue out of the plan; not one the user put in)
   nexus plan propose <queue> [--after <queue>]... --reason <text>   (orchestrator only) propose to the user a new list of
                                       predecessors that changes dependencies the user set; the user accepts or declines
@@ -138,7 +138,8 @@ Agent commands (session from NEXUS_SESSION or --session):
                                       time is check:<its name> (in seconds) without a definition: define it for a
                                       target or a threshold. A value beyond the threshold is marked and told to you.
                                       A negative number: --warn-below=-5
-  (--queue <id> picks the queue when the session has none or the step id is ambiguous)
+  (--queue <id> names the queue whenever it is given, over the session's own; nexus status heeds it only in an orchestrator's or a thinking partner's session.
+   A text given as - is read from standard input: ask, answer, note, context. A command that takes a subcommand and gets none runs the first of its own: ideas matches, metric list, template list, recurring list, server status)
 
 Help:
   nexus help [<topic>]                 Nexus's standards; topics: ${Object.keys(HELP_TOPICS).join(", ")}
@@ -148,12 +149,13 @@ Setup:
   nexus project list
   nexus import <file.md> [--prefix <text>] [--dry-run] [--replace]
   nexus attach [--role worker|orchestrator] [--runtime claude|codex|external] [--queue <id>] [--title <text>]
-  nexus note <queue> <step> <text> [--from user|orchestrator]
+  nexus note <queue> <step> <text|-> [--from user|orchestrator]
 
 The server (NEXUS_PORT, default 4317):
   nexus server status                 version, the steps running in each project, and an update in progress
   nexus server perf                   the server's measurements of itself since its start: event loop delay, the
                                       requests by route, the measured operations, the latest blocks over 200 ms
+  (every server update and cancel form is the user's, or an orchestrator the user asked in the chat; workers and thinking partners are refused)
   nexus server update [--now] [--ref <commit|branch>]
                                       let running steps finish (or stop them with --now), move the live worktree to
                                       <ref> (default main), build, restart; queues held for it go on by themselves
