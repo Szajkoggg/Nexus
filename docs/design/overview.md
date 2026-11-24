@@ -109,7 +109,7 @@ Nexus the **queue engine drives the steps**:
 This makes note delivery certain (it is part of the step's opening turn), gives natural pause points between steps,
 and works the same for both runtimes. If a turn ends without a step outcome, the engine asks the worker once for
 its status, then marks the step `waiting` and tells the orchestrator. A turn that failed is not such a turn: see
-["Failures"](engine.md#failures) below; nor is one that ended while work the agent started still runs: see ["Background work"](engine.md#background-work).
+["Failures"](engine-failures.md#failures) below; nor is one that ended while work the agent started still runs: see ["Background work"](engine.md#background-work).
 
 ## Tech stack
 

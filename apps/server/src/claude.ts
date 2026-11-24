@@ -118,7 +118,7 @@ export interface ClaudeOptions {
   appendSystemPrompt?: string;
   /**
    * Where the briefing is written for the CLI to read (--append-system-prompt-file), anew at each start: AgentHost
-   * gives the session's own file. Not on the command line, which Windows limits to 32,767 characters in all (docs/design/engine.md,
+   * gives the session's own file. Not on the command line, which Windows limits to 32,767 characters in all (docs/design/engine-failures.md,
    * "The orchestrator's briefing and the command line").
    */
   briefingFile?: string;

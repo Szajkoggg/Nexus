@@ -350,7 +350,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
    * not at thread/start (probed 2026-11-15), so a process that ended between the two left a thread id with nothing
    * behind it, and thread/resume fails with "no rollout found for thread id <id>". Then there is no conversation to
    * lose: a new thread is started instead, its id recorded (facts `nativeId`), and the session's message goes into it
-   * (queue RN; docs/design/engine.md, "When Claude Code saves a conversation"). Any other failure stays a failure.
+   * (queue RN; docs/design/engine-failures.md, "When Claude Code saves a conversation"). Any other failure stays a failure.
    */
   private async resumeThread(threadId: string, common: Json): Promise<Json> {
     try {

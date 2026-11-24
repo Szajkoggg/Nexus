@@ -65,9 +65,9 @@ export function differences(original: string, index: string, topics: string[]): 
   return [...seen].filter(([, n]) => n !== 0).map(([line, n]) => `${n > 0 ? "missing" : "added"} ${Math.abs(n)}x: ${line.slice(0, 160)}`);
 }
 
-/** A topic file split into several: its lines (without its title) are the new files' lines, apart from their additions. */
+/** A topic file split into several: its lines (without its title, "Part of" and "See also:" lines, which each new file carries) are the new files' lines, apart from their additions. */
 export function topicDifferences(original: string, topics: string[]): string[] {
-  return differences(original.split("\n").slice(1).join("\n"), "", topics);
+  return differences(withoutAdditions(original).join("\n"), "", topics);
 }
 
 /** A file as it was at a commit, with LF line ends. */

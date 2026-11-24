@@ -2,8 +2,8 @@
 
 See also: [Built in SM3, Built in SM4 and Beyond the decision](model-built.md), the sections that moved out when this file passed 40 KB.
 
-Status: planned in SM1 (2026-11-20); the model and its first readers built in SM3 ("Built in SM3", below), the rest
-moved onto it in SM4 ("Built in SM4"). It follows the user's decision of 2026-11-18 on the
+Status: planned in SM1 (2026-11-20); the model and its first readers built in SM3 ([Built in SM3](model-built.md#built-in-sm3)), the rest
+moved onto it in SM4 ([Built in SM4](model-built.md#built-in-sm4)). It follows the user's decision of 2026-11-18 on the
 server's responsiveness (the user's notes, "Server responsiveness: one read layer over the files"): no change of tech
 stack; one read layer; every appended line read once; nothing long on the event loop; the model can be thrown away and
 built again from the files, which stay the one source of truth (the model lives in memory only). It builds on what the
@@ -169,8 +169,8 @@ reads on it).
   moved out of the derived state into a function of the state and the time, which its reader calls.
 - **Cost**: a derivation from memory costs the fold and its passes, without the reading and parsing that made up
   about four fifths of a rebuild in the start's profile (15 s `existsSync`, 17 s YAML, 5 s reading of 45 s). SM2's gate
-  counts it; if it shows in the measurement after SM4, the next step is a derivation per queue (below, beyond the
-  decision).
+  counts it; if it shows in the measurement after SM4, the next step is a derivation per queue (see [Beyond the
+  decision](model-built.md#beyond-the-decision-proposals-not-decided)).
 
 ## Its reads are read-only
 
@@ -204,7 +204,7 @@ model (queue MF)").
 - **On demand**: the model can be thrown away and built again at any time (a test does it after every step of a
   scenario and compares: the model fed line by line and the model built from the files give the same state and the
   same indexes). A server of another version starts with a fresh model: nothing of it is kept across a restart (no
-  checkpoint; beyond the decision, below).
+  checkpoint; [Beyond the decision](model-built.md#beyond-the-decision-proposals-not-decided)).
 - **A whole rebuild when the watcher fails** (its `error` event, or a folder it lost on Windows): the model is
   marked stale and built again at the next read, and the event is logged.
 
@@ -231,12 +231,12 @@ Not in the measurement: a streaming agent also rewrites its `runtime.json` on mo
 context tokens, the cost), about as often as it appends activity. The measuring script appended activity only.
 `runtime.json` is a state input (the coordinator reads `live.state`, the orchestrator's context care the tokens), so it
 still moves the version after SM3; after SM4 that costs a derivation from memory and the decisions. Whether a facts-only
-rewrite (tokens, cost, model) may skip the decisions is a question for SM4's evidence (beyond the decision, below).
+rewrite (tokens, cost, model) may skip the decisions is a question for SM4's evidence ([Beyond the decision](model-built.md#beyond-the-decision-proposals-not-decided)).
 
 ## Today's readers
 
 The readers of the history in the server as SM1 found them, what each read then, and the step that moved it (all
-moved: "Built in SM3" and "Built in SM4" below).
+moved: [Built in SM3](model-built.md#built-in-sm3) and [Built in SM4](model-built.md#built-in-sm4)).
 
 | Reader | Where | Reads now | Moves in |
 |---|---|---|---|

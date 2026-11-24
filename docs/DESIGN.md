@@ -15,7 +15,9 @@ The design is split by topic, one file each in `docs/design/`. New text goes int
 - [Goals, concepts and decisions](design/overview.md): goals, concepts, the architecture in brief, the tech stack, phases and the user's first decisions.
   Sections: Goals; Concepts; Architecture; Tech stack; Phases; What projects need to change; Decisions; A project's rules: AGENTS.md, pulled into CLAUDE.md; Removing a project (queue PJ)
 - [The engine and the agents](design/engine.md): how the engine drives a queue: background work, process ownership, run states, failures, refused actions, the orchestrator, the texts agents receive.
-  Sections: Background work; Worker process ownership on Windows (queue PT); The run's state transitions; One host for agent processes; The texts agents receive; Failures; Refused actions; Messages to a running step; The orchestrator; Autonomy and insight; The orchestrator's briefing and the command line (queue TQ4); The same commands on every shell tool (queue SH)
+  Sections: Background work; Worker process ownership on Windows (queue PT); The run's state transitions; One host for agent processes; The texts agents receive
+- [The engine and the agents: failures, refused actions and the orchestrator](design/engine-failures.md): what happens when a turn fails, what the engine refuses, messages to a running step, the orchestrator, its briefing and the command line, the same commands on every shell tool.
+  Sections: Failures; Refused actions; Messages to a running step; The orchestrator; Autonomy and insight; The orchestrator's briefing and the command line (queue TQ4); The same commands on every shell tool (queue SH)
 - [Checks and static analysis](design/checks.md): the checks Nexus runs itself, and static analysis.
   Sections: Nexus runs the checks (queue EC); Static analysis (queue SA)
 - [Questions](design/questions.md): questions between worker, orchestrator and user, and the question barrier.

@@ -22,7 +22,7 @@ export interface StreamFacts {
   /**
    * The runtime has saved the session's conversation (true), or says it has none (false). Claude Code saves it when it
    * reads the session's first message (probed 2026-11-15): its first turn's start shows that, and the CLI's refusal of
-   * a start names either case (docs/design/engine.md, "When Claude Code saves a conversation").
+   * a start names either case (docs/design/engine-failures.md, "When Claude Code saves a conversation").
    */
   saved?: boolean;
   /** The process was replaced by a new one (a start Claude Code refused, tried again): its id. */
@@ -35,7 +35,7 @@ export interface ActivityItem { kind: "turn_start" | "text" | "tool" | "tool_err
 /**
  * Why a turn failed, read from the runtime's codes. `passing`: worth trying the turn again later (overloaded, a short
  * rate limit, the network). `lasting`: needs the user (authentication, an invalid request, a refusal, anything
- * unknown). `usage`: a subscription limit with a known reset time (`resetsAt`). See docs/design/engine.md, "Failures".
+ * unknown). `usage`: a subscription limit with a known reset time (`resetsAt`). See docs/design/engine-failures.md, "Failures".
  */
 /**
  * One turn's tokens, the same four for both runtimes. `input` is the input not read from the cache (Claude Code's
