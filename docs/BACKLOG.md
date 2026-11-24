@@ -24,4 +24,4 @@ today.
 
 - Adopting a session started in a terminal into Nexus (its transcript resumed by Nexus once the terminal is closed;
   queue AD). The user dropped it on 2026-11-24: a session's note and a fresh session bring the same more cheaply. The
-  queue is deleted; the work of its steps AD1 and AD2 stays on the branch `nexus/AD`.
+  queue is deleted; the work of its steps AD1 and AD2 stays on the branch `sessions/adopt` (its last commit `3c5909f`).
