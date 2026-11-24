@@ -127,3 +127,7 @@ had been carried out. With only the three files (`--copies 8 --rounds 2`) the ba
 the change 15 of 16: engine-checks.test.ts ("a restart while a check runs") saw the check run once instead of twice
 and took 80 s, as if the old server's 60 s check had lived on past the stop and the next server had taken its result
 (not confirmed).
+
+The three files went back to real processes, on the list with what failed (a fix queue is to find why). With the ten
+slowest converted files left (merger, orchestrator, recurring-maintenance, context-care, approval-wait, review-helper,
+accepted, coordinator, lift, agent-changes) the same load run passed 20 of 20.
