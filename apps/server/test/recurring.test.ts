@@ -7,15 +7,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, loadProjectState, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { TestClock } from "./test-clock.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, until as waitUntil, LONGER } from "./wait.ts";
-
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
@@ -50,7 +48,7 @@ function setup() {
   const clock = new TestClock();
   const engines: Engine[] = [];
   const tick = () => { routeAnswers(store); acceptReviews(store); engines.at(-1)!.onChange(loadProjectState(store)); };
-  const newEngine = () => { const e = new Engine(store, tick, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100, startupMs: 20, clock }); engines.push(e); return e; };
+  const newEngine = () => { const e = new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100, startupMs: 20, clock }); engines.push(e); return e; };
   let engine = newEngine();
   const timer = setInterval(tick, 150);
   const state = () => loadProjectState(store);

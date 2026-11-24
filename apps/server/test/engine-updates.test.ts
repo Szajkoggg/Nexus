@@ -14,6 +14,7 @@ import { Engine, RETRY_LIMIT, type EngineOptions } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
 import { FAST, WINDOW, activityOf, fixtureRun, here, restart, setup } from "./engine-setup.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 // ---------------------------------------------------------------- updates of Nexus itself
 
 
@@ -35,7 +36,7 @@ test("an update holds a running queue at its step's end; the next server resumes
     engine.shutdown();
 
     // The restart: a new engine on the same files.
-    next = new Engine(store, () => { routeAnswers(store); acceptReviews(store); next!.onChange(loadProjectState(store)); }, QUICK_ENGINE);
+    next = new Engine(store, () => { routeAnswers(store); acceptReviews(store); next!.onChange(loadProjectState(store)); }, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
     await until("the resumed run to finish", () => queue().run?.state === "finished", LONGER.run);
     assert.equal(store.readRun("R")?.state, "paused", "a queue the user paused stays paused");
     assert.equal(store.readRun("H")?.state, "halted", "a halted queue stays halted");

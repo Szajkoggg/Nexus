@@ -6,22 +6,19 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   ProjectStore, answerAsUser, applyDraft, approveQueue, loadProjectState, orchestratorStatusChange, routeAnswers, type StepDef,
 } from "@nexus/protocol";
 import { Engine, type EngineOptions } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
 // Queues in checkouts of their own (plain folders here, no git) end with the integration step, which is not this
 // file's subject: its fake reports it done.
 process.env.FAKE_INTEGRATE = "done";
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 const FAST: EngineOptions = { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE };
 
 const step = (id: string, behaviour: string): StepDef => ({ id, title: `Step ${id}`, goal: `FAKE: ${behaviour}`, acceptance: [] });
@@ -36,7 +33,7 @@ function setup(steps: StepDef[]) {
   const engines: Engine[] = [];
   /** An engine as the server makes one: every change it notices calls onChange (a restart is a new one). */
   const engine = (): Engine => {
-    const e: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); e.onChange(loadProjectState(store)); }, FAST);
+    const e: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); e.onChange(loadProjectState(store)); }, { spawn: inProcessRuntime(), ...FAST });
     engines.push(e);
     return e;
   };

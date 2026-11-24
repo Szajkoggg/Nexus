@@ -442,3 +442,8 @@ full run now does (`scripts/machine-probe.ts`, called by `scripts/test-lock.ts`)
 - **Reading it**: a run slower than its neighbours with slower process starts is the machine's; one with the usual
   starts is the code's (or the tests'). The lock's own tests turn the probe off (`NEXUS_TEST_MACHINE_LOG=off`), but
   one, which points it to a file of its own.
+
+## Processes in tests (queue IPR)
+
+Tests run the fake runtimes in their own process (`inProcessRuntime()`) and the CLI as a function; only the files
+`scripts/real-process-tests.ts` lists, each with why, start processes ([cli-in-process.md](cli-in-process.md)).

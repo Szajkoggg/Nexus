@@ -5,18 +5,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, approveQueue, loadProjectState, readTurns, readUsage, routeAnswers, type StepDef, type TurnRecord } from "@nexus/protocol";
 import { Conversations } from "../src/conversations.ts";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 function setup(behaviours: string[] = ["done"]) {
   const root = mkdtempSync(join(tmpdir(), "nexus-turns-"));
@@ -26,9 +22,9 @@ function setup(behaviours: string[] = ["done"]) {
   const steps: StepDef[] = behaviours.map((b, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${b}`, acceptance: [] }));
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => tick(), { ...QUICK_ENGINE, retryBaseMs: 60_000, usageMarginMs: 100 });
-  const orchestrator = new Orchestrator(store, engine, () => tick());
-  const conversations = new Conversations(store, orchestrator, () => tick());
+  const engine: Engine = new Engine(store, () => tick(), { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 60_000, usageMarginMs: 100 });
+  const orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn: inProcessRuntime() });
+  const conversations = new Conversations(store, orchestrator, () => tick(), { spawn: inProcessRuntime() });
   function tick() { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; turns: ${JSON.stringify(readTurns().entries)}`);

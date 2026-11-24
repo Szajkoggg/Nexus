@@ -14,19 +14,15 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { orchestratorOverview } from "@nexus/protocol";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { INTEGRATION_CONDITION, NEXUS_SESSION, ProjectStore, approveQueue, wrote, loadProjectState, readCapacity, routeAnswers, setStepLevel, updateSettings, type StepDef } from "@nexus/protocol";
 import { Capacity } from "../src/capacity.ts";
 import { Engine, type EngineOptions } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { gatedCleanup } from "./gated-cleanup.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 import { LONGER, QUICK_ENGINE, holdWork, until as waitUntil } from "./wait.ts";
 import { cliOut } from "../../../packages/cli/test/run-cli.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 
 const step = (id: string, behaviour: string): StepDef => ({ id, title: `Step ${id}`, goal: `FAKE: ${behaviour}`, acceptance: [] });
 /** The system's temporary folder as it was: each test points TEMP at a folder of its own, which must not nest. */
@@ -66,7 +62,7 @@ setTimeout(() => {
  * cleanup limit (15 s, worker-process.ts): a cleanup asked of a process before its first turn fails as it would there,
  * "worker cleanup timed out" (queue CI8). Later cleanups work as usual.
  */
-const slowHosts = () => gatedCleanup({ failBeforeTurn: "worker cleanup timed out" }).spawn;
+const slowHosts = () => gatedCleanup({ make: inProcessRuntime(), failBeforeTurn: "worker cleanup timed out" }).spawn;
 
 function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean; jobs?: boolean; slowHosts?: boolean } = {}) {
   const base = mkdtempSync(join(TMP, "nexus-free-"));
@@ -96,7 +92,7 @@ function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean; jobs?
   // Objects where a test ends a check mid-run (else its child keeps running).
   const server = () => {
     const cap = new Capacity({ testLock: join(mkdtempSync(join(TMP, "nexus-free-lock-")), "full-test.lock"), pollMs: 20, jobs: !!o.jobs });
-    const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store, free()); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, checkDrainWaitMs: 300, capacity: cap, ...(o.slowHosts ? { spawn: slowHosts() } : {}) });
+    const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store, free()); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, spawn: inProcessRuntime(), checkDrainWaitMs: 300, capacity: cap, ...(o.slowHosts ? { spawn: slowHosts() } : {}) });
     return { engine, cap };
   };
   let now = server();

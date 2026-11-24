@@ -4,8 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, applyDraft, approveQueue, loadProjectState, routeAnswers, withdrawApproval } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator, type UserNotice } from "../src/orchestrator.ts";
@@ -13,8 +12,7 @@ import { longReply } from "./fake-behaviour.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER, untilAsync, holdWork } from "./wait.ts";
 import { cliOut } from "../../../packages/cli/test/run-cli.ts";
-
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const QUEUE = `id: R
 title: Planned in the chat
@@ -39,8 +37,8 @@ function setup(again?: string, push?: (n: UserNotice) => void) {
   if (!again) delete process.env.FAKE_LOG;
   const store = again ? ProjectStore.forRoot(root) : ProjectStore.init(root, { id: "p", name: "P", root });
   let orchestrator: Orchestrator;
-  const engine: Engine = new Engine(store, () => tick(), QUICK_ENGINE);
-  orchestrator = new Orchestrator(store, engine, () => tick(), { push });
+  const engine: Engine = new Engine(store, () => tick(), { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  orchestrator = new Orchestrator(store, engine, () => tick(), { push }, { spawn: inProcessRuntime() });
   // Stands in for the server's file watcher.
   function tick() { routeAnswers(store); acceptReviews(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);

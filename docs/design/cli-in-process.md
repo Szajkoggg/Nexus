@@ -1,4 +1,4 @@
-# The nexus CLI inside the tests' processes
+# The nexus CLI and the fake runtimes inside the tests' processes
 
 ## The CLI as a function, and its calls in the tests (queue IPR1)
 
@@ -31,8 +31,8 @@ again. IPR1 made the CLI a function, and the tests call it in the process they a
   stdout and stderr (`packages/cli/test/cli-roles-errors.test.ts`: the command-line usage errors and `nexus --help`);
   the user's CLI outside every agent's job (`apps/server/test/agent-guard.test.ts`); and the protocol package's one
   call (`packages/protocol/test/status.test.ts`), since the protocol may not import the CLI (dependency-cruiser's
-  protocol-not-to-apps). The runtimes themselves (`fake-claude.ts`, `fake-codex.ts`) are still processes the engine
-  starts: the next step of IPR.
+  protocol-not-to-apps). The runtimes themselves (`fake-claude.ts`, `fake-codex.ts`) were still processes the engine
+  started: IPR2 moved them in too (below).
 
 Measured on the same machine, each full run alone under the lock (`npm test`; the processes counted by a preload
 through `NODE_OPTIONS` that notes every start of `bin/nexus.js`):
@@ -51,3 +51,55 @@ not the CLI's: with `node scripts/load-tests.mjs --copies 4 --rounds 3 --wait-ms
 the CLI in the fake's process, and in 1 of 24 runs with the fake and the CLI of the commit before (the same message).
 The 11 processes left are the ones listed above as still real (9 of cli-roles-errors.test.ts, one each of the other
 two).
+
+## The fake runtimes in the test's own process (queue IPR2)
+
+After IPR1 every agent process of a test was still a Node process of its own (`fake-claude.ts`, `fake-codex.ts`), on
+Windows inside a job host (PowerShell, `worker-job.ps1`): about 460 of them in a full run. IPR2 runs them in the
+test's own process, against the real adapters:
+
+- **The fakes as functions.** `runFakeClaude(io)` and `runFakeCodex(io)` take what the process gave them before
+  (`FakeIo`: argv, env, cwd, stdin, stdout, stderr, `exit(code)` and `signal()`) and return what ends them from
+  outside. Run as a script, the file passes `process.*` and behaves as before; the tests of real processes use that.
+  Everything a fake keeps is its own (`Fake`: its io, timers, the interrupt of its slow wait, the integration's stop),
+  since many run in one process; `fake-behaviour.ts`'s helpers take the fake, and its `nexus` calls run with the
+  fake's environment and working directory.
+- **An ended fake does nothing more**, as a killed process does: no output, no timer fires (its timers are cleared),
+  no `nexus` call starts (the call's promise never settles, and the work after it never runs).
+- **The seam** is the one that was there: `AgentHostOptions.spawn` (the engine's, the orchestrator's, the
+  conversations' and the review helpers'). `inProcessRuntime()` makes the real `ClaudeSession` or `CodexSession` with
+  `spawnChild` (`ClaudeOptions`, `AgentOptions`: what starts the process, `spawnRuntimeChild` by default) set to a
+  child in memory. A test that makes an adapter itself passes `inProcessClaude` or `inProcessCodex` as its
+  `spawnChild`. The server never sets it.
+- **The child in memory** (`apps/server/test/in-process-runtime.ts`): stdin, stdout and stderr are pipes whose data
+  comes out once the writer's call has returned and before the event loop goes on (`process.nextTick`). A first
+  version passed each chunk on a later turn of the event loop (`setImmediate`): a chunk took a turn, so Codex's answer
+  to `turn/start` came after a user's message that the engine sent meanwhile; the adapter, without the turn's id,
+  kept the message for the next turn, and the step that waited for it waited for ever (engine.test.ts, "a message
+  reaches a working turn"). Its exit comes as the job host gives it: what the fake wrote is read first, then `exit`
+  and `close`; a kill and a signal end it with exit code 1 (TerminateProcess, `worker-job.cs`). It has no pid: Nexus
+  records none and looks for no process of it.
+- **A process some code still starts** (a server, the model list, an engine made without the option) gets the fake's
+  script, never the real CLI: `in-process-runtime.ts` sets `NEXUS_CLAUDE` and `NEXUS_CODEX` when they are not set.
+
+What came out while moving the tests:
+
+- **A notice read inside a turn.** A fake in the test's process runs only when the server's synchronous work has
+  ended, so a notice sent right after another comes into the running turn more often than into a process of its own
+  (Claude's `next`, Codex's steer). The orchestrator's fake acted only on a command read so (`FAKE-NEXUS`); a step
+  waiting for its review was then never accepted (orchestrator.test.ts, recurring-maintenance.test.ts). It now acts on
+  a worker's question and a review notice read inside a turn as on one of its own turn, as an agent acts on what it
+  reads mid-turn.
+- **The closing step's round ends with its turn**, which may come in after the run finished: closing.test.ts waited
+  only for the run, and now waits for the round's end too.
+
+**Still real processes**, each with why, are listed in `scripts/real-process-tests.ts`; the rule is one sentence in
+[tests.md](tests.md), "Processes in tests". `scripts/test/real-process-tests.test.ts` reads every `*.test.ts` and
+fails on a file that starts the fake runtimes (their script path in a string), a server (`spawnServer`), the CLI
+(`bin/nexus.js` in a string) or test files (`"--test"`) as processes, is not listed and does not use the fakes in its
+own process; and on a listed file that is gone or starts none. Besides the job host and process-tree tests, one
+adapter test per runtime (Claude's settling, Codex's exit and drain window), the CLI's contract and the tests that
+start a server, these stay real because their subject is the process: runtime-records.test.ts (the record's pid),
+conversation-saved.test.ts (it waits for the pid before it ends the process, as a deploy does), scenario.test.ts
+(its golden files hold the server's frozen clock, the runtimes and the CLI keep the system clock) and stopwork.test.ts
+(clock-steps.test.ts runs it with the server's clock stepped and its agents on the system clock).

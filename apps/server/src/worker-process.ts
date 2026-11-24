@@ -12,7 +12,9 @@ import { fileURLToPath } from "node:url";
  * `owned`: a worker's or a check's process, below normal priority when the server asks for it (lowerOwnedProcesses).
  * `agent`: an agent session's role; on Windows its process runs in a job the server asks about (agentOwning).
  */
-interface SpawnOptions { cwd: string; env: NodeJS.ProcessEnv; owned?: boolean; agent?: string }
+export interface SpawnOptions { cwd: string; env: NodeJS.ProcessEnv; owned?: boolean; agent?: string }
+/** Starts a runtime's process: spawnRuntimeChild; tests give a stand-in that runs the fake runtime in their own process. */
+export type SpawnRuntimeChild = (bin: string, args: string[], options: SpawnOptions) => RuntimeChild;
 export interface RuntimeChild extends EventEmitter {
   readonly stdin: Writable;
   readonly stdout: PassThrough | ChildProcessWithoutNullStreams["stdout"];

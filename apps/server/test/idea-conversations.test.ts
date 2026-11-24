@@ -3,17 +3,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, changeIdeaStatus, ideaStatuses, loadProjectState, previewIdeaHandoff, retryIdeaHandoff, sendIdeaHandoff } from "@nexus/protocol";
 import { Conversations } from "../src/conversations.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Engine } from "../src/engine.ts";
 import { QUICK_ENGINE, until, LONGER } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 const TEXT = "# Scoped idea\n**Summary:** Initial summary.\n## Decided\n### 2026-11-14\n- Exact first decision.\n### 2026-11-15\n- Different date content.\n## Open\n- Still a question?\n## Ideas\n- Maybe something later.\n";
 function setup(runtime: "claude" | "codex") {
   const root = mkdtempSync(join(tmpdir(), "nexus-idea-chat-"));
@@ -22,8 +19,8 @@ function setup(runtime: "claude" | "codex") {
   const store = ProjectStore.init(root, { id: "p", name: "P", root, orchestrator: { runtime, notify: false } });
   store.updateProject((p) => ({ ...p, conversations: { ...p.conversations, runtime, notes_dir: "notes" } }));
   mkdirSync(join(root, "notes")); const note = join(root, "notes/a.md"); writeFileSync(note, TEXT);
-  const engine = new Engine(store, () => {}, QUICK_ENGINE), orchestrator = new Orchestrator(store, engine, () => {});
-  const conversations = new Conversations(store, orchestrator, () => {});
+  const engine = new Engine(store, () => {}, { spawn: inProcessRuntime(), ...QUICK_ENGINE }), orchestrator = new Orchestrator(store, engine, () => {}, {}, { spawn: inProcessRuntime() });
+  const conversations = new Conversations(store, orchestrator, () => {}, { spawn: inProcessRuntime() });
   const received = () => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n") : []).map((l) => JSON.parse(l) as { text: string });
   const stop = async () => {
     conversations.shutdown(); orchestrator.shutdown(); engine.shutdown();
@@ -112,7 +109,7 @@ for (const runtime of ["claude", "codex"] as const) {
       await until("ordinary partner reply", () => f.conversations.view(c.id).chat.some((m) => m.from === "partner" && m.text === "slow reply"), LONGER.step);
       assert(!f.store.readChat(c.id).entries.some((e) => e.text.includes("SUMMARY")));
       f.orchestrator.shutdown(); await until("old orchestrator exits", () => !f.orchestrator.alive(), LONGER.processes);
-      restarted = new Orchestrator(f.store, f.engine, () => {});
+      restarted = new Orchestrator(f.store, f.engine, () => {}, {}, { spawn: inProcessRuntime() });
       const deliver = (id: string, text: string) => restarted!.enqueueIdea(id, text);
       assert.deepEqual(sendIdeaHandoff(f.store, request, deliver), delivered);
       // Simulate a crash after inbox/chat append but before the handoff file records delivery.

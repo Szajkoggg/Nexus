@@ -17,6 +17,7 @@ import { Engine, type EngineOptions } from "../src/engine.ts";
 import { FAST, restart, setup } from "./engine-setup.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { LONGER, until as waitUntil } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 process.env.NEXUS_HOME ??= mkdtempSync(join(tmpdir(), "nexus-checks-home-"));
 const lockFile = () => join(mkdtempSync(join(tmpdir(), "nexus-checks-lock-")), "full-test.lock");
@@ -267,8 +268,8 @@ function withOrchestrator(queues: string[]) {
   // The server: its capacity, engine and orchestrator; `restart` is the next server on the same files.
   const serve = () => {
     cap = capacity();
-    engine = new Engine(store, () => tick(), { ...FAST, capacity: cap });
-    orchestrator = new Orchestrator(store, engine, () => tick());
+    engine = new Engine(store, () => tick(), { spawn: inProcessRuntime(), ...FAST, capacity: cap });
+    orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn: inProcessRuntime() });
   };
   serve();
   function tick() { routeAnswers(store); acceptReviews(store); const st = loadProjectState(store); orchestrator.onChange(st); engine.onChange(st); }

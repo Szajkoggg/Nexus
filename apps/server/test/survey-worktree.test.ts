@@ -9,8 +9,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   ProjectStore, applyDraft, approveQueue, fillTemplate, loadProjectState, parseTemplate, routeAnswers, updateSettings, type QueueView,
 } from "@nexus/protocol";
@@ -19,10 +18,7 @@ import { Merger } from "../src/merger.ts";
 import { cleanUp } from "../src/mergeback.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, LONGER, sleep, until as waitUntil } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 /** The system's temporary folder, read once: each project sets TEMP to a folder of its own (the report's folder). */
 const TMP = tmpdir();
@@ -76,7 +72,7 @@ function setup(o: { mergeBack?: boolean } = {}) {
   const reviews = { accept: true };
   const merger = new Merger(store, { start: (id) => void engine.start(id), release: (id, why) => engine.releaseHold(id, why), busy: () => false, serverRoot: join(base, "elsewhere") });
   const tick = () => { routeAnswers(store); if (reviews.accept) acceptReviews(store); const s = loadProjectState(store); engine.onChange(s); merger.onChange(s); };
-  const engine: Engine = new Engine(store, tick, { ...QUICK_ENGINE, retryBaseMs: 30, startupMs: 20 });
+  const engine: Engine = new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, startupMs: 20 });
   const timer = setInterval(tick, 150);
   const view = (id: string): QueueView => loadProjectState(store).queues.find((x) => x.id === id)!;
   const until = (what: string, id: string, pred: (q: QueueView) => boolean, ms: number = LONGER.processes) =>

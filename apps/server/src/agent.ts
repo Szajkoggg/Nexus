@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { EventEmitter } from "node:events";
 import { nexusHome } from "@nexus/protocol";
 import { withoutHandover } from "./handover.ts";
+import type { SpawnRuntimeChild } from "./worker-process.ts";
 
 export type Priority = "now" | "next" | "later";
 
@@ -179,6 +180,8 @@ export interface AgentOptions {
   /** Instructions added to the runtime's own system prompt. */
   instructions?: string;
   env: Record<string, string>;
+  /** Starts the process (spawnRuntimeChild); tests give a stand-in (AgentHostOptions.spawn). */
+  spawnChild?: SpawnRuntimeChild;
 }
 
 const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "../../../packages/cli/bin/nexus.js");

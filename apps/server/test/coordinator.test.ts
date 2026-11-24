@@ -9,6 +9,7 @@ import { DEFAULT_MAX_RUNNING, ensureGlobalSettings, loadProjectState, readGlobal
 import { Coordinator } from "../src/coordinator.ts";
 import { doneByHand, going, world } from "./coordinator-world.ts";
 import { gatedCleanup } from "./gated-cleanup.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 import { TestClock } from "./test-clock.ts";
 import { LONGER, holdWork } from "./wait.ts";
 
@@ -88,7 +89,7 @@ test("a direct start, a resume and a continue in a checkout another queue holds 
 
 test("a resume while the worker's cleanup runs is refused at once when another queue holds the checkout, not halted later (queue LH, finding 6)", async () => {
   const work = holdWork();
-  const cleanups = gatedCleanup();
+  const cleanups = gatedCleanup({ make: inProcessRuntime() });
   const w = world({ spawn: cleanups.spawn });
   const p = w.add("p", { A: ["slow"], H: ["slow"] });
   try {

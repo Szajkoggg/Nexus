@@ -7,17 +7,13 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, approveQueue, loadProjectState, normPath, reportFile, routeAnswers, type StepDef } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { cleanUp } from "../src/mergeback.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, WAIT_MS, POLL_MS, LONGER, sleep } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 function setup(o: { git?: boolean } = {}) {
   const base = mkdtempSync(join(tmpdir(), "nexus-report-"));
@@ -39,7 +35,7 @@ function setup(o: { git?: boolean } = {}) {
   const step = (id: string): StepDef => ({ id, title: `Step ${id}`, goal: "FAKE: done", acceptance: [] });
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps: [step("Q1"), step("Q2")], ...(o.git ? { worktree: "auto" } : {}) });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, QUICK_ENGINE);
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   // The run takes two steps and a report: about eight node processes (the fake worker, each nexus call), each started
   // in a second here but in two to four under load, where a step took 14 s (scripts/load-tests.mjs, 12 busy cores

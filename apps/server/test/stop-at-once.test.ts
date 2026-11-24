@@ -1,6 +1,7 @@
 // Immediate user stops against both real adapters with fake runtimes, never a model or a registered project.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -12,6 +13,10 @@ import { userStopNow } from "../src/prompts.ts";
 import { setup } from "./engine-setup.ts";
 import { assertTempHome } from "./helpers.ts";
 import { holdWork, LONGER } from "./wait.ts";
+
+// The fake runtimes as processes of their own (scripts/real-process-tests.ts).
+process.env.NEXUS_CLAUDE = fileURLToPath(new URL("./fake-claude.ts", import.meta.url));
+process.env.NEXUS_CODEX = fileURLToPath(new URL("./fake-codex.ts", import.meta.url));
 
 for (const runtime of ["claude", "codex"] as const) for (const worktree of [false, true]) {
   test(`${runtime}: Stop at once keeps ${worktree ? "worktree" : "checkout"} changes and resumes the same session`, async () => {

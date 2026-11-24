@@ -7,8 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   ProjectStore, approveQueue, loadProjectState, readGlobalSettings, routeAnswers, sendMessage, updateSettings, writeGlobalSettings,
   type GlobalSettings, type StepDef,
@@ -19,10 +18,7 @@ import { Conversations } from "../src/conversations.ts";
 import { WORKER_BRIEFING, workerBriefing } from "../src/prompts.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const lines = (file: string | undefined) => (file && existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>) : []);
 /** A Claude Code process's start: resumed or not, and its appended system prompt (the briefing). */
@@ -48,7 +44,7 @@ function worker(steps: (Partial<StepDef> & { fake: string })[]) {
     steps: steps.map(({ fake, ...s }, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${fake}`, acceptance: [], ...s })),
   });
   approveQueue(b.store, "Q");
-  const engine: Engine = new Engine(b.store, () => { routeAnswers(b.store); acceptReviews(b.store); engine.onChange(loadProjectState(b.store)); }, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
+  const engine: Engine = new Engine(b.store, () => { routeAnswers(b.store); acceptReviews(b.store); engine.onChange(loadProjectState(b.store)); }, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
   const queue = () => loadProjectState(b.store).queues.find((q) => q.id === "Q")!;
   const done = () => { engine.shutdown(); work.done(); };
   return { ...b, engine, queue, release: work.release, done };
@@ -136,8 +132,8 @@ test("with the defaults the worker gets today's texts: no language line", async 
 
 test("the orchestrator's briefing names the reader's language for its replies and queue text, and follows a change from its next message", async () => {
   const b = base();
-  const engine = new Engine(b.store, () => {}, QUICK_ENGINE);
-  const orchestrator = new Orchestrator(b.store, engine, () => {});
+  const engine = new Engine(b.store, () => {}, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  const orchestrator = new Orchestrator(b.store, engine, () => {}, {}, { spawn: inProcessRuntime() });
   const replies = () => orchestrator.view().chat.filter((c) => c.from === "orchestrator" && c.kind !== "tool").length;
   try {
     setGlobal((g) => { g.languages.reader = "de"; });
@@ -161,8 +157,8 @@ test("the orchestrator's briefing names the reader's language for its replies an
 
 test("without a reader's language the orchestrator's queue text is in the working language, as before", async () => {
   const b = base();
-  const engine = new Engine(b.store, () => {}, QUICK_ENGINE);
-  const orchestrator = new Orchestrator(b.store, engine, () => {});
+  const engine = new Engine(b.store, () => {}, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  const orchestrator = new Orchestrator(b.store, engine, () => {}, {}, { spawn: inProcessRuntime() });
   try {
     updateSettings(b.store, { languages: { working: "es" } });
     orchestrator.say("first");
@@ -175,9 +171,9 @@ test("without a reader's language the orchestrator's queue text is in the workin
 
 test("a thinking partner replies in the reader's language and writes files in the working language, from its next message after a change", async () => {
   const b = base();
-  const engine = new Engine(b.store, () => {}, QUICK_ENGINE);
-  const orchestrator = new Orchestrator(b.store, engine, () => {});
-  const conversations = new Conversations(b.store, orchestrator, () => {});
+  const engine = new Engine(b.store, () => {}, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  const orchestrator = new Orchestrator(b.store, engine, () => {}, {}, { spawn: inProcessRuntime() });
+  const conversations = new Conversations(b.store, orchestrator, () => {}, { spawn: inProcessRuntime() });
   const replies = (id: string) => b.store.readChat(id).entries.filter((e) => e.from === "partner").length;
   try {
     const c = conversations.create({ title: "Ideas" });

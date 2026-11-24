@@ -21,6 +21,7 @@ import { Orchestrator } from "../src/orchestrator.ts";
 import { serverEnv, spawnServer } from "./helpers.ts";
 import { QUICK_ENGINE, until, LONGER, untilAsync } from "./wait.ts";
 import { cliOut } from "../../../packages/cli/test/run-cli.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const REPO = join(here, "..", "..", "..");
@@ -158,10 +159,10 @@ test("a failed update tells the orchestrator that ran it why, and what still run
 
   const p = project(base, "p");
   const session = addOrchestrator(p.store);
-  const engine = new Engine(p.store, () => {}, QUICK_ENGINE);
+  const engine = new Engine(p.store, () => {}, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
   // Wired as main.ts wires it: the orchestrator reads the lifecycle's notice; a settled update runs its notices.
   let lifecycle!: Lifecycle;
-  const orchestrator = new Orchestrator(p.store, engine, () => {}, { update: () => lifecycle.notice() });
+  const orchestrator = new Orchestrator(p.store, engine, () => {}, { update: () => lifecycle.notice() }, { spawn: inProcessRuntime() });
   const onChange = () => orchestrator.onChange(loadProjectState(p.store));
   lifecycle = new Lifecycle(() => [{ id: "p", idle: () => true, drain: () => [], cancel: () => {}, shutdown: () => {} }], () => {}, {
     root: repo, successor: [process.execPath, join(here, "fake-successor.ts")], timeoutMs: 15_000,

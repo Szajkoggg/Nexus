@@ -18,6 +18,7 @@ import { Orchestrator } from "../src/orchestrator.ts";
 import { spawnServer } from "./helpers.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil, serverUp, LONGER } from "./wait.ts";
 import { cliOut } from "../../../packages/cli/test/run-cli.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -34,8 +35,8 @@ function setup() {
   delete process.env.FAKE_REVIEW_ACCEPT;
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   let orchestrator: Orchestrator;
-  const engine: Engine = new Engine(store, () => tick(), QUICK_ENGINE);
-  orchestrator = new Orchestrator(store, engine, () => tick());
+  const engine: Engine = new Engine(store, () => tick(), { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn: inProcessRuntime() });
   function tick() { routeAnswers(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);
   const state = () => loadProjectState(store);

@@ -4,8 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, approveQueue, ensureUserSession, loadProjectState, newId, type Event, type StepDef } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
@@ -13,10 +12,7 @@ import { Conversations } from "../src/conversations.ts";
 import { stepSeed, sinceThen } from "../src/step-seed.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil } from "./wait.ts";
 import { cliOut } from "../../../packages/cli/test/run-cli.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const T0 = Date.now() - 86_400_000;
 const at = (min: number) => new Date(T0 + min * 60_000).toISOString();
@@ -55,9 +51,9 @@ function setup() {
   emit(25, { type: "queue.stop", queue: "Q", step: "S1", condition: "art", reason: "the art is missing" });
   const q = store.readQueue("Q");
   store.writeQueue({ ...q, steps: q.steps.map((s) => (s.id === "K1" ? { ...s, status: "skipped" as const } : s)) });
-  const engine = new Engine(store, () => {}, QUICK_ENGINE);
-  const orchestrator = new Orchestrator(store, engine, () => {});
-  const conversations = new Conversations(store, orchestrator, () => {});
+  const engine = new Engine(store, () => {}, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  const orchestrator = new Orchestrator(store, engine, () => {}, {}, { spawn: inProcessRuntime() });
+  const conversations = new Conversations(store, orchestrator, () => {}, { spawn: inProcessRuntime() });
   const received = () => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n") : [])
     .map((l) => JSON.parse(l) as { text: string; session: string | null });
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms);
