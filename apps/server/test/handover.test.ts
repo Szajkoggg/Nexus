@@ -15,7 +15,8 @@ import { handOver, refuseHandoverDir, takeHandoverEnv, withoutHandover } from ".
 import { agentEnv } from "../src/agent.ts";
 import { MAIN, serverEnv, spawnServer } from "./helpers.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { until, untilAsync, LONGER, holdWork } from "./wait.ts";
+import { QUICK_ENGINE, until, untilAsync, LONGER, holdWork } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
@@ -41,7 +42,7 @@ async function heldProject() {
   const steps: StepDef[] = ["slow", "done"].map((b, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${b}`, acceptance: [] }));
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", stop_conditions: [], checks: [], steps, approvals: [], history: [] });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); });
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
   engine.start("Q");
   await until("the first step to run", () => loadProjectState(store).queues[0]!.steps[0]!.status === "running", LONGER.step);
   engine.drainForUpdate(false);

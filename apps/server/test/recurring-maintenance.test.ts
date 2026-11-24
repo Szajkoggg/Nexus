@@ -8,15 +8,14 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, approveQueue, ensureUserSession, loadProjectState, newId, now, routeAnswers, type Event } from "@nexus/protocol";
 import { Engine, SURVEY_CONDITION } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { until as waitUntil, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, until as waitUntil, LONGER } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
 
 /** A template whose one step does what `what` says to the fake; `maintenance` makes it a maintenance template. */
@@ -68,8 +67,8 @@ function setup(opts: { orchestrator?: boolean; git?: boolean } = {}) {
   let orchestrator: Orchestrator | undefined;
   const reviews = { accept: true };
   const tick = () => { routeAnswers(store); if (reviews.accept) acceptReviews(store); const s = loadProjectState(store); orchestrator?.onChange(s); engine.onChange(s); };
-  const engine = new Engine(store, tick, { retryBaseMs: 30, startupMs: 20 });
-  if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick);
+  const engine = new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, startupMs: 20 });
+  if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick, {}, { spawn: inProcessRuntime() });
   const timer = setInterval(tick, 150);
   const state = () => loadProjectState(store);
   const runs = (id: string) => state().queues.filter((q) => q.id.startsWith(`${id}-`));

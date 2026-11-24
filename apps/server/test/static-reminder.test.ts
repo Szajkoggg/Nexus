@@ -5,15 +5,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, loadProjectState, newId, now, routeAnswers, type Event } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { TestClock } from "./test-clock.ts";
-import { until as waitUntil, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, until as waitUntil, LONGER } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const DAY = 24 * 3600_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -28,8 +27,8 @@ function setup(files: Record<string, string>) {
   const clock = new TestClock();
   let orchestrator: Orchestrator | undefined;
   const tick = () => { routeAnswers(store); const s = loadProjectState(store); orchestrator?.onChange(s); engine.onChange(s); };
-  const engine = new Engine(store, tick, { retryBaseMs: 30, startupMs: 20, clock });
-  orchestrator = new Orchestrator(store, engine, tick);
+  const engine = new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, startupMs: 20, clock });
+  orchestrator = new Orchestrator(store, engine, tick, {}, { spawn: inProcessRuntime() });
   const timer = setInterval(tick, 100);
   const reminders = () => orchestrator!.view().chat.filter((c) => c.from === "nexus" && REMINDER.test(c.text)).length;
   const until = (what: string, pred: () => boolean) => waitUntil(what, pred, LONGER.run, () => `; reminders: ${reminders()}; note: ${JSON.stringify(store.readStaticAnalysisNote())}`);

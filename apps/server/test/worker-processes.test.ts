@@ -1,12 +1,17 @@
 // Real descendants of fake runtimes, never real models or user projects. Windows Job Object integration tests.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { setStepLevel } from "@nexus/protocol";
-import { setup } from "./engine-setup.ts";
+import { setup, REAL_PROCESSES } from "./engine-setup.ts";
 import { gatedCleanup } from "./gated-cleanup.ts";
 import { holdWork, until, LONGER } from "./wait.ts";
+
+// The fake runtimes as processes of their own (scripts/real-process-tests.ts).
+process.env.NEXUS_CLAUDE = fileURLToPath(new URL("./fake-claude.ts", import.meta.url));
+process.env.NEXUS_CODEX = fileURLToPath(new URL("./fake-codex.ts", import.meta.url));
 
 interface Family { root: number; direct: number; orphan: number; bridge: number }
 function alive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch { return false; } }
@@ -42,11 +47,11 @@ try {
 for (const runtime of ["claude", "codex"] as const) {
   test(`${runtime}: step cleanup preserves the runtime, interruption ends its tree and leaves another worker alone`, { skip: process.platform !== "win32" }, async () => {
     const work = holdWork();
-    const first = setup(["prochold", "prochold"]);
+    const first = setup(["prochold", "prochold"], REAL_PROCESSES);
     const log = process.env.FAKE_LOG!;
     first.engine.start("Q", { runtime });
     const otherWork = holdWork();
-    const other = setup(["prochold"]);
+    const other = setup(["prochold"], REAL_PROCESSES);
     const otherLog = process.env.FAKE_LOG!;
     other.engine.start("Q", { runtime });
     const releases: (() => Promise<void>)[] = [];
@@ -74,7 +79,7 @@ for (const runtime of ["claude", "codex"] as const) {
   });
 
   test(`${runtime}: a reported stop cleans descendants and retains the idle runtime`, { skip: process.platform !== "win32" }, async () => {
-    const fixture = setup(["procstop"]);
+    const fixture = setup(["procstop"], REAL_PROCESSES);
     const file = `${process.env.FAKE_LOG}.children-Q1`;
     try {
       fixture.engine.start("Q", { runtime });
@@ -91,7 +96,7 @@ for (const runtime of ["claude", "codex"] as const) {
   test(`${runtime}: Stop now cleans after the turn, and review cleans before acceptance`, { skip: process.platform !== "win32" }, async () => {
     for (const stop of [true, false]) {
       const work = holdWork();
-      const fixture = setup([stop ? "prochold" : "procdone", "done"]);
+      const fixture = setup([stop ? "prochold" : "procdone", "done"], REAL_PROCESSES);
       const file = `${process.env.FAKE_LOG}.children-Q1`;
       if (!stop) setStepLevel(fixture.store, "Q", "Q1", 1);
       try {
@@ -150,7 +155,7 @@ for (const runtime of ["claude", "codex"] as const) {
 
   test(`${runtime}: accepting review before a delayed exit never retries the completed step`, { skip: process.platform !== "win32" }, async () => {
     const work = holdWork();
-    const fixture = setup(["doneexitheld", "done"]);
+    const fixture = setup(["doneexitheld", "done"], REAL_PROCESSES);
     setStepLevel(fixture.store, "Q", "Q1", 1);
     try {
       fixture.engine.start("Q", { runtime });

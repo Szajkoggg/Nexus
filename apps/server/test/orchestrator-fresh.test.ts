@@ -5,14 +5,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, answerAsUser, loadProjectState, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { WAIT_MS, until as waitUntil, untilAsync, sleep } from "./wait.ts";
-
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, untilAsync, sleep } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const ASKED = /^\[Nexus\] Your context holds /;
 const SEED = "[Nexus] You go on as the project's orchestrator in a fresh session";
@@ -23,8 +21,8 @@ function setup() {
   process.env.FAKE_LOG = join(root, "fake.log");
   process.env.FAKE_CONTEXT_FILL_FILE = join(root, "fill");
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
-  const engine: Engine = new Engine(store, () => tick());
-  const orchestrator = new Orchestrator(store, engine, () => tick());
+  const engine: Engine = new Engine(store, () => tick(), { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  const orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn: inProcessRuntime() });
   // Stands in for the server's file watcher.
   function tick() { routeAnswers(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);

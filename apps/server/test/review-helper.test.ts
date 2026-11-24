@@ -7,15 +7,14 @@ import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, applyDraft, approveQueue, helperAbout, loadProjectState, reviewStats, reviewStatsText, routeAnswers, updateSettings, type StepDef } from "@nexus/protocol";
 import { audited } from "../src/review-helper.ts";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { LONGER, WAIT_MS, until as waitUntil } from "./wait.ts";
+import { QUICK_ENGINE, LONGER, WAIT_MS, until as waitUntil } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 // The orchestrator's fake accepts a step whose review notice it gets (and answers a worker's question).
 process.env.FAKE_REVIEW_ACCEPT = "1";
 
@@ -26,8 +25,8 @@ function setup(o: { limit?: number; helper?: Record<string, unknown> } = {}) {
   process.env.FAKE_ARGS = join(root, "fake-args.log");
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   updateSettings(store, { defaults: { review_send_back_limit: o.limit ?? 2 }, review_helper: { model: "claude-haiku-5-5", effort: "low", ...o.helper } });
-  const engine: Engine = new Engine(store, () => tick());
-  const orchestrator: Orchestrator = new Orchestrator(store, engine, () => tick(), {}, { helpers: {} });
+  const engine: Engine = new Engine(store, () => tick(), { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  const orchestrator: Orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn: inProcessRuntime(), helpers: {} });
   function tick() { routeAnswers(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);
   const state = () => loadProjectState(store);

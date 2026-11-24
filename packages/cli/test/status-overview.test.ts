@@ -3,14 +3,12 @@
 // fresh orchestrator session starts from), one queue with --queue; Waiting for the user and the machine in each.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, approveQueue, loadProjectState, newId, orchestratorOverview, orchestratorStatusChange, writeCapacity, type Event } from "@nexus/protocol";
+import { cliOut } from "./run-cli.ts";
 
-const CLI = join(dirname(fileURLToPath(import.meta.url)), "../bin/nexus.js");
 const T0 = Date.now() - 86_400_000;
 const at = (min: number) => new Date(T0 + min * 60_000).toISOString();
 const LONG = `${"what this session knows ".repeat(20)}END`;
@@ -41,10 +39,10 @@ function setup() {
   process.env.NEXUS_HOME = home;
   writeCapacity({ protocol: 1, workstation: "WS", slots: { heavy: 1 }, waiting: [],
     held: [{ id: "c1", kind: "checks", project: "p", queue: "O", step: "O1", requested_at: at(4), granted_at: at(4) }], updated_at: at(4) });
-  const status = (...args: string[]) => {
+  const status = async (...args: string[]) => {
     const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: store.dir, NEXUS_HOME: home };
     delete env.NEXUS_SESSION;
-    return execFileSync(process.execPath, [CLI, "status", "--session", "o", ...args], { env, encoding: "utf8" });
+    return await cliOut(["status", "--session", "o", ...args], { env });
   };
   return { store, workers, status };
 }
@@ -53,9 +51,9 @@ const sessions = (out: string) => [...out.matchAll(/^- (\S+) "/gm)].map((m) => m
 const MACHINE = /^machine WS \(one heavy operation at a time, across projects\):\n {2}running: checks of O\/O1 \(project p\)/m;
 const WAITING = /^Waiting for the user\n- stopped S[^\n]*: art: missing$/m;
 
-test("the short overview: open queues, finished ones counted, the live, open queues' and 10 latest sessions with short cards", () => {
+test("the short overview: open queues, finished ones counted, the live, open queues' and 10 latest sessions with short cards", async () => {
   const { status } = setup();
-  const out = status();
+  const out = await status();
   assert.match(out, /^Queues \(2 open; finished: 1; nexus status --all names them\)$/m);
   assert.match(out, /^- O \[approved\] Queue O/m);
   assert.match(out, /^- S \[stopped\] Queue S/m);
@@ -69,9 +67,9 @@ test("the short overview: open queues, finished ones counted, the live, open que
   assert.match(out, MACHINE);
 });
 
-test("--all: every queue and session with whole cards, as a fresh orchestrator session gets it; --queue: one queue", () => {
+test("--all: every queue and session with whole cards, as a fresh orchestrator session gets it; --queue: one queue", async () => {
   const { store, workers, status } = setup();
-  const all = status("--all");
+  const all = await status("--all");
   assert.match(all, /^Queues \(2 open; finished: F\)$/m);
   assert.deepEqual(sessions(all), [...workers].sort());
   const cards = all.split("\n").filter((l) => l.startsWith("  knows: "));
@@ -83,16 +81,16 @@ test("--all: every queue and session with whole cards, as a fresh orchestrator s
   assert.match(all, WAITING);
   assert.match(all, MACHINE);
 
-  const one = status("--queue", "S");
+  const one = await status("--queue", "S");
   assert.match(one, /^Queues \(1 open; finished: none\)\n- S \[stopped\] Queue S/m);
   assert.doesNotMatch(one, /^- O /m);
   assert.deepEqual(sessions(one), ["a-S"]);
   assert.match(one, /^Worker sessions \(1 of queue S\)$/m);
   assert.match(one, WAITING);
   assert.match(one, MACHINE);
-  const finished = status("--queue", "F");
+  const finished = await status("--queue", "F");
   assert.match(finished, /^- F \[cancelled\] Queue F/m, "a finished queue by name");
   assert.deepEqual(sessions(finished), ["a-F"]);
   assert.doesNotMatch(finished, /^Waiting for the user/m, "nothing waits about F");
-  assert.throws(() => status("--queue", "NOPE"), /unknown queue NOPE/);
+  await assert.rejects(async () => await status("--queue", "NOPE"), /unknown queue NOPE/);
 });

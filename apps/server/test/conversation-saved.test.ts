@@ -4,6 +4,7 @@
 // refuses as Claude Code does (fake-claude.ts); FAKE_START_MS holds its first read, so a test can end it before.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,8 +15,12 @@ import { Orchestrator } from "../src/orchestrator.ts";
 import type { Engine } from "../src/engine.ts";
 import { RESTARTED } from "../src/chats.ts";
 import { saveFakeConversation } from "./fake-behaviour.ts";
-import { restart, setup } from "./engine-setup.ts";
+import { restart, setup, REAL_PROCESSES } from "./engine-setup.ts";
 import { LONGER, holdWork, sleep, until } from "./wait.ts";
+
+// The fake runtimes as processes of their own (scripts/real-process-tests.ts).
+process.env.NEXUS_CLAUDE = fileURLToPath(new URL("./fake-claude.ts", import.meta.url));
+process.env.NEXUS_CODEX = fileURLToPath(new URL("./fake-codex.ts", import.meta.url));
 
 /** The fake's starts (FAKE_ARGS), each as its flag and the id: ["--session-id", id] or ["--resume", id]. */
 function starts(): string[][] {
@@ -43,7 +48,7 @@ function received(): string[] {
 // ---------------------------------------------------------------- the worker
 
 test("a worker whose process ended before it saved the conversation starts afresh after the restart, and its step runs", async () => {
-  const { store, engine, queue, until: wait } = setup(["done", "done"]);
+  const { store, engine, queue, until: wait } = setup(["done", "done"], REAL_PROCESSES);
   recordStarts();
   process.env.FAKE_START_MS = "60000"; // the process never reads its first message
   let next: Engine | undefined;
@@ -55,7 +60,7 @@ test("a worker whose process ended before it saved the conversation starts afres
     await wait("the process to exit", () => store.readRuntime(session)?.state === "exited");
     engine.shutdown();
     delete process.env.FAKE_START_MS;
-    next = restart(store);
+    next = restart(store, REAL_PROCESSES);
     await wait("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     const native = store.readSession(session).native_id!;
     assert.deepEqual(starts(), [["--session-id", native], ["--session-id", native]], "the same id, started afresh");
@@ -68,7 +73,7 @@ test("a worker whose process ended before it saved the conversation starts afres
 
 test("a worker stopped during its first turn, after the conversation was saved, resumes it without an error", async () => {
   const work = holdWork();
-  const { store, engine, queue, until: wait } = setup(["slow", "done"]);
+  const { store, engine, queue, until: wait } = setup(["slow", "done"], REAL_PROCESSES);
   recordStarts();
   let next: Engine | undefined;
   try {
@@ -81,7 +86,7 @@ test("a worker stopped during its first turn, after the conversation was saved, 
     await wait("the process to exit", () => store.readRuntime(session)?.state === "exited");
     engine.shutdown();
     work.release();
-    next = restart(store);
+    next = restart(store, REAL_PROCESSES);
     await wait("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     const native = store.readSession(session).native_id!;
     assert.deepEqual(starts(), [["--session-id", native], ["--resume", native]], "the saved conversation goes on");
@@ -208,7 +213,7 @@ test("a start refused a second time is not tried again: the process exits as bef
 
 /** A worker's session after a step that saved its conversation, or not (FAKE_START_MS), with its record changed. */
 async function workerRecord(saved: boolean, edit: (r: RuntimeFile) => RuntimeFile) {
-  const x = setup(saved ? ["slow", "done"] : ["done", "done"]);
+  const x = setup(saved ? ["slow", "done"] : ["done", "done"], REAL_PROCESSES);
   recordStarts();
   if (!saved) process.env.FAKE_START_MS = "60000";
   x.engine.start("Q");
@@ -233,7 +238,7 @@ for (const saved of [false, true]) {
     let next: Engine | undefined;
     try {
       work.release();
-      next = restart(x.store);
+      next = restart(x.store, REAL_PROCESSES);
       await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
       const native = x.store.readSession(x.session).native_id!;
       assert.deepEqual(starts(), saved
@@ -330,7 +335,7 @@ function threadCalls(): string[][] {
 }
 
 test("codex: a worker whose process ended before its thread was saved goes on in a new thread after the restart, and its step runs", async () => {
-  const { store, engine, queue, until: wait } = setup(["done", "done"]);
+  const { store, engine, queue, until: wait } = setup(["done", "done"], REAL_PROCESSES);
   recordStarts();
   process.env.FAKE_TURN_START_MS = "60000"; // the thread is started, its first turn never
   let next: Engine | undefined;
@@ -343,7 +348,7 @@ test("codex: a worker whose process ended before its thread was saved goes on in
     engine.shutdown();
     await wait("the process to exit", () => store.readRuntime(session)?.state === "exited");
     delete process.env.FAKE_TURN_START_MS;
-    next = restart(store);
+    next = restart(store, REAL_PROCESSES);
     await wait("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     assert.deepEqual(threadCalls(), [["thread/start"], ["thread/resume", unsaved], ["thread/start"]], "resume refused, a new thread instead");
     assert.notEqual(store.readSession(session).native_id, unsaved, "the session names its new thread");
@@ -354,7 +359,7 @@ test("codex: a worker whose process ended before its thread was saved goes on in
 
 test("codex: a worker whose thread was saved (stopped in its first turn) resumes the same thread after the restart", async () => {
   const work = holdWork();
-  const { store, engine, queue, until: wait } = setup(["slow", "done"]);
+  const { store, engine, queue, until: wait } = setup(["slow", "done"], REAL_PROCESSES);
   recordStarts();
   let next: Engine | undefined;
   try {
@@ -366,7 +371,7 @@ test("codex: a worker whose thread was saved (stopped in its first turn) resumes
     await wait("the process to exit", () => store.readRuntime(session)?.state === "exited");
     engine.shutdown();
     work.release();
-    next = restart(store);
+    next = restart(store, REAL_PROCESSES);
     await wait("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     assert.deepEqual(threadCalls(), [["thread/start"], ["thread/resume", thread]]);
     assert.equal(store.readSession(session).native_id, thread);

@@ -9,18 +9,14 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   ProjectStore, answerAsUser, approveQueue, ensureUserSession, loadProjectState, newId, now, readTurns, routeAnswers, sendBack, sendMessage, writeUsage, type StepDef,
 } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 type Step = Partial<StepDef> & { fake: string };
 const G = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
@@ -40,7 +36,7 @@ function setup(steps: Step[], o: { level?: 1 | 2 } = {}) {
     steps: steps.map(({ fake, ...s }, i) => ({ id: `Q${i + 1}`, title: `Step ${i + 1}`, goal: `FAKE: ${fake}`, acceptance: [], ...s })),
   });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
   const timer = setInterval(() => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, 150);
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const sessions = () => loadProjectState(store).sessions.filter((s) => s.role === "worker");

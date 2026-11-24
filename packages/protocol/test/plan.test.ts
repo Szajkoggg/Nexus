@@ -1,8 +1,8 @@
 // The plan's rules (plan.ts): several predecessors and how each stands, the loop check, who may change what, the
 // orchestrator's proposals and the user's answers, and the move of the chains from before the plan.
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,8 +10,13 @@ import {
   newId, newPlan, now, planLoop, proposePlan, checkPredecessors, removedByUser, reorderedFollowers, type Event, type PlanFile,
 } from "../src/index.ts";
 
+// The tests' roots, removed when the file's tests end (queue TI2).
+const roots: string[] = [];
+after(() => { for (const r of roots) rmSync(r, { recursive: true, force: true }); });
+
 function setup(ids: string[]) {
   const root = mkdtempSync(join(tmpdir(), "nexus-plan-"));
+  roots.push(root);
   const st = ProjectStore.init(root, { id: "p", name: "P", root });
   for (const id of ids) {
     st.writeQueue({

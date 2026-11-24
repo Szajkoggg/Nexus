@@ -6,17 +6,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const QUEUE = `id: R
 title: Planned in the chat
@@ -40,8 +36,8 @@ function setup(runtime: "claude" | "codex") {
   delete process.env.FAKE_LOG;
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   setRuntime(store, runtime);
-  const engine: Engine = new Engine(store, () => tick());
-  const orchestrator = new Orchestrator(store, engine, () => tick());
+  const engine: Engine = new Engine(store, () => tick(), { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  const orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn: inProcessRuntime() });
   // Stands in for the server's file watcher.
   function tick() { routeAnswers(store); acceptReviews(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);
@@ -109,7 +105,7 @@ test("on Codex, a resumed thread (a restarted server) gets the same permission p
     orchestrator.shutdown();
     await until("its process ended", () => !orchestrator.alive());
 
-    const again = new Orchestrator(store, engine, () => {});
+    const again = new Orchestrator(store, engine, () => {}, {}, { spawn: inProcessRuntime() });
     try {
       again.say("Hello again");
       await until("the thread resumed", () => args().some((l) => l.method === "thread/resume"), LONGER.step);

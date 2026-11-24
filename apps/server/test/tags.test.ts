@@ -5,14 +5,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, acceptTagProposal, loadProjectState, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { WAIT_MS, until as waitUntil } from "./wait.ts";
-
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "nexus-tags-"));
@@ -20,8 +18,8 @@ function setup() {
   delete process.env.FAKE_LOG;
   const store = ProjectStore.init(root, { id: "p", name: "P", root, orchestrator: { notify: true } });
   const tick = () => { routeAnswers(store); const s = loadProjectState(store); orchestrator.onChange(s); engine.onChange(s); };
-  const engine = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100 });
-  const orchestrator = new Orchestrator(store, engine, tick);
+  const engine = new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
+  const orchestrator = new Orchestrator(store, engine, tick, {}, { spawn: inProcessRuntime() });
   const timer = setInterval(tick, 150);
   const chat = () => orchestrator.view().chat.map((c) => c.text);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; chat: ${JSON.stringify(chat().slice(-3))}`);

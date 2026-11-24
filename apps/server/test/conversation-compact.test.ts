@@ -5,26 +5,22 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ActionError, ProjectStore } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { COMPACTED, Conversations } from "../src/conversations.ts";
-import { WAIT_MS, until as waitUntil } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 function setup(compacts?: (runtime: "claude" | "codex") => boolean) {
   const root = mkdtempSync(join(tmpdir(), "nexus-compact-"));
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_LOG = join(root, "fake.log");
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
-  const engine = new Engine(store, () => {});
-  const orchestrator = new Orchestrator(store, engine, () => {});
-  const conversations = new Conversations(store, orchestrator, () => {}, compacts ? { compacts } : {});
+  const engine = new Engine(store, () => {}, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  const orchestrator = new Orchestrator(store, engine, () => {}, {}, { spawn: inProcessRuntime() });
+  const conversations = new Conversations(store, orchestrator, () => {}, { spawn: inProcessRuntime(), ...(compacts ? { compacts } : {}) });
   /** What reached the fake partner (FAKE_LOG). */
   const heard = (): string[] => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").split("\n").filter(Boolean).map((l) => (JSON.parse(l) as { text: string }).text) : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms);

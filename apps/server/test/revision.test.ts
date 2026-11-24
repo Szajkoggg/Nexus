@@ -6,18 +6,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   ProjectStore, applyDraft, approveQueue, loadProjectState, newId, orchestratorStatusChange, routeAnswers, type Event, type StepDef,
 } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const step = (id: string, behaviour: string): StepDef => ({ id, title: `Step ${id}`, goal: `FAKE: ${behaviour}`, acceptance: [] });
 
@@ -30,7 +26,7 @@ function setup(steps: StepDef[]) {
   approveQueue(store, "W");
   const engines: Engine[] = [];
   const engine = (): Engine => {
-    const e: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); e.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100 });
+    const e: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); e.onChange(loadProjectState(store)); }, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
     engines.push(e);
     return e;
   };

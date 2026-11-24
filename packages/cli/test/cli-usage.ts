@@ -1,20 +1,17 @@
-// What the CLI knows, read from `nexus help` (bin/nexus.js; main.ts runs when it is loaded, so it is not imported), and
+// What the CLI knows, read from `nexus help` (main.ts's run(), in this process), and
 // the check of one command line against it: its command, subcommand and flags (queue DOC). Shared by protocol-cli.test.ts
 // (the lines of docs/protocol/cli.md) and instruction-commands.test.ts (the commands the agents' texts give).
-import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const CLI = join(dirname(fileURLToPath(import.meta.url)), "../bin/nexus.js");
+import { join } from "node:path";
+import { cliOut } from "./run-cli.ts";
 
 /** The text of `nexus help`, run without a session or a project. */
-export function helpText(): string {
+export async function helpText(): Promise<string> {
   const cwd = mkdtempSync(join(tmpdir(), "nexus-cli-usage-")); // no .nexus here
   const env: NodeJS.ProcessEnv = { ...process.env };
   delete env.NEXUS_SESSION; delete env.NEXUS_DIR;
-  return execFileSync(process.execPath, [CLI, "help"], { cwd, env, encoding: "utf8", stdio: "pipe" });
+  return cliOut(["help"], { cwd, env });
 }
 
 // ---------------------------------------------------------------- reading lines

@@ -8,9 +8,9 @@
 // - POLL_MS: how often a condition is looked at.
 
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { appendFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { tempDir } from "./temp-dirs.ts";
 
 /**
  * How long a test waits for a condition before it fails (NEXUS_TEST_WAIT_MS, default 10000). Decided as 10 s (queue
@@ -73,7 +73,7 @@ export const LONGER = {
  * reset, an update's deadline, a turn's recorded length).
  */
 export function holdWork(): { release: (step?: string) => void; done: () => void } {
-  const file = join(mkdtempSync(join(tmpdir(), "nexus-hold-")), "release");
+  const file = join(tempDir("nexus-hold-"), "release");
   process.env.FAKE_RELEASE = file;
   return { release: (step) => writeFileSync(step ? `${file}-${step}` : file, ""), done: () => { delete process.env.FAKE_RELEASE; } };
 }

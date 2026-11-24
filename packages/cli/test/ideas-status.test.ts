@@ -2,14 +2,12 @@
 // decision, the linked queues, the problems), the full JSON with --full, one entry's (or note's) JSON with a reference.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, changeIdeaStatus, ideaStatuses, loadProjectState, type IdeaStatusesResponse } from "@nexus/protocol";
+import { cliOut } from "./run-cli.ts";
 
-const CLI = join(dirname(fileURLToPath(import.meta.url)), "../bin/nexus.js");
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "nexus-cli-ideas-status-"));
@@ -23,17 +21,17 @@ function setup() {
     source: ["docs/ideas/tags.md#2026-11-14"], steps: [{ id: "TG1", title: "One", goal: "", acceptance: [] }] });
   changeIdeaStatus(store, { request_id: "drop", revision: ideaStatuses(store, loadProjectState(store)).revision,
     ref: "docs/ideas/plan.md#2026-11-16", operation: "drop", reason: "User dropped it" });
-  const run = (...args: string[]) => {
+  const run = async (...args: string[]) => {
     try {
-      return { ok: true, out: execFileSync(process.execPath, [CLI, "ideas", "status", ...args], { env: { ...process.env, NEXUS_DIR: store.dir, NEXUS_SESSION: "" }, encoding: "utf8", cwd: root, stdio: "pipe" }) };
+      return { ok: true, out: await cliOut(["ideas", "status", ...args], { env: { ...process.env, NEXUS_DIR: store.dir, NEXUS_SESSION: "" }, cwd: root }) };
     } catch (e) { return { ok: false, out: String((e as { stderr?: string }).stderr ?? e) }; }
   };
   return { run };
 }
 
-test("nexus ideas status summarizes each note's entries: reference, effective decision, queues, problems", () => {
+test("nexus ideas status summarizes each note's entries: reference, effective decision, queues, problems", async () => {
   const { run } = setup();
-  const r = run();
+  const r = await run();
   assert.ok(r.ok, r.out);
   const lines = r.out.trimEnd().split("\n");
   assert.equal(lines[0], "3 decided entries in 2 note(s): 1 active, 1 dropped, 1 replaced; 2 with problems; 1 user action(s)");
@@ -52,9 +50,9 @@ test("nexus ideas status summarizes each note's entries: reference, effective de
   assert.doesNotMatch(r.out, /Facets|snapshot/, "no entry's text, no snapshot");
 });
 
-test("nexus ideas status --full prints the whole JSON, every snapshot included", () => {
+test("nexus ideas status --full prints the whole JSON, every snapshot included", async () => {
   const { run } = setup();
-  const r = run("--full");
+  const r = await run("--full");
   assert.ok(r.ok, r.out);
   const body = JSON.parse(r.out) as IdeaStatusesResponse;
   assert.equal(body.entries.length, 3);
@@ -62,19 +60,19 @@ test("nexus ideas status --full prints the whole JSON, every snapshot included",
   assert.equal(body.history[0]!.reason, "User dropped it");
 });
 
-test("nexus ideas status <ref> narrows the JSON to one entry, or to a note; an unknown date lists the note's dates", () => {
+test("nexus ideas status <ref> narrows the JSON to one entry, or to a note; an unknown date lists the note's dates", async () => {
   const { run } = setup();
-  const one = run("plan.md#2026-11-16");
+  const one = await run("plan.md#2026-11-16");
   assert.ok(one.ok, one.out);
   const body = JSON.parse(one.out) as IdeaStatusesResponse;
   assert.deepEqual(body.entries.map((e) => [e.ref, e.disposition]), [["docs/ideas/plan.md#2026-11-16", "dropped"]]);
   assert.deepEqual(body.history.map((h) => h.ref), ["docs/ideas/plan.md#2026-11-16"]);
-  const note = JSON.parse(run("docs/ideas/tags.md").out) as IdeaStatusesResponse;
+  const note = JSON.parse((await run("docs/ideas/tags.md")).out) as IdeaStatusesResponse;
   assert.deepEqual(note.entries.map((e) => e.ref), ["docs/ideas/tags.md#2026-11-14", "docs/ideas/tags.md#2026-11-15"]);
   assert.deepEqual(note.history, [], "another note's actions are left out");
-  const unknown = run("tags.md#2026-11-30");
+  const unknown = await run("tags.md#2026-11-30");
   assert.ok(!unknown.ok);
   assert.match(unknown.out, /docs\/ideas\/tags\.md has no Decided entry #2026-11-30 \(its dates: 2026-11-14, 2026-11-15\)/);
-  assert.match(run("none.md").out, /no note docs\/ideas\/none\.md with Decided entries/);
-  assert.match(run("tags.md", "--full").out, /either a reference or --full/);
+  assert.match((await run("none.md")).out, /no note docs\/ideas\/none\.md with Decided entries/);
+  assert.match((await run("tags.md", "--full")).out, /either a reference or --full/);
 });

@@ -10,15 +10,20 @@
 //
 // Each file runs as `node --test <file>` with the spec reporter. At the first failing test the run is stopped (its
 // own process and what it started), the failure is shown and the exit code is 1; when all pass, 0. The environment
-// of a Nexus session (NEXUS_HANDOVER, NEXUS_DIR, NEXUS_SESSION) is cleared, as the test helpers expect.
+// of a Nexus session (NEXUS_HANDOVER, NEXUS_DIR, NEXUS_SESSION) is cleared, as the test helpers expect. The compile
+// cache is on (NODE_COMPILE_CACHE, as in npm test).
 import { spawn, spawnSync } from "node:child_process";
 import { parseArgs } from "node:util";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const { values: o, positionals: files } = parseArgs({ allowPositionals: true, options: { pattern: { type: "string" }, import: { type: "string" } } });
 if (!files.length) { console.error("usage: npm run test:files -- <test file>... [--pattern TEXT]"); process.exit(2); }
 const MODEL_READS = new URL("../apps/server/test/model-reads.ts", import.meta.url).href;
 const env = { ...process.env };
 delete env.NEXUS_HANDOVER; delete env.NEXUS_DIR; delete env.NEXUS_SESSION;
+// The compile cache for the files and every process they start (queue TI2): the one the nexus CLI uses by itself.
+env.NODE_COMPILE_CACHE ||= join(tmpdir(), "node-compile-cache");
 
 /** Ends a run and everything it started (only this script's own child, by its pid). */
 function stop(child) {

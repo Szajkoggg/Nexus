@@ -4,8 +4,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, loadProjectState, updateSettings } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
@@ -14,11 +13,8 @@ import { CodexSession, webSearchText } from "../src/codex.ts";
 import type { AgentEvents, AgentProcess } from "../src/agent.ts";
 import type { AgentHostOptions } from "../src/agent-host.ts";
 import { longReply } from "./fake-behaviour.ts";
-import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { inProcessCodex, inProcessRuntime } from "./in-process-runtime.ts";
 
 function setup(notes?: string, host: AgentHostOptions = {}) {
   const root = mkdtempSync(join(tmpdir(), "nexus-conv-"));
@@ -27,9 +23,9 @@ function setup(notes?: string, host: AgentHostOptions = {}) {
   delete process.env.FAKE_LOG;
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   if (notes) updateSettings(store, { conversations: { notes_dir: notes } });
-  const engine = new Engine(store, () => {});
-  const orchestrator = new Orchestrator(store, engine, () => {});
-  const conversations = new Conversations(store, orchestrator, () => {}, host);
+  const engine = new Engine(store, () => {}, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  const orchestrator = new Orchestrator(store, engine, () => {}, {}, { spawn: inProcessRuntime() });
+  const conversations = new Conversations(store, orchestrator, () => {}, { spawn: inProcessRuntime(), ...host });
   const args = () => (existsSync(process.env.FAKE_ARGS!) ? readFileSync(process.env.FAKE_ARGS!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, any>) : []);
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms);
   const stop = () => { conversations.shutdown(); orchestrator.shutdown(); engine.shutdown(); };
@@ -155,8 +151,8 @@ test("a turn's end that comes after the shutdown arms no idle timer: a stopped N
     kill(): void { this.state = "exited"; }
   }
   const stands: Stand[] = [];
-  const engine = new Engine(store, () => {});
-  const orchestrator = new Orchestrator(store, engine, () => {});
+  const engine = new Engine(store, () => {}, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  const orchestrator = new Orchestrator(store, engine, () => {}, {}, { spawn: inProcessRuntime() });
   const conversations = new Conversations(store, orchestrator, () => {}, { spawn: () => { const p = new Stand(); stands.push(p); return p; } });
   const timeouts = () => process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
   try {
@@ -267,7 +263,7 @@ test("a Codex thread's config overrides go beside its writable roots, not instea
   const root = mkdtempSync(join(tmpdir(), "nexus-conv-roots-"));
   process.env.FAKE_ARGS = join(root, "args.log");
   const extra = join(root, "extra");
-  const s = new CodexSession({ cwd: root, env: {}, sandbox: "workspace-write", approvalPolicy: "never", writableRoots: [extra], config: { web_search: "cached" }, withoutUserTools: true });
+  const s = new CodexSession({ cwd: root, env: {}, sandbox: "workspace-write", approvalPolicy: "never", writableRoots: [extra], config: { web_search: "cached" }, withoutUserTools: true, spawnChild: inProcessCodex });
   try {
     s.send("Hello");
     await waitUntil("the turn", () => existsSync(process.env.FAKE_ARGS!) && readFileSync(process.env.FAKE_ARGS!, "utf8").includes("turn/start"), WAIT_MS);

@@ -9,19 +9,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ActionError, ProjectStore, readTurns, type ChatEntry } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Conversations } from "../src/conversations.ts";
 import { STOPPED } from "../src/chats.ts";
 import { PARTIAL } from "./fake-behaviour.ts";
-import { WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 process.env.FAKE_CHAT_SLOW_MS = "8000";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -40,9 +37,9 @@ function setup() {
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_LOG = join(root, "fake.log");
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
-  const engine = new Engine(store, () => {});
-  const orchestrator = new Orchestrator(store, engine, () => {});
-  const conversations = new Conversations(store, orchestrator, () => {});
+  const engine = new Engine(store, () => {}, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  const orchestrator = new Orchestrator(store, engine, () => {}, {}, { spawn: inProcessRuntime() });
+  const conversations = new Conversations(store, orchestrator, () => {}, { spawn: inProcessRuntime() });
   const log = () => readLog(join(root, "fake.log"));
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; fake log: ${JSON.stringify(log().slice(-6))}`);
   const close = () => { conversations.shutdown(); orchestrator.shutdown(); engine.shutdown(); };

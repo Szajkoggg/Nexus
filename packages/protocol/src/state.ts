@@ -14,7 +14,7 @@ import { trainPlace, trainsOf, type TrainPlace } from "./train.ts";
 import { stepTags, tagProposalText, type StepTags } from "./tags.ts";
 import { CHECK_UNIT, checkMetric, metricDef, metricWarning, type MetricValue } from "./metrics.ts";
 import { recurringViews, scheduleText, type RecurringView } from "./recurring.ts";
-import { readTemplates } from "./templates.ts";
+import { readTemplates, templateDirs } from "./templates.ts";
 
 import type { CheckView } from "./steps.ts";
 interface AnswerView { id: string; text: string; at: string; escalate?: boolean; continue?: boolean; session: string; by: "orchestrator" | "user" }
@@ -311,7 +311,7 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
   countRebuild();
   const warnings: string[] = [];
   const project = store.readProject();
-  const away = readAway();
+  const away = readAway(store.env);
   let tags: TagsFile;
   try { tags = store.readTags(); } catch (e) { warnings.push(`tags.yaml: ${(e as Error).message}`); tags = { protocol: 1, areas: [], activities: [], renames: [], proposals: [], decisions: [] }; }
   let metrics: MetricsFile;
@@ -570,7 +570,7 @@ function recurringOf(store: ProjectStore, project: ProjectFile, warnings: string
     try { const r = store.readRecurring(id); if (r) files.push(r); } catch (e) { warnings.push(`recurring ${id}: ${(e as Error).message}`); }
   }
   if (!files.length) return [];
-  return recurringViews(files, readTemplates(project.root), [...queues.values()], Date.now());
+  return recurringViews(files, readTemplates(project.root, templateDirs(store.env)), [...queues.values()], Date.now());
 }
 
 /** What the recurring queues ask of the user: a standing approval, or a time that passed without a run. */

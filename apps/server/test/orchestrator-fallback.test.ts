@@ -3,16 +3,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, applyDraft, approveQueue, loadProjectState, updateSettings, writeUsage } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { until, LONGER } from "./wait.ts";
+import { QUICK_ENGINE, until, LONGER } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 type Runtime = "claude" | "codex";
 const HOUR = 3_600_000;
 const key = (runtime: Runtime) => runtime === "claude" ? "five_hour" : "codex_5h";
@@ -29,8 +26,8 @@ function setup(primary: Runtime, fallback?: Runtime, o: { lateTurnMs?: number } 
   updateSettings(store, { orchestrator: { runtime: primary, model: "primary-model", effort: "high",
     fallback: fallback ? { runtime: fallback, model: "backup-model", effort: "low" } : null } });
   let clock = Date.now();
-  const engine = new Engine(store, () => {});
-  let orchestrator = new Orchestrator(store, engine, tick, {}, { nowMs: () => clock, lateTurnMs: o.lateTurnMs });
+  const engine = new Engine(store, () => {}, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  let orchestrator = new Orchestrator(store, engine, tick, {}, { spawn: inProcessRuntime(), nowMs: () => clock, lateTurnMs: o.lateTurnMs });
   function tick() { orchestrator.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 100);
   const log = (): { text: string; session: string }[] => existsSync(join(root, "fake.log"))
@@ -58,7 +55,7 @@ function setup(primary: Runtime, fallback?: Runtime, o: { lateTurnMs?: number } 
     restart: async (resume = false) => {
       orchestrator.shutdown();
       await until("the old process ended", () => !orchestrator.alive());
-      orchestrator = new Orchestrator(store, engine, tick, {}, { nowMs: () => clock, lateTurnMs: o.lateTurnMs });
+      orchestrator = new Orchestrator(store, engine, tick, {}, { spawn: inProcessRuntime(), nowMs: () => clock, lateTurnMs: o.lateTurnMs });
       if (resume) orchestrator.resumeCutOff();
       tick();
     },

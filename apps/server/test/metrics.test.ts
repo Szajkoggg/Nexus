@@ -7,14 +7,13 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { LONGER, WAIT_MS, until as waitUntil } from "./wait.ts";
+import { QUICK_ENGINE, LONGER, WAIT_MS, until as waitUntil } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
 
 function setup() {
@@ -36,8 +35,8 @@ function setup() {
   });
   approveQueue(store, "Q");
   const tick = () => { routeAnswers(store); const s = loadProjectState(store); orchestrator.onChange(s); engine.onChange(s); };
-  const engine: Engine = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100 });
-  const orchestrator = new Orchestrator(store, engine, tick);
+  const engine: Engine = new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100 });
+  const orchestrator = new Orchestrator(store, engine, tick, {}, { spawn: inProcessRuntime() });
   const timer = setInterval(tick, 150);
   const chat = () => orchestrator.view().chat.map((c) => c.text);
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;

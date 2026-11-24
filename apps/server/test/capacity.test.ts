@@ -7,17 +7,15 @@
 // ends only the processes it started.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { constants, getPriority, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, readCapacity } from "@nexus/protocol";
 import { processAlive } from "@nexus/protocol/full-test-lock";
 import { Capacity, type Grant, type HeavyProcess } from "../src/capacity.ts";
 import { lowerOwnedProcesses } from "../src/worker-process.ts";
+import { cliOut } from "../../../packages/cli/test/run-cli.ts";
 
-const CLI = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/cli/bin/nexus.js");
 process.env.NEXUS_HOME = mkdtempSync(join(tmpdir(), "nexus-capacity-home-"));
 const lockFile = () => join(mkdtempSync(join(tmpdir(), "nexus-capacity-lock-")), "full-test.lock");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -46,12 +44,12 @@ async function until(what: string, check: () => boolean, ms = 30_000): Promise<v
   for (const end = Date.now() + ms; !check(); await sleep(20)) if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
 }
 
-function status(): string {
+async function status(): Promise<string> {
   const root = mkdtempSync(join(tmpdir(), "nexus-capacity-project-"));
   const store = ProjectStore.init(root, { id: "b", name: "B", root });
   const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: store.dir };
   delete env.NEXUS_SESSION;
-  return execFileSync(process.execPath, [CLI, "status"], { env, encoding: "utf8" });
+  return await cliOut(["status"], { env });
 }
 
 test("two projects' heavy operations asked for at once run one after the other; the second's wait is shown", async () => {
@@ -66,7 +64,7 @@ test("two projects' heavy operations asked for at once run one after the other; 
     assert.deepEqual(file.held.map((r) => `${r.project} ${r.queue}/${r.step}`), ["a EC/EC3"]);
     assert.deepEqual(file.waiting.map((r) => `${r.project} ${r.queue}/${r.step}`), ["b W/W5"]);
     assert.equal(file.slots.heavy, 1);
-    const shown = status();
+    const shown = await status();
     assert.match(shown, /^machine .+ \(one heavy operation at a time, across projects\):$/m);
     assert.match(shown, /^ {2}running: checks of EC\/EC3 \(project a\), since \d\d:\d\d$/m);
     assert.match(shown, /^ {2}waiting: checks of W\/W5 \(project b\), since \d\d:\d\d, 1st in line, behind checks of EC\/EC3 \(project a\)$/m);
@@ -82,7 +80,7 @@ test("two projects' heavy operations asked for at once run one after the other; 
     assert.deepEqual(readCapacity()!.waiting, []);
     second.end();
     await until("the slot to be free", () => readCapacity()!.held.length === 0);
-    assert.equal(status().includes("machine "), false, "nothing to show once nothing holds or waits");
+    assert.equal((await status()).includes("machine "), false, "nothing to show once nothing holds or waits");
   } finally { capacity.shutdown(); }
 });
 
@@ -147,7 +145,7 @@ test("a full test run outside Nexus keeps every request waiting, shown as what o
     assert.equal(await settledWithin(a.granted, 1000), false, "not granted beside the run outside Nexus");
     const file = readCapacity()!;
     assert.deepEqual(file.outside, { cwd: "C:/by-hand", pid: process.pid, since });
-    const shown = status();
+    const shown = await status();
     assert.match(shown, /^ {2}waiting: checks of EC\/EC3 \(project a\), since \d\d:\d\d, 1st in line, behind a full test run outside Nexus$/m);
     assert.match(shown, new RegExp(`^ {2}outside Nexus: a full test run in C:/by-hand \\(pid ${process.pid}, since .+\\); nothing is granted until it ends$`, "m"));
 

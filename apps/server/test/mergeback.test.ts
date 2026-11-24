@@ -5,15 +5,14 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, newId, now } from "@nexus/protocol";
 import { recordBase } from "../src/gitinfo.ts";
 import { cleanUp, mergeBack, worktreeLeft } from "../src/mergeback.ts";
+import { cliOut } from "../../../packages/cli/test/run-cli.ts";
 
 const G = ["-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"];
 const git = (cwd: string, ...args: string[]) => execFileSync("git", [...G, ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-const CLI = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/cli/bin/nexus.js");
 
 function setup(o: { done?: boolean } = {}) {
   const base = mkdtempSync(join(tmpdir(), "nexus-merge-"));
@@ -117,13 +116,13 @@ test("only a finished worktree queue; cleanup refuses uncommitted changes and an
   assert.match(cleanUp(x.store, "Q"), /cleaned up already/);
 });
 
-test("the orchestrator and workers have no way to merge or clean up", () => {
+test("the orchestrator and workers have no way to merge or clean up", async () => {
   const x = setup();
   for (const role of ["orchestrator", "worker"] as const) {
     const id = `s-${role}`;
     x.store.writeSession({ protocol: 1, id, project: "p", role, runtime: "external", cwd: x.root, launched_by: "external", created_at: now() });
     for (const cmd of [["queue", "merge", "Q"], ["queue", "cleanup", "Q"], ["merge", "Q"], ["cleanup", "Q"]]) {
-      assert.throws(() => execFileSync(process.execPath, [CLI, ...cmd], { env: { ...process.env, NEXUS_SESSION: id, NEXUS_DIR: x.store.dir }, stdio: "pipe" }), /unknown command|usage|nexus/i, `${role}: nexus ${cmd.join(" ")}`);
+      await assert.rejects(async () => cliOut([...cmd], { env: { ...process.env, NEXUS_SESSION: id, NEXUS_DIR: x.store.dir } }), /unknown command|usage|nexus/i, `${role}: nexus ${cmd.join(" ")}`);
     }
   }
   assert.equal(x.store.readGit("Q")!.merged, undefined);

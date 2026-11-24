@@ -7,8 +7,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   ProjectStore, approveQueue, loadProjectState, newId, now, planLines, routeAnswers, updateSettings, type Event, type GitFile, type QueueFile, type SessionFile, type StepDef,
 } from "@nexus/protocol";
@@ -19,10 +18,7 @@ import { judgePlan } from "../src/deploy-plan.ts";
 import { Engine } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { LONGER, QUICK_ENGINE, holdWork, sleep, until as waitUntil } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 /** The system's temporary folder, read once: each project sets TEMP to a folder of its own (the report's folder). */
 const TMP = tmpdir();
@@ -517,7 +513,7 @@ function wired(steps: { W: StepDef[]; M?: StepDef[]; B?: StepDef[] }, o: { merge
     merger!.onChange(s);
     engine.onChange(loadProjectState(x.store));
   };
-  const engine: Engine = new Engine(x.store, tick, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, boundary: (q, step, state) => merger!.atBoundary(q, step, state) });
+  const engine: Engine = new Engine(x.store, tick, { spawn: inProcessRuntime(), retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, boundary: (q, step, state) => merger!.atBoundary(q, step, state) });
   merger = new Merger(x.store, { start: (q) => void engine.start(q, { runtime: "claude" }), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining, serverRoot: join(x.base, "elsewhere"), poke: tick, pollMs: 200 });
   const until = (what: string, pred: () => boolean, ms: number = LONGER.processes) =>
     waitUntil(what, pred, ms, () => ["W", ...(steps.B ? ["B"] : [])].map((id) => `; ${id} ${JSON.stringify(x.queue(id).run)} ${x.queue(id).steps.map((s) => `${s.id}=${s.status}`).join(" ")}; git ${JSON.stringify(x.store.readGit(id)?.merge)}`).join(""));

@@ -8,15 +8,11 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, onWrite, routeAnswers, sendMessage, type StepDef } from "@nexus/protocol";
 import { Engine, type Clock } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
-
-const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER, holdWork } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 interface Received { text: string; priority: string | null; busy: boolean; session: string | null }
 
@@ -41,7 +37,7 @@ function setup(behaviours: string[], opts: { fill: number; window?: number; care
     stop_conditions: [], checks: [], steps, approvals: [], withdrawals: [], history: [],
   });
   approveQueue(store, "Q");
-  const make = (): Engine => new Engine(store, () => { routeAnswers(store); if (!opts.hold) acceptReviews(store); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...(opts.clock ? { clock: opts.clock } : {}), lateTurnMs: opts.lateTurnMs });
+  const make = (): Engine => new Engine(store, () => { routeAnswers(store); if (!opts.hold) acceptReviews(store); engine.onChange(loadProjectState(store)); }, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100, ...(opts.clock ? { clock: opts.clock } : {}), lateTurnMs: opts.lateTurnMs });
   let engine = make();
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const received = (): Received[] => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").trim().split("\n").map((l) => JSON.parse(l) as Received) : []);

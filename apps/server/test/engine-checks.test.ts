@@ -13,10 +13,15 @@ import { ProjectStore, applyDraft, approveQueue, loadProjectState, onWrite, read
 import { Orchestrator } from "../src/orchestrator.ts";
 import { Capacity } from "../src/capacity.ts";
 import { failedTests } from "../src/check-runs.ts";
+import { fileURLToPath } from "node:url";
 import { Engine, type EngineOptions } from "../src/engine.ts";
-import { FAST, restart, setup } from "./engine-setup.ts";
+import { REAL_PROCESSES, restart, setup } from "./engine-setup.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { LONGER, until as waitUntil } from "./wait.ts";
+
+// The fake runtimes as processes of their own (scripts/real-process-tests.ts).
+process.env.NEXUS_CLAUDE = fileURLToPath(new URL("./fake-claude.ts", import.meta.url));
+process.env.NEXUS_CODEX = fileURLToPath(new URL("./fake-codex.ts", import.meta.url));
 
 process.env.NEXUS_HOME ??= mkdtempSync(join(tmpdir(), "nexus-checks-home-"));
 const lockFile = () => join(mkdtempSync(join(tmpdir(), "nexus-checks-lock-")), "full-test.lock");
@@ -66,7 +71,7 @@ type Setup = ReturnType<typeof setup>;
  */
 function withChecks(behaviours: string[], names: string[], options: EngineOptions = {}, o: { worktree?: string } = {}) {
   const cap = options.capacity ?? capacity();
-  const x = setup(behaviours, { ...FAST, capacity: cap, ...options });
+  const x = setup(behaviours, { ...REAL_PROCESSES, capacity: cap, ...options });
   const s = standIns(x.store.readProject().root);
   const q = x.store.readQueue("Q");
   if (names.length || o.worktree) {
@@ -230,7 +235,7 @@ test("a checkout gone before the checks run: the run halts with \"no checkout\",
     x.engine.shutdown(); // the server stops; its check ends with it, and the worktree's folder goes meanwhile
     x.cap.shutdown();
     rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
-    next = restart(x.store, { ...FAST, capacity: capacity(true) });
+    next = restart(x.store, { ...REAL_PROCESSES, capacity: capacity(true) });
     next.resume("Q");
     await x.until("the run to halt", () => x.queue().run?.state === "halted", LONGER.run);
     haltedUnrunnable(x, /no checkout: the queue's checkout .*nexus-checks-wt-.* does not exist/);
@@ -317,7 +322,7 @@ test("a restart while a check runs: the check runs again when the run goes on", 
     await x.until("the check to run", () => x.sets()[0]?.state === "running" && x.runs().length === 1, LONGER.run);
     x.engine.shutdown(); // the server stops: its check ends with it
     x.cap.shutdown();
-    next = restart(x.store, { ...FAST, capacity: capacity(true) });
+    next = restart(x.store, { ...REAL_PROCESSES, capacity: capacity(true) });
     assert.equal(x.sets()[0]!.state, "interrupted", "what the old server ran is interrupted, not failed");
     assert.equal(x.queue().steps[0]!.status, "checking");
     next.resume("Q");
@@ -340,7 +345,7 @@ test("an update's drain waits for a running check a while, then ends it; it runs
     assert.equal(x.sets()[0]!.checks[0]!.runs[0]!.interrupted, true);
     assert.equal(x.queue().run!.resume_after_restart, true);
     x.engine.shutdown();
-    next = restart(x.store, { ...FAST, capacity: capacity(true) }); // the successor resumes the held run
+    next = restart(x.store, { ...REAL_PROCESSES, capacity: capacity(true) }); // the successor resumes the held run
     await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
     assert.deepEqual(x.runs(), ["unit", "unit"]);
   } finally { x.engine.shutdown(); next?.shutdown(); x.cap.shutdown(); }
@@ -385,7 +390,7 @@ function withOrchestrator(queues: string[]) {
   // The server: its capacity, engine and orchestrator; `restart` is the next server on the same files.
   const serve = () => {
     cap = capacity();
-    engine = new Engine(store, () => tick(), { ...FAST, capacity: cap });
+    engine = new Engine(store, () => tick(), { ...REAL_PROCESSES, capacity: cap });
     orchestrator = new Orchestrator(store, engine, () => tick());
   };
   serve();

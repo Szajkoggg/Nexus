@@ -16,12 +16,13 @@ import { Engine } from "../src/engine.ts";
 import { cleanUp } from "../src/mergeback.ts";
 import { spawnServer } from "./helpers.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { serverUp, WAIT_MS, POLL_MS, LONGER, sleep } from "./wait.ts";
+import { QUICK_ENGINE, serverUp, WAIT_MS, POLL_MS, LONGER, sleep } from "./wait.ts";
+import { cliOut } from "../../../packages/cli/test/run-cli.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
 process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
-const CLI = join(here, "../../../packages/cli/bin/nexus.js");
 
 function setup() {
   const base = mkdtempSync(join(tmpdir(), "nexus-review-files-"));
@@ -47,7 +48,7 @@ function setup() {
 test("a protected worker's review files are copied into the queue's folder; the worktree stays clean and is cleaned up", async () => {
   const { temp, root, store } = setup();
   assert.equal(store.readProject().defaults.protect_nexus, true);
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); });
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); engine.onChange(loadProjectState(store)); }, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   try {
     engine.start("Q", { runtime: "claude" });
@@ -100,7 +101,7 @@ test("the dashboard serves a copy in the queue's folder and material added befor
   st.appendEvent({ v: 1, id: newId(), at: now(), session: "w", type: "review.added", queue: "Q", step: "R1", items: [{ path: normPath(join(root, "tmp", "review", "old.md")), label: "old", kind: "doc" }] });
   // Added now: copied by the CLI.
   writeFileSync(join(outside, "new.md"), "# New material\n");
-  execFileSync(process.execPath, [CLI, "review", "add", "R1", join(outside, "new.md")], { cwd: root, env: { ...process.env, NEXUS_SESSION: "w", NEXUS_DIR: st.dir }, stdio: "pipe" });
+  await cliOut(["review", "add", "R1", join(outside, "new.md")], { cwd: root, env: { ...process.env, NEXUS_SESSION: "w", NEXUS_DIR: st.dir } });
   const items = loadProjectState(st).queues[0]!.steps[0]!.review_items;
   assert.deepEqual(items.map((x) => x.path), [normPath(join(root, "tmp", "review", "old.md")), normPath(join(st.reviewDir("Q", "R1"), "new.md"))]);
 

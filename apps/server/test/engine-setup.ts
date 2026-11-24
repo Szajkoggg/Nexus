@@ -1,24 +1,29 @@
 // The shared setup of the engine tests (engine*.test.ts), against the fake runtimes (test/fake-claude.ts,
 // test/fake-codex.ts): no model, no tokens. Split from engine.test.ts so its parts run side by side (queue TS2).
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers, type StepDef } from "@nexus/protocol";
 import { Engine, type EngineOptions } from "../src/engine.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
+import { tempDir } from "./temp-dirs.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil } from "./wait.ts";
 
 export const here = dirname(fileURLToPath(import.meta.url));
-process.env.NEXUS_CLAUDE = join(here, "fake-claude.ts");
-process.env.NEXUS_CODEX = join(here, "fake-codex.ts");
 export const WINDOW = { claude: 1000, codex: 2000 } as const;
 
-/** Short retries, usage margins and the engine's own waits, so the tests wait milliseconds where the server waits minutes. */
-export const FAST: EngineOptions = { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE };
+/**
+ * Short retries, usage margins and the engine's own waits, so the tests wait milliseconds where the server waits
+ * minutes; the fake runtimes as processes of their own (for the tests of real processes, scripts/real-process-tests.ts).
+ */
+export const REAL_PROCESSES: EngineOptions = { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE };
+
+/** REAL_PROCESSES with the fake runtimes in the test's own process (in-process-runtime.ts): every other engine test. */
+export const FAST: EngineOptions = { ...REAL_PROCESSES, spawn: inProcessRuntime() };
 
 export function setup(behaviours: string[], options: EngineOptions = FAST) {
-  const root = mkdtempSync(join(tmpdir(), "nexus-engine-"));
+  const root = tempDir("nexus-engine-");
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_LOG = join(root, "fake.log");
   const store = ProjectStore.init(root, { id: "p", name: "P", root });

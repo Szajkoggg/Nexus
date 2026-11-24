@@ -8,6 +8,7 @@
 // test opens a gate (fake-behaviour.ts, exitHeld), so the window is open when the turn ends whatever the machine's load.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -18,7 +19,11 @@ import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { FAST, activityOf, setup } from "./engine-setup.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { LONGER, WAIT_MS, sleep, until as waitUntil } from "./wait.ts";
+import { QUICK_ENGINE, LONGER, WAIT_MS, sleep, until as waitUntil } from "./wait.ts";
+
+// The fake runtimes as processes of their own (scripts/real-process-tests.ts).
+process.env.NEXUS_CLAUDE = fileURLToPath(new URL("./fake-claude.ts", import.meta.url));
+process.env.NEXUS_CODEX = fileURLToPath(new URL("./fake-codex.ts", import.meta.url));
 
 /** Long past every wait here: the window ends when the fake's held stdout does, not by the adapter's limit. */
 const DRAIN_MS = 60_000;
@@ -112,7 +117,7 @@ test("codex orchestrator: a message in the drain window starts a fresh process t
   const p = store.readProject();
   store.writeProject({ ...p, orchestrator: { notify: true, session: null, ...p.orchestrator, runtime: "codex" } });
   const made: CodexSession[] = [];
-  const engine: Engine = new Engine(store, () => tick());
+  const engine: Engine = new Engine(store, () => tick(), QUICK_ENGINE);
   const orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn: codexMaker(made) });
   // Stands in for the server's file watcher.
   function tick() { routeAnswers(store); acceptReviews(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }

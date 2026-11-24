@@ -296,8 +296,13 @@ process's nice value instead. An engine in a test process leaves it off. Subsequ
 | Helper to server | `X <code>` | Runtime exited and descendants were cleaned |
 | Helper to server | `F <base64>` | Cleanup/exit failure text; pending cleanup rejects and the worker is ended |
 
-Helper startup errors go to its own stderr and fail the launch. An EOF on its control input ends the job. The helper
-allows ten seconds for repeated descendant enumeration (each termination waits at most two seconds); the server
+Helper startup errors go to its own stderr and fail the launch. The helper loads its compiled C# from a machine-wide
+cache, `%LOCALAPPDATA%\Nexus\job-host\worker-job-<hash>.dll` (or the folder `NEXUS_JOB_CACHE` names), compiling and
+storing it when it is missing; when the cache fails it compiles in memory and writes the reason to its stderr and to
+`worker-job.log` in that folder (docs/design/engine.md, "Worker process ownership on Windows (queue PT)").
+`NEXUS_JOB_CACHE_TRACE=1` makes it also tell on stderr whether it loaded (`cached`), stored (`stored`) or compiled in
+memory (`fallback`); it removes the variable before the runtime starts. An EOF on its control input ends the job. The
+helper allows ten seconds for repeated descendant enumeration (each termination waits at most two seconds); the server
 allows fifteen seconds for a cleanup acknowledgement and otherwise halts the run and requests termination. A kill
 not completed in fifteen seconds ends the helper through Node's child handle, closing the job. Only handles whose
 membership in this private job was verified may be terminated, with no name/command-line matching. The helper

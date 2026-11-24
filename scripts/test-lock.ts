@@ -16,6 +16,9 @@
 //   for; a hung holder or a reused pid is handled by the staleness above, not by a time after which waiting gives up.
 //   The Nexus server's capacity coordinator reads the same lock: packages/protocol/src/full-test-lock.ts holds the
 //   rules both go by.
+// - Once it holds the lock, it times how long node, PowerShell, Add-Type and git take to start, and when the run ends
+//   appends them with the run's time to nexus-test-machine.jsonl in the temporary folder and prints them (queue TI4,
+//   scripts/machine-probe.ts): whether a later slowdown is the machine's or the code's.
 // - The lock is removed when the run ends (only if it is still this run's).
 // - The run ends with whoever started it (queue TF): a watchdog process watches the run's starter (this script's
 //   parent, and the shells and npm above it) and this script. The watchdog owns the runner. A known starter gone or
@@ -27,11 +30,13 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { openSync, unlinkSync, writeFileSync, writeSync, closeSync, futimesSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   fullTestLockFile, fullTestStale, fullTestStaleMs, processAlive as alive, readFullTestHolder as readHolder,
   type FullTestHolder as Holder,
 } from "@nexus/protocol/full-test-lock";
+import { machineLogFile, probeMachine, recordMachine } from "./machine-probe.ts";
 
 export { alive };
 
@@ -53,6 +58,16 @@ interface LockOptions {
   lease?: boolean;
   /** Ends the wait (the run's starter is gone): acquire resolves with undefined, and nothing runs. */
   signal?: AbortSignal;
+}
+
+/**
+ * The run's environment with the compile cache on (queue TI2): the test files, and every node process they start
+ * (servers, fake runtimes, the nexus CLI), read the sources compiled from the system's temporary folder rather than
+ * compiling them again; a full run took 666 s with it against 815 to 865 s without (TI1). The folder is the one the
+ * nexus CLI uses by itself; a NODE_COMPILE_CACHE already set is kept.
+ */
+function withCompileCache(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return { ...env, NODE_COMPILE_CACHE: env.NODE_COMPILE_CACHE || join(tmpdir(), "node-compile-cache") };
 }
 
 /** The lock taken: `release()` removes it, if it is still this run's. */
@@ -278,7 +293,7 @@ function watchdog(wrapper: number, parent: number, file: string, pollMs = 1000):
     if (m.signal) { child?.kill(m.signal); return; }
     if (!m.args || child || ending) return;
     token = m.token;
-    child = spawn(process.execPath, m.args, { stdio: "inherit", windowsHide: true, detached: process.platform !== "win32" });
+    child = spawn(process.execPath, m.args, { env: withCompileCache(process.env), stdio: "inherit", windowsHide: true, detached: process.platform !== "win32" });
     child.on("error", () => finish(1));
     child.on("exit", (code, signal) => finish(ending ? 1 : code ?? (signal ? 1 : 0)));
   });
@@ -332,10 +347,16 @@ async function runLocked(args: string[], o: LockOptions = {}): Promise<number> {
     const result = await Promise.race([acquired.then((value) => ({ lock: value })), ended.then((code) => ({ code }))]);
     if ("code" in result) { void acquired.then((value) => value?.release()); return result.code; }
     lock = result.lock;
+    // The machine's state, under the lock so that no other full run disturbs it (TI4, scripts/machine-probe.ts).
+    const log = lock ? machineLogFile() : undefined;
+    const probe = log ? await probeMachine() : undefined;
     // Never without the lock: undefined only when the wait was ended, and then nothing runs.
     if (!lock || !guard.connected) { send({ stop: true }); return await ended; }
+    const at = new Date().toISOString(), start = performance.now();
     send({ args, token: lock.token });
-    return await ended;
+    const code = await ended;
+    if (log && probe) recordMachine(log, { at, ...probe, run_s: Math.round((performance.now() - start) / 1000) }, say);
+    return code;
   } finally {
     lock?.release();
     process.off("disconnect", parentGone); process.off("SIGINT", onInt); process.off("SIGTERM", onTerm);

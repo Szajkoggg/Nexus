@@ -6,13 +6,12 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { ProjectStore, applyDraft, approveQueue, confirmProvisional, loadProjectState, newId, routeAnswers } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 const G = ["-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"];
 const git = (cwd: string, ...args: string[]) => execFileSync("git", [...G, ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
@@ -48,7 +47,7 @@ function setup(o: { push?: boolean; remote?: boolean; steps?: number; goal?: str
   }));
   store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "proposed", review_level: 1, stop_conditions: [], checks: [], steps, approvals: [], history: [] });
   approveQueue(store, "Q");
-  const engine: Engine = new Engine(store, () => { routeAnswers(store); engine.onChange(loadProjectState(store)); }, QUICK_ENGINE);
+  const engine: Engine = new Engine(store, () => { routeAnswers(store); engine.onChange(loadProjectState(store)); }, { spawn: inProcessRuntime(), ...QUICK_ENGINE });
   const timer = setInterval(() => engine.onChange(loadProjectState(store)), 150);
   const queue = () => loadProjectState(store).queues.find((q) => q.id === "Q")!;
   const step = (id: string) => queue().steps.find((s) => s.id === id)!;

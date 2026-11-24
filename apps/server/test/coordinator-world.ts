@@ -1,10 +1,8 @@
 // Projects whose engines share one coordinator, as the server's do, against the fake runtimes: the world of the tests
 // of the checkout rule and the limits on queues running at once (coordinator.test.ts, limit-hold.test.ts).
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   ProjectStore, approveQueue, loadProjectState, newId, routeAnswers, updateGlobalSettings, updateSettings,
   type Event, type StepDef,
@@ -12,9 +10,10 @@ import {
 import { Engine, type Clock, type EngineOptions } from "../src/engine.ts";
 import { Coordinator } from "../src/coordinator.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { WAIT_MS, until as waitUntil } from "./wait.ts";
+import { tempDir } from "./temp-dirs.ts";
+import { QUICK_ENGINE, WAIT_MS, until as waitUntil } from "./wait.ts";
+import { inProcessRuntime } from "./in-process-runtime.ts";
 
-process.env.NEXUS_CLAUDE = join(dirname(fileURLToPath(import.meta.url)), "fake-claude.ts");
 // Queues in checkouts of their own (plain folders here, no git) end with the integration step, which is not these
 // files' subject: its fake reports it done.
 process.env.FAKE_INTEGRATE = "done";
@@ -36,7 +35,7 @@ export interface Received { text: string; session: string | null }
  * server's coordinator, it reads it from the global settings).
  */
 export function world(opts: { limit?: number; clock?: Clock; spawn?: EngineOptions["spawn"] } = {}) {
-  const base = mkdtempSync(join(tmpdir(), "nexus-coord-"));
+  const base = tempDir("nexus-coord-");
   process.env.NEXUS_HOME = join(base, "home");
   process.env.FAKE_LOG = join(base, "fake.log");
   updateGlobalSettings({ defaults: { max_running: opts.limit ?? 2 } });
@@ -72,7 +71,7 @@ export function world(opts: { limit?: number; clock?: Clock; spawn?: EngineOptio
     let engine: Engine | undefined;
     // Stands in for the server's file watcher.
     const tick = () => { routeAnswers(store); acceptReviews(store); engine?.onChange(loadProjectState(store)); };
-    engine = new Engine(store, tick, { retryBaseMs: 30, usageMarginMs: 100, coordinator, clock: opts.clock, spawn: opts.spawn });
+    engine = new Engine(store, tick, { ...QUICK_ENGINE, retryBaseMs: 30, usageMarginMs: 100, coordinator, clock: opts.clock, spawn: opts.spawn ?? inProcessRuntime() });
     ticks.push(tick);
     engines.push(engine);
     const queue = (q: string) => loadProjectState(store).queues.find((x) => x.id === q)!;
