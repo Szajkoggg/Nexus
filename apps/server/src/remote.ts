@@ -11,7 +11,7 @@ import { join } from "node:path";
 import type { IncomingMessage } from "node:http";
 import webpush from "web-push";
 import QRCode from "qrcode";
-import { attentionKey, knownTimeZone, nexusHome, normPath, notifySettingsOf, now, renameRetrying, parseNotifySettings, shouldNotify, writeJson, type AttentionItem, type NotificationKind, type NotifyKind, type NotifySettings } from "@nexus/protocol";
+import { attentionKey, knownTimeZone, nexusHome, normPath, notifySettingsOf, now, parseNotifySettings, renameRetrying, shouldNotify, writeJson, type AttentionItem, type NotificationKind, type NotifyKind, type NotifySettings } from "@nexus/protocol";
 
 const COOKIE = "nexus_auth";
 const authFile = () => join(nexusHome(), "auth.json");

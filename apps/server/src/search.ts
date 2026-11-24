@@ -88,8 +88,11 @@ export function searchProject(store: ProjectStore, q: SearchQuery): SearchResult
   // The kept hits' places: an answer's question, and the title of each hit's queue.
   const titles = new Map<string, string | undefined>();
   const titleOf = (queue: string) => {
-    // A queue without a readable queue.yaml has no title to show (an unreadable one was warned of above).
-    if (!titles.has(queue)) { try { titles.set(queue, store.hasQueue(queue) ? store.readQueue(queue).title : undefined); } catch { titles.set(queue, undefined); } }
+    if (!titles.has(queue)) {
+      let title: string | undefined;
+      try { if (store.hasQueue(queue)) title = store.readQueue(queue).title; } catch { /* unreadable: warned of above, no title */ }
+      titles.set(queue, title);
+    }
     return titles.get(queue);
   };
   for (const item of hits.items()) {

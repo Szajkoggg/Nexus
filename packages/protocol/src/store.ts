@@ -188,7 +188,7 @@ export function renameRetrying(from: string, to: string): void {
 // a warning with its path; nothing overwrites it: its writer sets it aside as <file>.corrupt first.
 
 /** A file that is there but cannot be read (it does not parse, its schema refuses it, or the system refuses it). */
-export class UnreadableFileError extends Error {
+class UnreadableFileError extends Error {
   readonly file: string;
   /** Its content is at fault (not a refusal of the system, such as a file another process holds). */
   readonly content: boolean;
