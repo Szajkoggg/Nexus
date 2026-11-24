@@ -583,8 +583,8 @@ export function firstUserWait(l: PlanLayout, queues: readonly ReviewQueue[], who
       path.add(id);
       for (const b of n.before) {
         if (b.done || !nodes.has(b.queue)) continue;
-        const s = startOf(b.queue, path), e = estimates?.[b.queue];
-        const end = s === undefined ? undefined : !e?.steps ? s : e.ms === undefined ? undefined : s + e.ms;
+        const s = startOf(b.queue, path), w = workOf(b.queue, estimates);
+        const end = s === undefined || w === undefined ? undefined : s + w;
         at = at === undefined || end === undefined ? undefined : Math.max(at, end);
       }
       path.delete(id);
