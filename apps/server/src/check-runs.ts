@@ -247,13 +247,13 @@ export class CheckRunner {
       // worker cannot fix the machine's install.
       if (!(await this.setupFirst(a, queue, step, done, cwd))) {
         if (a.stopped) { this.update(queue, step, done, (s) => { s.state = "interrupted"; s.ended_at = now(); }); return; }
-        const setup = checkSetOf(this.read(queue), step, done)!.setup!;
+        const setup = this.setOf(queue, step, done).setup!;
         const last = setup.runs.at(-1);
         const how = last?.timed_out ? "it ran into its time limit" : `exit code ${last?.exit_code ?? "none"}`;
         return this.cannotRun(queue, step, done, `the ${SETUP_NAME} (${setup.command}) failed twice: ${how}${last?.tail ? `; its output ends: ${last.tail.slice(-1500)}` : ""}`);
       }
-      const set = checkSetOf(this.read(queue), step, done)!;
-      const failed: string[] = [];
+      const set = this.setOf(queue, step, done);
+      const failed: number[] = [];
       for (const [i, c] of set.checks.entries()) {
         if (a.stopped) break;
         // A check whose first word is no program on the server's PATH (or an older queue's check in words, queue EF)
@@ -265,24 +265,24 @@ export class CheckRunner {
         }
         if (await this.attempt(a, grant, queue, step, done, c, i, cwd, 1)) continue;
         // npm has no such script: not run again, the run halts (queue CK).
-        const missing = a.stopped ? undefined : missingScript(checkSetOf(this.read(queue), step, done)!.checks[i]!.runs.at(-1)?.tail ?? "");
+        const missing = a.stopped ? undefined : missingScript(this.setOf(queue, step, done).checks[i]!.runs.at(-1)?.tail ?? "");
         if (missing) {
           this.update(queue, step, done, (s) => { s.checks[i]!.missing_script = true; s.checks[i]!.ok = false; });
           return this.cannotRun(queue, step, done, `check "${c.name}": missing script (${missing})`);
         }
-        failed.push(c.name);
+        failed.push(i);
       }
       // Each failed check once more, in the same grant: the code has not changed (P3). One that ran into its time limit
       // is not run again (the user's decision of 2026-11-23, queue CK): another hour would end the same way; only when
       // Windows made a volume shadow copy while it ran, which stops the volume's writes, it runs once more.
       const twice: string[] = [];
-      const runs = checkSetOf(this.read(queue), step, done)!.checks;
-      for (const name of failed) {
+      const runs = this.setOf(queue, step, done).checks;
+      for (const i of failed) {
         if (a.stopped) break;
-        const i = set.checks.findIndex((c) => c.name === name);
+        const c = set.checks[i]!;
         const first = runs[i]!.runs.at(-1);
-        if (first?.timed_out && !first.snapshots?.length) { this.update(queue, step, done, (s) => { s.checks[i]!.ok = false; }); twice.push(name); continue; }
-        if (!(await this.attempt(a, grant, queue, step, done, set.checks[i]!, i, cwd, 2))) twice.push(name);
+        if (first?.timed_out && !first.snapshots?.length) { this.update(queue, step, done, (s) => { s.checks[i]!.ok = false; }); twice.push(c.name); continue; }
+        if (!(await this.attempt(a, grant, queue, step, done, c, i, cwd, 2))) twice.push(c.name);
       }
       if (a.stopped) {
         this.update(queue, step, done, (s) => { s.state = "interrupted"; s.ended_at = now(); });
@@ -303,7 +303,7 @@ export class CheckRunner {
     const grant = a.grant;
     if (!stale || !grant) return true;
     this.update(queue, step, done, (s) => { s.setup = { name: SETUP_NAME, command: stale.command, reason: stale.reason, runs: [] }; });
-    const set = checkSetOf(this.read(queue), step, done)!;
+    const set = this.setOf(queue, step, done);
     for (const n of [1, 2]) {
       if (a.stopped) return false;
       const rel = `checks/${step}/r${set.round}f${set.fix}-0-setup.${n}.log`;
@@ -328,7 +328,7 @@ export class CheckRunner {
 
   /** One run of a check; whether it passed. Its state is written before it starts and after its tree has ended. */
   private async attempt(a: Active, grant: Grant, queue: string, step: string, done: string, c: CheckRun, index: number, cwd: string, n: number, base = false): Promise<boolean> {
-    const set = checkSetOf(this.read(queue), step, done)!;
+    const set = this.setOf(queue, step, done);
     const rel = `checks/${step}/r${set.round}f${set.fix}-${index + 1}-${slug(c.name)}${base ? "-base" : ""}.${n}.log`;
     const attempt: CheckAttempt = { started_at: now(), log: rel };
     if (!base) this.update(queue, step, done, (s) => { s.checks[index]!.runs.push(attempt); });
@@ -407,7 +407,7 @@ export class CheckRunner {
       s.state = "failed";
       if (s.fix >= limit) { s.limit = true; halt = `step ${step}: the checks failed after ${s.fix} check-fix round${s.fix === 1 ? "" : "s"} (the limit, check_fix_limit ${limit}): ${failed.join(", ")}`; }
     });
-    const set = checkSetOf(this.read(queue), step, done)!;
+    const set = this.setOf(queue, step, done);
     if (halt) { this.host.halt(queue, halt); return; }
     if (set.state === "failed") {
       const session = this.session(state, queue, step);
@@ -483,7 +483,7 @@ export class CheckRunner {
     });
     if (result === "failed") return this.accept(queue, step, done, state);
     if (result === "passed") {
-      const set = checkSetOf(this.read(queue), step, done)!;
+      const set = this.setOf(queue, step, done);
       const session = this.session(state, queue, step);
       if (session) this.appendFix(session, queue, step, set, `The check ${set.dispute!.name} passes on the queue's base commit ${commit ?? "?"}: the failure comes with this queue's work, so it is yours to fix in this round.\n${failureText(this.store, queue, set)}`, `check-failed-${done}-base`);
     }
@@ -513,7 +513,7 @@ export class CheckRunner {
   /** An accepted failure: the step goes to review, and a fix queue is proposed for it (or the open one gets it). */
   private accept(queue: string, step: string, done: string, state: ProjectState): void {
     // The fix queue first, so the orchestrator, told of the accepted failure, is told of its queue in the same notice.
-    const set = checkSetOf(this.read(queue), step, done)!;
+    const set = this.setOf(queue, step, done);
     let fixQueue: CheckSet["fix_queue"];
     try { fixQueue = proposeFixQueue(this.store, state, queue, step, set); }
     catch (e) { console.error(`queue ${queue} step ${step}: the fix queue for the accepted failure was not proposed: ${(e as Error).message}`); }
@@ -553,6 +553,11 @@ export class CheckRunner {
   }
 
   // ---------------------------------------------------------------- the file
+
+  /** The set of `done` as the file has it now (it exists from startSet on). */
+  private setOf(queue: string, step: string, done: string): CheckSet {
+    return checkSetOf(this.read(queue), step, done)!;
+  }
 
   private read(queue: string): ChecksFile {
     return this.store.readChecks(queue) ?? { protocol: 1, steps: {} };
