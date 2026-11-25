@@ -684,8 +684,15 @@ what the stop interrupted. The record is `crash.json` in `NEXUS_HOME`, with the 
 
 A damaged Nexus file (one that is there but does not parse) is never replaced silently. The dashboard's warnings or
 the server's log name it; where Nexus goes on without it and writes the file anew, the old copy is kept beside it as
-`<file>.corrupt`, for you to look at or delete. A damaged `queue.yaml` is not drafted over: repair it or move it away
-first.
+`<file>.corrupt` (a later damage as `<file>.corrupt.2`, and so on, never over an earlier copy), for you to look at or
+delete. A damaged `queue.yaml` is not drafted over: repair it or move it away first. An action on a queue or session
+whose file is damaged is refused naming that file, rather than calling the queue unknown. A damaged `run.yaml`,
+`plan.yaml` or `start.yaml` does not keep the server (or an update) from starting: that queue is left as it is, with a
+warning naming the file, and the others go on. A damaged `deploy-plan.json` means the planned deploy is lost: the log
+says so, and the file is kept as `deploy-plan.json.corrupt`.
+
+Between two steps Nexus ends what the worker left running. If that does not answer in time on a busy machine, Nexus
+asks once more; only a second timeout stops the run, with "worker process cleanup timed out twice".
 
 While an update waits, you can go on talking with the orchestrator and the thinking partners. An answer still being
 written when Nexus restarts is cut off; after the restart the chat says "Nexus restarted while answering; it goes on",
@@ -1043,7 +1050,8 @@ step with the reason; the card itself has Merge into <base>… to do the merge b
 integration step's page says who merged it back ("Merged back by Nexus"). The cleanup waits until you have confirmed
 the queue's provisional acceptances. Turn it on where the project's checks are strong: everything then rests on them.
 "Worktree setup" (project only) is a command run once in each new worktree before its first step, for example `npm ci`;
-if it fails, the run stops with the reason.
+if it fails, the run stops with the reason. Pausing or stopping the queue while it runs does not count as a failure: it
+runs again when you resume.
 
 **Checks for every step** (Settings → Defaults, project only, empty by default): commands Nexus runs after every step of
 every queue of the project, before the queue's own checks, one per line, for example `npm run lint`; a check the queue names
