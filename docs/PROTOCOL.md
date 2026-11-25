@@ -10,8 +10,10 @@ a shell command can take part.
 
 The protocol is split by topic, one file each in `docs/protocol/`. New text goes into the file of its topic.
 
-- [The `.nexus` files](protocol/files.md): the layout of `.nexus/`, `project.yaml`, notes and the server-owned runtime files, the rules files, removing a project.
-  Sections: Rules; Layout; `project.yaml`; Notes: `notes/<step-id>/<note-id>.md`; Server-owned runtime files; Removing a project; A project's rules files
+- [The `.nexus` files](protocol/files.md): the layout of `.nexus/`, `project.yaml`, notes, the rules files, removing a project.
+  Sections: Rules; Layout; `project.yaml`; Notes: `notes/<step-id>/<note-id>.md`; Removing a project; A project's rules files
+- [Server-owned runtime files](protocol/runtime-files.md): the files only the server's queue engine writes (`git.yaml`, `checks.yaml`, `push.yaml`, `plan.yaml`, runs, inboxes and the like).
+  Sections: Server-owned runtime files
 - [Settings](protocol/settings.md): the global settings, how a project follows them, and the languages.
   Sections: Global settings
 - [Queues](protocol/queues.md): `queue.yaml`: steps, revisions, stops and the closing refactoring step.

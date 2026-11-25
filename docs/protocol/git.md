@@ -113,7 +113,7 @@ setup run again; by default (`WORKTREE_SETUP_INPUTS`) `**/package-lock.json`, `*
 --name-only <setup.sha, else base.sha> HEAD` names one of them:
 
 - before a check set (any step's), the setup runs first within the set's grant, recorded on the set (`setup`: `name`
-  ["worktree setup"](files.md#server-owned-runtime-files), `command`, `reason`, `runs` as a check's, logs `checks/<step>/r<round>f<fix>-0-setup.<run>.log`,
+  ["worktree setup"](runtime-files.md#server-owned-runtime-files), `command`, `reason`, `runs` as a check's, logs `checks/<step>/r<round>f<fix>-0-setup.<run>.log`,
   `ok`, `flaky`); it is run once more after a failure; failing twice, its checks are not run, and the set stops as a
   machine cause, which the worker cannot fix: `interrupted` with `unrunnable`, the run halted with its output, no
   check-fix round (queue CK; docs/protocol/checks.md, "Checks run by Nexus"). Passing, `setup.sha` becomes HEAD;
