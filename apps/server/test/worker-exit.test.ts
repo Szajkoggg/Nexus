@@ -100,6 +100,7 @@ test("Windows server: owned helper cleanup, real denial and resume, and another 
   const held = (id: string) => join(tree(id), `.owned-${id}1`);
   const ready = (id: string) => until(`${id}'s helper ready`, () => existsSync(`${log}.helper-${id}1`), LONGER.step);
   const reviews = setInterval(() => acceptReviews(store), 100);
+  const exited = (id: string) => until(`${id}'s process exited`, () => store.readRuntime(store.readRun(id)!.session)?.state === "exited", LONGER.processes);
   try {
     await serverUp(`${url}/api/projects`);
     await post("B", "start"); await ready("B"); locked(held("B"));
@@ -111,6 +112,7 @@ test("Windows server: owned helper cleanup, real denial and resume, and another 
     assert.equal(store.readRuntime(store.readRun("N")!.session)?.state, "exited");
     await post("N", "resume"); writeFileSync(`${release}-N2`, "");
     await until("normal queue finishes", () => view("N").run?.state === "finished", LONGER.run);
+    await exited("N"); // the run is finished before its process exits: the cleanup would answer 409 (survey LC3 F3 c)
     await post("N", "", "cleanup"); assert.equal(existsSync(tree("N")), false);
     await post("D", "start"); await ready("D"); locked(held("D"));
     writeFileSync(`${release}-D1`, "");
@@ -121,6 +123,7 @@ test("Windows server: owned helper cleanup, real denial and resume, and another 
     rmdirSync(held("D")); locked(held("B"));
     await post("D", "resume");
     await until("resume finishes from next step", () => view("D").run?.state === "finished", LONGER.run);
+    await exited("D"); // the run is finished before its process exits: the cleanup would answer 409 (survey LC3 F3 c)
     await post("D", "", "cleanup"); assert.equal(existsSync(tree("D")), false);
     await post("B", "stop_at_once"); rmdirSync(held("B"));
     assert.ok((await fetch(`${url}/api/projects`)).ok, "the development server remains alive");

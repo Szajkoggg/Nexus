@@ -103,14 +103,15 @@ export const inProcessCodex: SpawnRuntimeChild = inProcessChild(runFakeCodex);
 
 /**
  * A process that does not end when it is told to (queue LCK; a refused TerminateProcess, a turn that never ends): the
- * modes are read at each call, so a test changes them while its processes run. `kill`: "ignore" drops the call, a
- * `delayMs` makes it that much later; `close`: "ignore" drops the call (the runtime's input stays open). `dropped`
- * (given empty) gets each dropped call, with `make()` to make it after all (letEnd: a test's end, the hang's release).
+ * modes are read at each call, so a test changes them while its processes run. `kill`: "ignore" drops the call, forced
+ * or not; "unforced" drops only a kill without force (AgentProcess.kill(true) ends it); a `delayMs` makes it that much
+ * later; `close`: "ignore" drops the call (the runtime's input stays open). `dropped` (given empty) gets each dropped
+ * call, with whether it was forced and `make()` to make it after all (letEnd: a test's end, the hang's release).
  */
 export interface ProcessEnds {
-  kill?: "ignore" | { delayMs: number };
+  kill?: "ignore" | "unforced" | { delayMs: number };
   close?: "ignore";
-  readonly dropped: { call: "kill" | "close"; proc: AgentProcess; make(): void }[];
+  readonly dropped: { call: "kill" | "close"; force?: boolean; proc: AgentProcess; make(): void }[];
 }
 
 /** ProcessEnds' modes set off, and every dropped call made after all, in order. */
@@ -137,11 +138,11 @@ export function inProcessRuntime(o: { wrap?: (proc: AgentProcess, launch: Launch
 
 function endsOf(proc: AgentProcess, ends: ProcessEnds): void {
   const kill = proc.kill.bind(proc), close = proc.close.bind(proc);
-  proc.kill = () => {
+  proc.kill = (force?: boolean) => {
     const mode = ends.kill;
-    if (mode === "ignore") ends.dropped.push({ call: "kill", proc, make: kill });
-    else if (mode) setTimeout(kill, mode.delayMs);
-    else kill();
+    if (mode === "ignore" || (mode === "unforced" && !force)) ends.dropped.push({ call: "kill", force, proc, make: () => kill(force) });
+    else if (typeof mode === "object") setTimeout(() => kill(force), mode.delayMs);
+    else kill(force);
   };
   proc.close = () => {
     if (ends.close === "ignore") ends.dropped.push({ call: "close", proc, make: close });

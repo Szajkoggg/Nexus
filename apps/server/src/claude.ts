@@ -403,7 +403,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
   /** Ends the session after the running turn: closing stdin lets the CLI finish and exit. */
   close(): void { this.inputClosed = true; if (this.state !== "exited") this.proc.stdin.end(); }
 
-  kill(): void { this.killed = true; if (this.state !== "exited") this.proc.kill(); }
+  kill(force = false): void { this.killed = true; if (this.state !== "exited") this.proc.kill(force ? "SIGKILL" : undefined); }
 
   async cleanup(): Promise<void> { await this.proc.cleanup?.(); this.background = []; }
 

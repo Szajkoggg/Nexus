@@ -330,6 +330,17 @@ export function leftText(left: { files: string[]; count: number }): string {
 }
 
 /**
+ * The user's Clean up (POST /api/projects/:id/queues/:queue/cleanup): the queue's worker processes end first (queue PRC:
+ * one still running keeps its folder and may write into it). `processesLeft` (Engine.queueProcessesLeft) ends them and
+ * says why one is still alive: refused with 409 then, with that reason once there is one (queue LCK, F2).
+ */
+export function userCleanUp(store: ProjectStore, queueId: string, processesLeft: (queue: string) => string | undefined): string {
+  const left = processesLeft(queueId);
+  if (left !== undefined) throw new ActionError(left || `queue ${queueId}'s worker process is still ending: clean up again in a moment`, 409);
+  return cleanUp(store, queueId);
+}
+
+/**
  * The cleanup of a finished worktree queue (the user's, or Nexus's after merging back or after a survey run): the
  * worktree removed, its branch deleted with -d.
  */

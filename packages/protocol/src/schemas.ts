@@ -1054,10 +1054,11 @@ export const GitFile = z.object({
   /**
    * Nexus's cleanup of a done survey run's worktree (src/merger.ts) could not go: `waiting.reason` says why (told to the
    * user and the orchestrator), `files` the untracked files left in it, as git status names them (at most 20, `more`:
-   * how many besides). Nexus does not try again; the user's Clean up does, and clears it.
+   * how many besides). Nexus does not try again; the user's Clean up does, and clears it. `processes`: it waits for the
+   * queue's worker process to end (queue LCK, F2): Nexus does look again, and cleans up once it has ended.
    */
   cleanup: z.object({
-    waiting: z.object({ reason: z.string(), since: Time, files: z.array(z.string()).optional(), more: z.number().int().positive().optional() }),
+    waiting: z.object({ reason: z.string(), since: Time, files: z.array(z.string()).optional(), more: z.number().int().positive().optional(), processes: z.literal(true).optional() }),
   }).optional(),
   /**
    * The project's worktree setup command for the worktree Nexus made (`at`): `done_at` once it succeeded; until then

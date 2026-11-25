@@ -47,7 +47,8 @@ steps:
     size: S
 `;
 
-function setup(o: { mergeBack?: boolean } = {}) {
+/** `left.on`: the Merger's processesLeft answers `left.value` instead of the engine's, and counts its asks. */
+function setup(o: { mergeBack?: boolean; left?: { on: boolean; value?: string; asks: number } } = {}) {
   const base = mkdtempSync(join(TMP, "nexus-survey-wt-"));
   const temp = join(base, "temp");
   mkdirSync(temp);
@@ -70,7 +71,11 @@ function setup(o: { mergeBack?: boolean } = {}) {
     approveQueue(store, id);
   };
   const reviews = { accept: true };
-  const merger = new Merger(store, { start: (id) => void engine.start(id), release: (id, why) => engine.releaseHold(id, why), busy: () => false, serverRoot: join(base, "elsewhere") });
+  const left = o.left;
+  const merger = new Merger(store, {
+    start: (id) => void engine.start(id), release: (id, why) => engine.releaseHold(id, why), busy: () => false, serverRoot: join(base, "elsewhere"),
+    ...(left ? { processesLeft: (q: string) => { if (!left.on) return engine.queueProcessesLeft(q); left.asks++; return left.value; } } : {}),
+  });
   const tick = () => { routeAnswers(store); if (reviews.accept) acceptReviews(store); const s = loadProjectState(store); engine.onChange(s); merger.onChange(s); };
   const engine: Engine = new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, startupMs: 20 });
   const timer = setInterval(tick, 150);
@@ -104,6 +109,30 @@ test("a survey run in a worktree of its own works there, has no integration step
       assert.deepEqual(loadProjectState(x.store).attention.filter((a) => a.queue === "SV"), [], `merge_back ${mergeBack}: nothing waits for the user`);
     } finally { x.stop(); }
   }
+});
+
+test("a done survey's cleanup waits while its worker processes live: the reason recorded as its wait, looked at again, and it goes once they have ended (survey LC3 F3 a)", async () => {
+  const left = { on: true, value: "" as string | undefined, asks: 0 };
+  const x = setup({ left });
+  try {
+    x.queue("SV", "done");
+    x.engine.start("SV", { runtime: "claude" });
+    const wt = x.store.readQueue("SV").worktree!;
+    await x.until("SV done", "SV", (q) => q.status === "done" && q.run?.state === "finished");
+    await waitUntil("two asks about its processes", () => left.asks >= 2, LONGER.processes);
+    assert.ok(existsSync(wt), "the worktree stays while they live");
+    assert.equal(x.store.readGit("SV")?.cleanup, undefined, "nothing recorded while they were only now asked to end");
+    left.value = "queue SV's cleanup waits for its worker process to end (session s)";
+    await x.until("the wait recorded", "SV", (q) => q.git?.cleanup?.waiting.reason === left.value);
+    assert.equal(x.store.readGit("SV")!.cleanup!.waiting.processes, true, "a wait for the processes: Nexus looks again");
+    assert.ok(loadProjectState(x.store).attention.some((a) => a.kind === "cleanup" && a.queue === "SV" && a.text === left.value), "the waiting list shows it");
+    const asks = left.asks;
+    await waitUntil("looked at again", () => left.asks > asks, LONGER.processes);
+    left.value = undefined;
+    await x.until("the worktree cleaned up", "SV", (q) => !!q.git?.cleaned);
+    assert.equal(existsSync(wt), false);
+    assert.equal(x.store.readGit("SV")!.cleanup, undefined, "the wait is gone");
+  } finally { x.stop(); }
 });
 
 test("untracked files left in a survey's worktree keep it, and the user is told what is left; their Clean up removes it afterwards", async () => {

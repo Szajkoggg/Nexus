@@ -65,10 +65,12 @@ export interface MergerOptions {
   /** How a cleanup removes the worktree's files (a test's seam: a locked folder, fewer retries). */
   removal?: RemovalIO;
   /**
-   * Ends the queue's worker processes (Engine.endQueueProcesses); true when none is alive any more. A cleanup waits
-   * until then (queue PRC): a process that still runs in the worktree keeps its folder and may write into it.
+   * Ends the queue's worker processes (Engine.queueProcessesLeft); undefined when none is alive any more, else why the
+   * cleanup waits ("" when they were only now asked to end). A cleanup waits until then (queue PRC): a process that still
+   * runs in the worktree keeps its folder and may write into it. The reason is recorded as the cleanup's wait (queue
+   * LCK, F2).
    */
-  processesEnded?: (queue: string) => boolean;
+  processesLeft?: (queue: string) => string | undefined;
 }
 
 /** How often a merge back that waits is looked at again. */
@@ -278,7 +280,7 @@ export class Merger {
       if (q.git.merge?.waiting) this.writeMerge(q, { ...q.git.merge, waiting: undefined });
       return; // the user's return batch shows it; a Fix it runs in the worktree
     }
-    if (!this.processesEnded(q)) return;
+    if (!this.processesEnded(q, (reason) => this.wait(q, reason))) return;
     try { this.tryCleanUp(q.id); }
     catch (e) { this.wait(q, `queue ${q.id} is merged back, but its cleanup waits: ${errorText(e)}`); }
   }
@@ -288,12 +290,15 @@ export class Merger {
    * holds it a moment: looked at again.
    */
   private surveyCleanup(state: ProjectState, q: QueueView): void {
-    if (q.status !== "done" || runGoing(q.run) || q.git?.cleaned || q.git?.cleanup) return;
+    if (q.status !== "done" || runGoing(q.run) || q.git?.cleaned || (q.git?.cleanup && !q.git.cleanup.waiting.processes)) return;
     if (!q.steps.every((s) => s.status === "done" || s.status === "skipped") || q.steps.some(pendingProvisional)) return;
     if (q.steps.some((s) => stillEnding(q, s))) { this.waits = true; return; }
     const path = checkoutOf(this.store, q);
     if (!path || samePath(path, state.project.root)) return;
-    if (!this.processesEnded(q)) return;
+    const processes = (reason: string) => {
+      if (q.git?.cleanup?.waiting.reason !== reason) patchGit(this.store, q.id, { cleanup: { waiting: { reason, since: now(), processes: true } } });
+    };
+    if (!this.processesEnded(q, processes)) return;
     let waiting: CleanupWaiting;
     try {
       this.tryCleanUp(q.id);
@@ -320,11 +325,14 @@ export class Merger {
 
   /**
    * The queue's worker processes have ended (asked to end now, if not): a cleanup may go. Else it waits a moment, looked
-   * at again (their exits change the runtime records, which brings a look too).
+   * at again (their exits change the runtime records, which brings a look too), and `record` gets why, once there is a
+   * reason to show.
    */
-  private processesEnded(q: QueueView): boolean {
-    if (!this.o.processesEnded || this.o.processesEnded(q.id)) return true;
+  private processesEnded(q: QueueView, record: (reason: string) => void): boolean {
+    const left = this.o.processesLeft?.(q.id);
+    if (left === undefined) return true;
     this.waits = true;
+    if (left) record(left);
     return false;
   }
 

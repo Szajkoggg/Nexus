@@ -153,10 +153,27 @@ export interface EngineOptions {
   /** A check's time limit (CHECK_LIMIT_MS) and how long an update's drain waits for running checks; tests make them short. */
   checkLimitMs?: number;
   checkDrainWaitMs?: number;
+  /**
+   * How long a done or cancelled queue's worker process may take to end once its cleanup waits for it (END_DEADLINE_MS)
+   * before Nexus kills it by force (queueProcessesLeft); tests make it short.
+   */
+  endDeadlineMs?: number;
 }
+
+/**
+ * A worker process a queue's cleanup waits for (Engine.endProcesses): whether the deadline's forced kill was made, and
+ * whether a cleanup (queueProcessesLeft) has asked about it before.
+ */
+interface EndWait { forced: boolean; asked: boolean }
+interface Left { session: string; pid?: number; wait: EndWait }
 
 /** A process asked to end for a restart (another model or effort) is killed if it has not exited by then. */
 const RESTART_KILL_MS = 10_000;
+/**
+ * A worker process its queue's cleanup waits for is killed by force if it has not ended by then (the user's decision with
+ * queue LCK, survey LC3 F2): its last turn may still write the queue's context summary, which takes seconds, not a minute.
+ */
+const END_DEADLINE_MS = 60_000;
 
 /**
  * Context care's idle switch (queue FI): a session idle this long at a step boundary has lost its prompt cache (it
@@ -233,6 +250,12 @@ export class Engine implements Member {
   private readonly restarting = new Set<string>();
   /** Sessions whose process ended after reporting their step, including an already accepted review. */
   private readonly exitedAfterOutcome = new Set<string>();
+  /**
+   * The worker processes a queue's cleanup waits for (endProcesses): whether the deadline's forced kill has been made.
+   * By process, so a new process of the session starts afresh.
+   */
+  private readonly endWaits = new WeakMap<Live["proc"], EndWait>();
+  private readonly endDeadlineMs: number;
   private readonly retryBaseMs: number;
   private readonly usageMarginMs: number;
   private readonly turnSettleMs: number;
@@ -272,6 +295,7 @@ export class Engine implements Member {
     this.startupMs = options.startupMs ?? STARTUP_MS;
     this.backgroundLimitMs = options.backgroundLimitMs ?? BACKGROUND_LIMIT_MS;
     this.boundary = options.boundary;
+    this.endDeadlineMs = options.endDeadlineMs ?? END_DEADLINE_MS;
     this.clock = options.clock ?? REAL_CLOCK;
     this.clockTimers = new ClockTimers(this.clock, () => this.stopped);
     this.coordinator = options.coordinator ?? new Coordinator();
@@ -1742,15 +1766,35 @@ export class Engine implements Member {
   }
 
   /**
-   * Ends the worker processes AgentHost holds for a done or cancelled queue (Merger: before its worktree is cleaned up;
-   * the user's Clean up). True when none of them is alive any more; a queue not closed is left alone (true: its cleanup
-   * is refused anyway).
+   * Ends the worker processes AgentHost holds for a done or cancelled queue (the user's Clean up). True when none of them
+   * is alive any more; a queue not closed is left alone (true: its cleanup is refused anyway).
    */
   endQueueProcesses(queueId: string): boolean {
+    return this.queueProcessesLeft(queueId) === undefined;
+  }
+
+  /**
+   * As endQueueProcesses (the Merger, before a queue's worktree is cleaned up): undefined once none of the queue's worker
+   * processes is alive, else why its cleanup waits. The reason is empty while they were asked to end only now (they
+   * normally end at once); from the next ask on it says what keeps them (survey LC3 F2: before, the cleanup waited with
+   * nothing shown).
+   */
+  queueProcessesLeft(queueId: string): string | undefined {
     const state = loadProjectState(this.store);
     const status = state.queues.find((q) => q.id === queueId)?.status;
-    if (status !== "done" && status !== "cancelled") return true;
-    return !this.endProcesses((q) => q === queueId, { state });
+    if (status !== "done" && status !== "cancelled") return undefined;
+    const left = this.endProcesses((q) => q === queueId, { state });
+    if (!left.length) return undefined;
+    const sessions = (ls: typeof left) => ls.map((l) => l.session).join(", ");
+    const fresh = left.every((l) => !l.wait.asked);
+    for (const l of left) l.wait.asked = true;
+    const forced = left.filter((l) => l.wait.forced);
+    if (forced.length) {
+      const pids = forced.flatMap((l) => (l.pid ? [l.pid] : []));
+      return `queue ${queueId}'s worker process did not end even when Nexus killed it by force (session ${sessions(forced)}${pids.length ? `, process ${pids.join(", ")}` : ""}): its cleanup waits until it has ended; end it by hand if it does not`;
+    }
+    if (fresh) return "";
+    return `queue ${queueId}'s cleanup waits for its worker process to end (session ${sessions(left)}); Nexus kills it by force if it has not ended ${Math.round(this.endDeadlineMs / 1000)} s after it was asked`;
   }
 
   /**
@@ -1759,14 +1803,15 @@ export class Engine implements Member {
    * ends after that turn (its input closes: a done queue's last turn may still write its context summary), any other
    * now; one Nexus is ending already (its run finished, its session switched) is left to end as it does. Each exits as
    * one Nexus ended (no failure, nothing to retry) and its runtime record becomes `exited` (AgentHost's exit handler).
-   * Returns whether any of them is still alive. `state`: the project's state as it stands, when the caller has it (else
-   * the files are read).
+   * One still alive `endDeadlineMs` after it was first found here is killed by force (queue LCK, F2). Returns those
+   * still alive, each with its wait. `state`: the project's state as it stands, when the caller has it (else the files
+   * are read).
    */
-  private endProcesses(of: (queue: string) => boolean, o: { keep?: string; state?: ProjectState } = {}): boolean {
+  private endProcesses(of: (queue: string) => boolean, o: { keep?: string; state?: ProjectState } = {}): Left[] {
     const { state } = o;
     const sessionFile = (id: string) => (state ? state.sessions.find((x) => x.id === id) : this.store.readSession(id));
     const runs = () => (state ? state.queues.map((q) => q.run) : this.store.queueIds().map((q) => this.store.readRun(q)));
-    let alive = false;
+    const left: Left[] = [];
     let going: Set<string> | undefined; // read once, and only when a process of the queues is found
     for (const l of this.host.all()) {
       if (l.session === o.keep || l.proc.state === "exited") continue;
@@ -1775,12 +1820,35 @@ export class Engine implements Member {
       if (s?.role !== "worker" || !s.queue || !of(s.queue)) continue;
       going ??= new Set(runs().flatMap((r) => (r && runGoing(r) ? [r.session] : [])));
       if (going.has(l.session)) continue;
-      alive = true;
+      let wait = this.endWaits.get(l.proc);
+      if (!wait) {
+        wait = { forced: false, asked: false };
+        this.endWaits.set(l.proc, wait);
+        this.forceEndAt(l, wait);
+      }
+      left.push({ session: l.session, pid: l.proc.pid, wait });
       if (this.ending.has(l.session)) continue;
       this.ending.add(l.session);
       if (l.proc.state === "working") l.proc.close(); else l.proc.kill();
     }
-    return alive;
+    return left;
+  }
+
+  /**
+   * The deadline of a process a cleanup waits for: killed by force then (AgentProcess.kill(true): on Windows its job
+   * host and with it its job end, elsewhere SIGKILL), and the Merger told to look again (changed).
+   */
+  private forceEndAt(l: Live, wait: EndWait): void {
+    const key = `endforce:${l.session}`;
+    clearTimeout(this.timers.get(key));
+    this.timers.set(key, setTimeout(() => {
+      this.timers.delete(key);
+      if (this.stopped || l.proc.state === "exited") return;
+      wait.forced = true;
+      this.store.appendActivity(l.session, { at: now(), kind: "error", text: `The worker's process did not end within ${Math.round(this.endDeadlineMs / 1000)} s of being asked: Nexus kills it by force` });
+      l.proc.kill(true);
+      this.changed();
+    }, this.endDeadlineMs));
   }
 
   private ensureProcess(session: SessionFile): Live {

@@ -293,6 +293,23 @@ fresh proof check; exhaustion leaves the proof for a later Clean up. Nexus's own
 only on its first try for a queue; once that failed, each later look (at most every 30 s) tries once, without the
 delays, which wait synchronously on the server's one loop (queue CWA).
 
+Every worktree cleanup, Nexus's (after a merge back, or a survey run's) and the user's Clean up, first ends the
+queue's worker processes and waits until none is alive: a process still running in the worktree keeps its folder and
+may write into it (queue PRC). The first look that finds one asks it to end and records nothing (it normally ends at
+once). From the next look on the wait is recorded with its reason, where the cleanup's other waits go: for a merged-back
+queue in `merge.waiting` (the waiting list's `merge` item), for a survey run in `cleanup.waiting` with
+`processes: true` (the `cleanup` item; with that mark Nexus does look again):
+
+- "queue Q's cleanup waits for its worker process to end (session S); Nexus kills it by force if it has not ended 60 s
+  after it was asked";
+- once that deadline has passed, Nexus kills it by force (on Windows its job host, which closes its job with every
+  member; elsewhere SIGKILL). One that lives on after that: "queue Q's worker process did not end even when Nexus
+  killed it by force (session S, process P): its cleanup waits until it has ended; end it by hand if it does not".
+
+The wait stays, looked at again at most every 30 s, until the process has ended; then the cleanup goes and its success
+clears it. The user's Clean up meanwhile is refused (409) with the same reason ("queue Q's worker process is still
+ending: clean up again in a moment" at the first ask). Queue LCK, survey LC3 F2.
+
 Missing files, a missing `.git` pointer or registration, and an entirely absent target are valid subsets. A missing
 branch is accepted only with saved proof; it lets a crash after `branch -d` finish writing `cleaned`. The final
 write sets `cleaned` and clears `cleanup_proof`, `cleanup` and `merge`. An already cleaned queue returns success
@@ -324,7 +341,8 @@ When it is not clean, or the branch is not merged, nothing is removed. A removal
 and keeps `cleanup_proof`. In either case `git.yaml` gets `cleanup.waiting` (`reason`, `since`; `files`: what is left, as git status
 names it, the first 20, and `more`: how many besides), the user's waiting list an item of kind `cleanup` with the
 reason ("survey run Q is done, but its worktree stays: 1 file: ?? notes.txt left in it; look at them, then clean up
-(<path>)"), and the orchestrator is told once (`notify:cleanupwait:…`). Nexus does not try again; the user's Clean up
+(<path>)"), and the orchestrator is told once (`notify:cleanupwait:…`). Nexus does not try again (but for a wait for
+the queue's worker processes, `processes: true`, above); the user's Clean up
 on the queue's page does (refused the same way while something is left), and its success clears `cleanup`. The
 dashboard offers no Merge back for a survey run.
 

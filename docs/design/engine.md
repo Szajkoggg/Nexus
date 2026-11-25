@@ -181,8 +181,12 @@ its process the same way, and a worktree cleanup then met a folder a live proces
   the queue its file names); a session the start continues (`--use-session`) is kept;
 - a queue that is done or cancelled keeps none: the engine ends them at its next look after the change (`onChange`);
 - a worktree cleanup, Nexus's (Merger, after a merge back or a survey run) or the user's Clean up, first asks the
-  engine to end them (`Engine.endQueueProcesses`) and waits until none is alive: Nexus's looks again, the user's is
-  refused for a moment (409).
+  engine to end them (`Engine.queueProcessesLeft`) and waits until none is alive: Nexus's looks again, the user's is
+  refused for a moment (409). From the second ask on the wait has a reason, recorded where the cleanup's other waits
+  go; a process still alive 60 s (`endDeadlineMs`) after it was first found is killed by force
+  (`AgentProcess.kill(true)`: the job host itself on Windows, closing the job; SIGKILL elsewhere), and one that lives on
+  even then keeps the wait, which says so (docs/protocol/git.md, "Merge back and clean up"; survey LC3 F2: before, it waited
+  forever with nothing shown, freed only by a server restart).
 
 A process in the middle of a turn ends after that turn (its input closes: a done queue's last turn may still write its
 context summary), any other at once; one Nexus is ending already is left to end as it does. A session a going run works

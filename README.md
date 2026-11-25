@@ -1013,7 +1013,9 @@ runs again; the files that count are the project's `defaults.worktree_setup_inpu
 integration step tested (a fast-forward, never a merge commit); if main moved on since, the integration step runs
 again instead. It refuses while the checkout of main has uncommitted changes or a step is at work there. Clean up
 removes the worktree and deletes the branch, only if nothing is uncommitted and the branch is merged. Nothing is
-pushed. (A queue from before the integration step merges as before: a fast-forward when possible, else a merge commit;
+pushed. Every cleanup, yours and Nexus's own, first waits for the queue's worker process to end; while it has not,
+Clean up is refused and the waiting list says why. One that has not ended a minute after it was asked is killed by
+force; if it lives on even then, the waiting list says so and names the process, for you to end by hand. (A queue from before the integration step merges as before: a fast-forward when possible, else a merge commit;
 a conflict is aborted.)
 
 **Interrupted worktree cleanup.** Retry Clean up after resolving the reported filesystem error. A cleanup that

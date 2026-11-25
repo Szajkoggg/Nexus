@@ -308,7 +308,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     if (this.state === "working") this.once("turnEnd", end); else end();
   }
 
-  kill(): void { if (this.state !== "exited") this.proc.kill(); }
+  kill(force = false): void { if (this.state !== "exited") this.proc.kill(force ? "SIGKILL" : undefined); }
 
   async cleanup(): Promise<void> { await this.proc.cleanup?.(); this.openCommands.clear(); this.openAgents.clear(); }
 

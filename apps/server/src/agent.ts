@@ -147,7 +147,11 @@ export interface AgentProcess extends EventEmitter<AgentEvents> {
    * runtime cannot (see COMPACTS).
    */
   compact?(): boolean;
-  kill(): void;
+  /**
+   * End the process now. `force`: it was asked to end and did not (Engine's end deadline, queue LCK F2): on Windows its
+   * job host is killed, which closes its job with every member; elsewhere the runtime gets SIGKILL.
+   */
+  kill(force?: boolean): void;
   /**
    * Worker-only boundary barrier: end descendants while preserving the runtime for the next step. A cleanup that got no
    * answer in time fails with CleanupTimedOut and ends nothing itself: the engine asks once more (queue LCK, F5).

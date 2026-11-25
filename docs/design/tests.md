@@ -145,10 +145,12 @@ git dozens of times. In the full suite every core is busy, so each file takes ab
   engine's one retry (queue LCK, survey LC3 F5/F17: the in-process child has no cleanup of its own, so without them the
   barrier passes in a microtask; cleanup-barrier.test.ts).
 - **A process that does not end when told** (queue LCK): `inProcessRuntime({ ends })` with a `ProcessEnds` makes the
-  processes' `kill()` ignored or late (`{ delayMs }`) and their `close()` ignored; the modes are read at each call, so
+  processes' `kill()` ignored (`"ignore"`; `"unforced"` ignores only a kill without force, so the engine's forced kill
+  ends it) or late (`{ delayMs }`) and their `close()` ignored; the modes are read at each call, so
   a test sets them while its processes run, and `letEnd(ends)` lifts them and makes the dropped calls after all (a
-  test's `finally` too, or the fake runs on). merger.test.ts's `wired()` gives the Merger `processesEnded` as main.ts
-  does, and with an ignored end shows the cleanup's silent wait (survey F2/F3). Its `looks` counts the Merger's
+  test's `finally` too, or the fake runs on). merger.test.ts's `wired()` gives the Merger `processesLeft` as main.ts
+  does, and with an ignored end shows the cleanup's wait, its reason and the forced kill at `endDeadlineMs` (survey
+  F2/F3). Its `looks` counts the Merger's
   asks: wait for looks, not for time. The fixture has no file watchers, so the look after a fast-forward (the
   server's comes from git.yaml's change) is the test's own `merger.onChange`; a wait for looks without it never ends.
 - **Damaged saved state at a start** (queue LCK): `restart(store, options, { corrupt })` in engine-setup.ts writes an

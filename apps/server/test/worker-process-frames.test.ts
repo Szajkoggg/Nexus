@@ -223,6 +223,17 @@ test("the server's 15 s before the native settle timeout: the cleanup fails as t
   await quiet(h);
 });
 
+test("a forced kill (SIGKILL, the engine's end deadline): K and the host killed at once, which closes its job; nothing more later (queue LCK, F2)", async (t) => {
+  const h = start(t);
+  h.worker.kill("SIGKILL");
+  assert.deepEqual(h.host.frames(), ["K"]);
+  assert.equal(h.host.kills, 1, "the host itself, not 15 s later");
+  h.host.close(null); await settle();
+  h.worker.kill("SIGKILL");
+  assert.equal(h.host.kills, 1, "an exited host is not killed again");
+  await quiet(h);
+});
+
 test("kill: K at once, the host killed 15 s later and only once however often it is asked; a close before then kills nothing", async (t) => {
   const h = start(t);
   h.worker.kill();
