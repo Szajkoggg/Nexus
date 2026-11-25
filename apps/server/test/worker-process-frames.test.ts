@@ -1,0 +1,253 @@
+// H6 of the LWH survey (queue WHR, WHR3): the server's end of a job host's control pipe (WorkerProcess). The frame tests
+// give it a pipe of their own (FakeHost) and node:test's mock timers for its 5 s and 15 s deadlines, so every frame,
+// every timer and every kill is the test's to send, pass and count. A fake pipe proves no OS resource is freed: the last
+// test runs the real job host and shows its job's process and directory lock gone.
+import { test, type TestContext } from "node:test";
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, rmdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { PassThrough, Writable } from "node:stream";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { WorkerProcess, spawnRuntimeChild } from "../src/worker-process.ts";
+import { LONGER, until } from "./wait.ts";
+
+const b64 = (text: string) => Buffer.from(text, "utf8").toString("base64");
+
+/** The job host's side of the pipe: what the server wrote, frames the test sends back, the kills it got. */
+class FakeHost extends EventEmitter {
+  input = "";
+  kills = 0;
+  readonly stdin = new Writable({ write: (chunk: Buffer, _e, done) => { this.input += chunk.toString(); done(); } });
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+  kill(): boolean { this.kills++; return true; }
+  /** The server's lines after the two start lines (the runtime's binary and arguments). */
+  frames(): string[] { return this.input.split("\n").filter(Boolean).slice(2); }
+  send(text: string): void { this.stdout.write(text); }
+  close(code: number | null = 0): void { this.emit("close", code); }
+}
+
+/** A promise's outcome as the test sees it, counted: a second settlement would show as a count of 2. */
+function watch(p: Promise<void>) {
+  const seen = { resolved: 0, rejected: 0, error: undefined as Error | undefined };
+  p.then(() => { seen.resolved++; }, (e: Error) => { seen.rejected++; seen.error = e; });
+  return seen;
+}
+
+/** Lets the streams deliver what was written (setImmediate is not among the mocked timers). */
+const settle = () => new Promise<void>((r) => setImmediate(r));
+
+function start(t: TestContext, clock = true) {
+  if (clock) t.mock.timers.enable({ apis: ["setTimeout"] });
+  const host = new FakeHost();
+  const worker = new WorkerProcess("runtime.exe", ["--flag"], { cwd: tmpdir(), env: {} }, () => host as unknown as ChildProcessWithoutNullStreams);
+  let errors = "";
+  worker.stderr.on("data", (b: Buffer) => { errors += b.toString(); });
+  const exits: (number | null)[] = [];
+  worker.on("exit", (code: number | null) => exits.push(code));
+  const tick = async (ms: number) => { t.mock.timers.tick(ms); await settle(); };
+  return { host, worker, errors: () => errors, exits, tick };
+}
+
+/** Nothing armed is left: a minute on the clock writes no frame and kills nothing. */
+async function quiet(h: ReturnType<typeof start>): Promise<void> {
+  const frames = h.host.frames().length, kills = h.host.kills;
+  await h.tick(60_000);
+  assert.equal(h.host.frames().length, frames, "no frame written by a leftover timer");
+  assert.equal(h.host.kills, kills, "no kill by a leftover timer");
+}
+
+test("two cleanups, two ids: only each one's own C resolves it, exactly once; a foreign, repeated or another request's id does nothing", async (t) => {
+  const h = start(t);
+  const a = watch(h.worker.cleanup()), b = watch(h.worker.cleanup());
+  const owner = h.worker.owns(5000, 4318);
+  assert.deepEqual(h.host.frames(), ["C 1", "C 2", "T 3 5000 4318"]);
+  h.host.send("C 99\nC 3\n"); await settle();
+  assert.deepEqual([a.resolved, b.resolved, a.rejected, b.rejected], [0, 0, 0, 0], "an unknown id and the T request's id resolve no cleanup");
+  h.host.send("C 2\n"); await settle();
+  assert.deepEqual([a.resolved, b.resolved], [0, 1]);
+  h.host.send("C 2\r\n"); await settle();
+  assert.deepEqual([a.resolved, b.resolved], [0, 1], "a repeated C resolves nothing more");
+  h.host.send("C 1\r\n"); await settle();
+  assert.deepEqual([a.resolved, b.resolved, a.rejected, b.rejected], [1, 1, 0, 0]);
+  h.host.send("T 3 1\n");
+  assert.equal(await owner, "job");
+  assert.equal(h.host.kills, 0);
+  assert.equal(h.errors(), "");
+  await quiet(h);
+});
+
+test("a frame split across chunks and within its line is read whole, and only once its line ends", async (t) => {
+  const h = start(t);
+  const a = watch(h.worker.cleanup());
+  let out = "";
+  h.worker.stdout.on("data", (b: Buffer) => { out += b.toString(); });
+  h.host.send("C"); await settle();
+  h.host.send(" "); await settle();
+  h.host.send("1"); await settle();
+  assert.equal(a.resolved, 0, "no line end yet");
+  h.host.send(`\nO ${b64("hello ")}`); await settle();
+  assert.equal(a.resolved, 1);
+  assert.equal(out, "", "the O frame is not whole yet");
+  h.host.send(`\nO ${b64("world")}\n`); await settle();
+  assert.equal(out, "hello world");
+  await quiet(h);
+});
+
+test("an invalid frame goes to stderr and ends the job (K, then the host killed 15 s later); a pending cleanup fails when the host closes", async (t) => {
+  const h = start(t);
+  h.host.send("Z what\n"); await settle();
+  assert.equal(h.errors(), "invalid worker job frame: Z what");
+  assert.deepEqual(h.host.frames(), ["K"]);
+  // Asked 10 s later, the cleanup's own 15 s limit lies beyond the kill's: the host's close answers it.
+  await h.tick(10_000);
+  const a = watch(h.worker.cleanup());
+  assert.deepEqual(h.host.frames(), ["K", "C 1"]);
+  await h.tick(4_999);
+  assert.equal(a.rejected, 0, "a K does not answer the cleanup");
+  assert.equal(h.host.kills, 0);
+  await h.tick(1);
+  assert.equal(h.host.kills, 1);
+  h.host.close(1); await settle();
+  assert.equal(a.rejected, 1);
+  assert.equal(a.error?.message, "worker job host exited");
+  assert.deepEqual(h.exits, [1]);
+  await quiet(h);
+});
+
+test("F fails every pending cleanup with the host's text, once, and ends the job; a late C resolves nothing", async (t) => {
+  const h = start(t);
+  const a = watch(h.worker.cleanup()), b = watch(h.worker.cleanup());
+  const text = "OpenProcess for worker job member 7: Access is denied.";
+  h.host.send(`F ${b64(text)}\n`); await settle();
+  assert.deepEqual([a.rejected, b.rejected, a.resolved, b.resolved], [1, 1, 0, 0]);
+  assert.equal(a.error?.message, text);
+  assert.equal(b.error?.message, text);
+  assert.equal(h.errors(), text);
+  assert.deepEqual(h.host.frames(), ["C 1", "C 2", "K"]);
+  h.host.send("C 1\nC 2\n"); await settle();
+  assert.deepEqual([a.rejected, b.rejected, a.resolved, b.resolved], [1, 1, 0, 0], "the late acknowledgements change nothing");
+  h.host.close(1); await settle();
+  assert.deepEqual([a.rejected, b.rejected], [1, 1], "the close rejects nothing twice");
+  assert.equal(h.host.kills, 0, "the host closed before the 15 s backstop");
+  await quiet(h);
+});
+
+test("the host closing before C fails the pending cleanups and clears the timers; afterwards cleanup resolves at once and nothing is written", async (t) => {
+  // Since 6c1149c (CI82) the engine asks no cleanup of a process that has run no turn, so a host closing under a
+  // pending C is one whose runtime has worked: the cleanup was asked after a turn.
+  const h = start(t);
+  const a = watch(h.worker.cleanup()), b = watch(h.worker.cleanup());
+  h.worker.kill();
+  h.host.send("X 3\n"); await settle();
+  h.host.close(1); await settle();
+  assert.deepEqual([a.rejected, b.rejected], [1, 1]);
+  assert.equal(a.error?.message, "worker job host exited");
+  assert.deepEqual(h.exits, [3], "the runtime's own exit code (X), not the host's");
+  const after = watch(h.worker.cleanup());
+  h.worker.kill();
+  await settle();
+  assert.equal(after.resolved, 1);
+  assert.deepEqual(h.host.frames(), ["C 1", "C 2", "K"], "nothing written after the close");
+  await quiet(h);
+});
+
+test("a missing C: the cleanup fails at 15 s, not before, sends K, and the host is killed 15 s later; a late C changes nothing", async (t) => {
+  const h = start(t);
+  const a = watch(h.worker.cleanup());
+  await h.tick(14_999);
+  assert.deepEqual([a.resolved, a.rejected], [0, 0]);
+  assert.deepEqual(h.host.frames(), ["C 1"]);
+  await h.tick(1);
+  assert.equal(a.rejected, 1);
+  assert.equal(a.error?.message, "worker cleanup timed out");
+  assert.deepEqual(h.host.frames(), ["C 1", "K"]);
+  h.host.send("C 1\n"); await settle();
+  assert.deepEqual([a.resolved, a.rejected], [0, 1], "the late C resolves nothing");
+  await h.tick(14_999);
+  assert.equal(h.host.kills, 0);
+  await h.tick(1);
+  assert.equal(h.host.kills, 1);
+  h.host.close(null); await settle();
+  assert.equal(a.rejected, 1, "rejected once");
+  await quiet(h);
+});
+
+test("kill: K at once, the host killed 15 s later and only once however often it is asked; a close before then kills nothing", async (t) => {
+  const h = start(t);
+  h.worker.kill();
+  await h.tick(10_000);
+  h.worker.kill();
+  assert.deepEqual(h.host.frames(), ["K", "K"]);
+  await h.tick(4_999);
+  assert.equal(h.host.kills, 0, "the first kill's 15 s, not the second's");
+  await h.tick(1);
+  assert.equal(h.host.kills, 1);
+  await h.tick(30_000);
+  assert.equal(h.host.kills, 1);
+  h.host.close(1); await settle();
+
+  const second = start(t, false); // the same mocked clock
+  second.worker.kill();
+  await second.tick(14_999);
+  second.host.close(1); await settle();
+  await quiet(second);
+  assert.equal(second.host.kills, 0);
+});
+
+test("the input's end: E written, K 5 s later, the host killed 15 s after; an E frame from the host is the runtime's stderr and arms nothing", async (t) => {
+  const h = start(t);
+  h.host.send(`E ${b64("a warning")}\n`); await settle();
+  assert.equal(h.errors(), "a warning");
+  await h.tick(60_000);
+  assert.deepEqual(h.host.frames(), [], "the runtime's stderr is no input end");
+  h.worker.stdin.end(); await settle();
+  assert.deepEqual(h.host.frames(), ["E"]);
+  await h.tick(4_999);
+  assert.deepEqual(h.host.frames(), ["E"]);
+  await h.tick(1);
+  assert.deepEqual(h.host.frames(), ["E", "K"]);
+  await h.tick(14_999);
+  assert.equal(h.host.kills, 0);
+  await h.tick(1);
+  assert.equal(h.host.kills, 1);
+  h.host.close(0); await settle();
+  await quiet(h);
+});
+
+// The real host: what the fake pipe cannot show. A cleanup's C comes after the job's other member is gone and its
+// directory free, with the runtime kept; the host's end takes the runtime too.
+test("Windows: a real cleanup frees the job member's directory and keeps the runtime; the job's end takes the runtime", { skip: process.platform !== "win32" }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "nexus-frames-"));
+  const held = join(root, "held"), ready = join(root, "ready"); mkdirSync(held);
+  const script = join(root, "runtime.mjs");
+  // The child holds its directory only once it has started (its current directory is opened then, not at spawn):
+  // it says so with the ready file.
+  const child = `require('fs').writeFileSync(${JSON.stringify(ready)}, ''); setInterval(() => {}, 1000)`;
+  writeFileSync(script, `import {spawn} from 'node:child_process';
+const child = spawn(process.execPath, ['-e', ${JSON.stringify(child)}], {cwd: ${JSON.stringify(held)}, stdio: 'ignore', windowsHide: true});
+console.log(JSON.stringify({root: process.pid, child: child.pid}));
+setInterval(() => {}, 1000);
+`);
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const locked = () => assert.throws(() => rmdirSync(held), (e: NodeJS.ErrnoException) => e.code === "EBUSY" || e.code === "EPERM");
+  const runtime = spawnRuntimeChild(process.execPath, [script], { cwd: root, env: process.env, owned: true });
+  const exited = new Promise<void>((r) => runtime.once("close", () => r()));
+  let text = "";
+  runtime.stdout.on("data", (b: Buffer) => { text += b.toString(); });
+  try {
+    await until("runtime and its child up", () => text.includes("\n") && existsSync(ready), LONGER.step);
+    const family = JSON.parse(text.trim()) as { root: number; child: number };
+    locked();
+    await runtime.cleanup!();
+    assert.equal(alive(family.child), false, "the job member is ended before the C");
+    rmdirSync(held);
+    assert.equal(alive(family.root), true, "the runtime is kept");
+    runtime.kill();
+    await exited;
+    assert.equal(alive(family.root), false);
+    await runtime.cleanup!();
+  } finally { runtime.kill(); await exited; }
+});

@@ -90,7 +90,17 @@ export async function agentOwning(clientPort: number, serverPort: number): Promi
   return answers.find((a) => a.owns === "job")?.agent ?? (answers.some((a) => a.owns === "sandbox") ? CODEX_SANDBOX : undefined);
 }
 
-class WorkerProcess extends EventEmitter implements RuntimeChild {
+/** Starts the job host's PowerShell (worker-job.ps1) in `cwd` with `env`. */
+export type StartJobHost = (cwd: string, env: NodeJS.ProcessEnv) => ChildProcessWithoutNullStreams;
+const startJobHost: StartJobHost = (cwd, env) => spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fileURLToPath(new URL("./worker-job.ps1", import.meta.url))], {
+  cwd, env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+});
+
+/**
+ * The server's end of a job host's control pipe. `start` is the real host but in the frame tests
+ * (worker-process-frames.test.ts), which give a pipe of their own to send the host's frames and read the server's.
+ */
+export class WorkerProcess extends EventEmitter implements RuntimeChild {
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
   readonly stdin: Writable;
@@ -107,13 +117,11 @@ class WorkerProcess extends EventEmitter implements RuntimeChild {
   /** The agent session's role, for an agent's job (SpawnOptions.agent). */
   readonly agent?: string;
 
-  constructor(bin: string, args: string[], options: SpawnOptions) {
+  constructor(bin: string, args: string[], options: SpawnOptions, start: StartJobHost = startJobHost) {
     super();
     this.agent = options.agent;
     if (this.agent) agentJobs.add(this);
-    this.host = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fileURLToPath(new URL("./worker-job.ps1", import.meta.url))], {
-      cwd: options.cwd, env: { ...options.env, [JOB_PRIORITY]: lowered && options.owned ? "1" : undefined }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
-    });
+    this.host = start(options.cwd, { ...options.env, [JOB_PRIORITY]: lowered && options.owned ? "1" : undefined });
     this.host.stdin.on("error", () => {});
     this.stdin = new Writable({
       write: (chunk: Buffer, _encoding, done) => { this.write(`W ${chunk.toString("base64")}`); done(); },
