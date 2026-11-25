@@ -1076,6 +1076,9 @@ nexus step done W3 --summary "No floating body on any fixture"
 
 `nexus status` is also how a hand-started agent receives what the user sends: notes for its queue's steps, messages
 and answers to its questions. Each is shown once and recorded as delivered. `nexus --help` lists every command.
+`nexus attach --role` takes `worker` (the default) or `orchestrator`; an unknown `--queue`, or a file to import that is
+not there, is refused by name. A text given as `-` (`nexus ask -`, `nexus note`, `nexus context`) is read from
+standard input, and an empty one is refused.
 
 ## Layout
 
