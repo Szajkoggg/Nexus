@@ -138,24 +138,23 @@ const OUTPUT_TAIL = 1500;
  * and the worktree's folder is free after (queue LKF); it resolves once the tree has ended.
  */
 export function runSetup(command: string, cwd: string, o: { limitMs?: number; started?: (p: HeavyProcess) => void } = {}): Promise<string | undefined> {
+  const limitMs = o.limitMs ?? SETUP_LIMIT_MS;
+  let tree: HeavyProcess;
+  try { tree = spawnTree(...shellCommand(command), { cwd }); }
+  catch (e) { return Promise.resolve(`it could not start: ${errorText(e)}`); }
   return new Promise((resolve) => {
-    let out = "";
+    let out = "", failed: string | undefined, timedOut = false, killed = false;
     const keep = (b: Buffer) => { out = (out + b.toString()).slice(-OUTPUT_TAIL * 2); };
-    let p: HeavyProcess;
-    try { p = spawnTree(...shellCommand(command), { cwd }); }
-    catch (e) { return resolve(`it could not start: ${errorText(e)}`); }
-    let failed: string | undefined, timedOut = false, killed = false;
-    p.child.on("error", (e: Error) => { failed = e.message; });
-    p.child.stdout.on("data", keep);
-    p.child.stderr.on("data", keep);
-    const tree = p;
+    tree.child.on("error", (e: Error) => { failed = e.message; });
+    tree.child.stdout.on("data", keep);
+    tree.child.stderr.on("data", keep);
     o.started?.({ ...tree, kill: () => { killed = true; tree.kill(); } });
-    const timer = setTimeout(() => { timedOut = true; tree.kill(); }, o.limitMs ?? SETUP_LIMIT_MS);
+    const timer = setTimeout(() => { timedOut = true; tree.kill(); }, limitMs);
     const tail = () => { const t = out.trim().slice(-OUTPUT_TAIL); return t ? `; its output ends: ${t}` : ""; };
     void tree.done.then((code) => {
       clearTimeout(timer);
-      if (failed !== undefined && !timedOut) resolve(`it could not start: ${failed}`);
-      else if (timedOut) resolve(`it ran longer than ${Math.round((o.limitMs ?? SETUP_LIMIT_MS) / 60_000)} minutes and was ended${tail()}`);
+      if (timedOut) resolve(`it ran longer than ${Math.round(limitMs / 60_000)} minutes and was ended${tail()}`);
+      else if (failed !== undefined) resolve(`it could not start: ${failed}`);
       else if (code === 0 && !killed) resolve(undefined);
       else resolve(`${code === null || killed ? "it was ended" : `exit code ${code}`}${tail()}`);
     });
