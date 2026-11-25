@@ -3,7 +3,7 @@
 // run as a script, for the tests of real processes) or inside the test's own process (in-process-runtime.ts).
 import { existsSync, readFileSync } from "node:fs";
 import {
-  BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, contextWindow, endFake, fakeGatesOf, fakeSaved, interrupt, later, onBackgroundEnd, record, recordArgs, respond, runAsScript, saveFakeConversation,
+  BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, contextWindow, endFake, fakeGatesOf, fakeSaved, interrupt, later, onBackgroundEnd, openConversation, record, recordArgs, respond, runAsScript, saveFakeConversation, takenIn,
   type Background, type Fake, type FakeFailure, type FakeIo, type FakePoint,
 } from "./fake-behaviour.ts";
 
@@ -68,6 +68,9 @@ export function runFakeClaude(io: FakeIo): () => void {
       afterOutput(() => writeErr(`${refusal}\n`, () => end(1)));
     }, refusal);
   }
+  // The conversation it works in: a resumed one with the history kept for it (queue LCR, LC-F9), a new one empty.
+  const conversation = refusal ? undefined : resumeId ?? newId;
+  if (conversation) openConversation(fake, "claude", conversation, !!resumeId);
   let saved = !newId;
   const save = () => { if (!saved) { saved = true; saveFakeConversation(newId!, "claude", env); } };
   let busy = false;
@@ -87,14 +90,14 @@ export function runFakeClaude(io: FakeIo): () => void {
     // anything of the turn (a start-up failure); after a turn's output when sent as a later message.
     const scripted = /^FAKE-EXIT: (signal|\d+)(?: ([^\n]*))?/m.exec(text);
     if (scripted) {
-      fake.history!.push(text);
+      takenIn(fake, text);
       const how = scripted[1] === "signal" ? "signal" : Number(scripted[1]);
       if (scripted[2]) writeErr(`${scripted[2]}\n`, () => end(how)); else end(how);
       return new Promise(() => {}); // the process ends: no turn after it
     }
     out({ type: "system", subtype: "init", model: "fake-model", session_id: "fake" });
     if (text === "/compact") return compact();
-    fake.history!.push(text);
+    takenIn(fake, text);
     const denials: unknown[] = [];
     const first = await respond(fake, text, (command) =>
       out({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command } }] }, parent_tool_use_id: null }), () => refused(denials));
@@ -102,7 +105,7 @@ export function runFakeClaude(io: FakeIo): () => void {
     // What came in during the turn was read inside it (and a command in it is acted on).
     const read = unread;
     unread = [];
-    fake.history!.push(...read);
+    takenIn(fake, ...read);
     const reply = await actOnRead(fake, read, first);
     out({ type: "assistant", message: { content: [{ type: "text", text: reply }], usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: contextTokens(fake, contextWindow(fake, 1000), 100) - 10 } }, parent_tool_use_id: null });
     // FAKE_LATE_NEXT: the process's first turn writes its result only once a message comes in after its reply, and that
@@ -115,7 +118,7 @@ export function runFakeClaude(io: FakeIo): () => void {
       // FAKE_LATE_GATE: that turn starts only once the file it names exists (a busy machine: after Nexus looked at the
       // turn's end), polled every 10 ms.
       const gate = env.FAKE_LATE_GATE;
-      if (env.FAKE_LATE_NEXT === "inside") fake.history!.push(...unread);
+      if (env.FAKE_LATE_NEXT === "inside") takenIn(fake, ...unread);
       else if (gate) {
         const late = unread;
         lateTurns++;

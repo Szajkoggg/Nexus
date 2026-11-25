@@ -6,7 +6,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
-  PARTIAL, actOnRead, contextTokens, contextWindow, endFake, fakeGatesOf, fakeSaved, interrupt, later, onBackgroundEnd, record, recordArgs, respond, runAsScript, saveFakeConversation,
+  PARTIAL, actOnRead, contextTokens, contextWindow, endFake, fakeGatesOf, fakeSaved, interrupt, later, onBackgroundEnd, openConversation, record, recordArgs, respond, runAsScript, saveFakeConversation, takenIn,
   type Background, type Fake, type FakeFailure, type FakeIo,
 } from "./fake-behaviour.ts";
 
@@ -63,7 +63,7 @@ export function runFakeCodex(io: FakeIo): () => void {
     const item = { type: "userMessage", id: randomUUID(), content: [{ type: "text", text, text_elements: [] }] };
     notify("item/started", { threadId, turnId: turn, item });
     notify("item/completed", { threadId, turnId: turn, item });
-    fake.history!.push(text);
+    takenIn(fake, text);
   }
 
   async function runTurn(id: string, text: string): Promise<void> {
@@ -256,11 +256,11 @@ export function runFakeCodex(io: FakeIo): () => void {
           reply({ data: (JSON.parse(env.FAKE_CODEX_MODELS ?? "[]") as { model: string; efforts?: string[] }[])
             .map((x) => ({ model: x.model, displayName: x.model, supportedReasoningEfforts: (x.efforts ?? []).map((e) => ({ reasoningEffort: e })) })) });
           break;
-        case "thread/start": recordArgs(fake, { method: m.method, model: m.params.model, approvalsReviewer: m.params.approvalsReviewer ?? null, approvalPolicy: m.params.approvalPolicy, sandbox: m.params.sandbox, cwd: m.params.cwd, writableRoots: m.params.config?.["sandbox_workspace_write.writable_roots"] ?? null, config: m.params.config ?? null, instructions: m.params.developerInstructions ?? null }); threadId = randomUUID(); reply({ thread: { id: threadId }, model: "fake-codex-model", reasoningEffort: "medium" }); break;
+        case "thread/start": recordArgs(fake, { method: m.method, model: m.params.model, approvalsReviewer: m.params.approvalsReviewer ?? null, approvalPolicy: m.params.approvalPolicy, sandbox: m.params.sandbox, cwd: m.params.cwd, writableRoots: m.params.config?.["sandbox_workspace_write.writable_roots"] ?? null, config: m.params.config ?? null, instructions: m.params.developerInstructions ?? null }); threadId = randomUUID(); openConversation(fake, "codex", threadId, false); reply({ thread: { id: threadId }, model: "fake-codex-model", reasoningEffort: "medium" }); break;
         case "thread/resume":
           recordArgs(fake, { method: m.method, threadId: m.params.threadId, model: m.params.model ?? null, sandbox: m.params.sandbox, config: m.params.config ?? null, instructions: m.params.developerInstructions ?? null });
           if (!fakeSaved(m.params.threadId, "codex", env)) { out({ id: m.id, error: { code: -32600, message: `no rollout found for thread id ${m.params.threadId}` } }); break; }
-          threadId = m.params.threadId; reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
+          threadId = m.params.threadId; openConversation(fake, "codex", threadId, true); reply({ thread: { id: threadId }, model: "fake-codex-model" }); break;
         // The user's MCP servers, as a real Codex reads them from its config: FAKE_CODEX_MCP names them (comma-separated).
         case "config/read":
           recordArgs(fake, { method: m.method, cwd: m.params.cwd ?? null });

@@ -70,7 +70,9 @@
 // "slow reply"; a stop (interrupt) ends it early. "FAKE-HOLD": waits for FAKE_RELEASE (as a slow worker does),
 // so a test can change usage during a chat turn. "FAKE-EXIT-HELD" (Codex's fake only): replies "exit reply", then
 // exits with its stdout held open (exitHeld below). "FAKE-HISTORY": the reply lists every message the agent took in so
-// far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer).
+// far ("history: a | b"): the turns' messages and those read inside a turn (Claude's `next`, Codex's steer), and, in a
+// resumed saved conversation, what its earlier processes took in (openConversation; queue LCR). "FAKE-EFFECT: <key>"
+// anywhere in a message: a turn that completes writes a receipt of its own (fakeEffects), a stopped one none.
 // As a review helper (its packet: "[Nexus] Review step S of queue Q, round R"), the step's goal steers it with
 // "FAKE-HELPER: <verdict>": accept (nexus review accept), sendback (nexus review send-back, every round), sendback1
 // (the first round only, accept after), passon:<reasons> (nexus review pass-on --why <reasons>), none (no verdict),
@@ -93,6 +95,7 @@
 // in a thread it did not start or resume fails ("thread not found"), as Codex's does.
 import { errorText } from "@nexus/protocol/errors";
 import { execFileSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -343,8 +346,13 @@ export interface Fake {
   subagent?: boolean;
   /** The step asked with FAKE: askslow: the answer's turn works before it reports the step done. */
   answerWork?: boolean;
-  /** Every message the agent took in, in order (FAKE-HISTORY shows them). */
+  /**
+   * Every message the agent took in, in order (FAKE-HISTORY shows them): with a conversation (openConversation), also
+   * what earlier processes of the same saved conversation took in.
+   */
   history?: string[];
+  /** The conversation (Claude's session, Codex's thread) whose history it keeps on disk: openConversation. */
+  conversation?: { runtime: "claude" | "codex"; id: string };
   /**
    * After this turn the process exits with its stdout held open (FAKE: noopexit1, FAKE-EXIT-HELD; Codex's fake only):
    * a descendant inherits stdout and outlives the process by FAKE_CODEX_HOLD_STDOUT_MS (default 3000), as a command the
@@ -485,6 +493,47 @@ export function saveFakeConversation(id: string, runtime: "claude" | "codex" = "
   if (!fakeSaved(id, runtime, env)) appendFileSync(fakeSavedFile(env, runtime), `${id}\n`);
 }
 
+/**
+ * A conversation's minimal history across the fake's processes (queue LCR, LC-F9): the messages it took in, one JSON
+ * string a line, in a file beside the saved list. Only what Nexus sent: no model's thinking, no provider's store.
+ */
+function historyFile(env: NodeJS.ProcessEnv, runtime: "claude" | "codex", id: string): string {
+  return join(dirname(fakeSavedFile(env, runtime)), `fake-${runtime}-history-${id}.jsonl`);
+}
+
+/** The history the fake kept for conversation `id` (empty when it kept none). */
+export function fakeHistory(id: string, runtime: "claude" | "codex" = "claude", env: NodeJS.ProcessEnv = process.env): string[] {
+  const f = historyFile(env, runtime, id);
+  return existsSync(f) ? readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as string) : [];
+}
+
+/**
+ * The fake works in conversation `id` from now on: a resumed one starts with the history kept for it (a saved
+ * conversation's), a new one with none; what it takes in (takenIn) is kept with it.
+ */
+export function openConversation(fake: Fake, runtime: "claude" | "codex", id: string, resumed: boolean): void {
+  fake.conversation = { runtime, id };
+  fake.history = resumed ? fakeHistory(id, runtime, fake.io.env) : [];
+}
+
+/** Messages the agent took in: into its history, and into its conversation's kept history. */
+export function takenIn(fake: Fake, ...texts: string[]): void {
+  fake.history!.push(...texts);
+  const c = fake.conversation;
+  if (c) for (const t of texts) appendLine(historyFile(fake.io.env, c.runtime, c.id), JSON.stringify(t) + "\n");
+}
+
+/** A receipt of an effect a turn completed ("FAKE-EFFECT: <key>"): one per completion, each with an id of its own. */
+export interface EffectReceipt { key: string; conversation: string | null; receipt: string }
+
+const effectsFile = (env: NodeJS.ProcessEnv) => join(dirname(fakeSavedFile(env, "claude")), "fake-effects.jsonl");
+
+/** The receipts of the effects the fakes' turns completed, in order (fake-effects.jsonl beside FAKE_LOG). */
+export function fakeEffects(env: NodeJS.ProcessEnv = process.env): EffectReceipt[] {
+  const f = effectsFile(env);
+  return existsSync(f) ? readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as EffectReceipt) : [];
+}
+
 /** The integration step's merge, as its opening asks (see the header). */
 async function integrate(fake: Fake, step: string, text: string): Promise<void> {
   const nexus = (...args: string[]) => callNexus(fake, args);
@@ -526,6 +575,18 @@ function writeDenied(fake: Fake, path: string): boolean {
  * `tool` reports a shell command it ran.
  */
 export async function respond(fake: Fake, text: string, tool: (command: string) => void, refused?: () => void): Promise<string | { fail: FakeFailure } | { exit: true } | { interrupted: true }> {
+  const r = await answer(fake, text, tool, refused);
+  // "FAKE-EFFECT: <key>" (queue LCR): an effect the turn completes as it ends, with a receipt of its own each time; a
+  // turn stopped, failed or ended before gives none.
+  const effect = /FAKE-EFFECT: (\S+)/.exec(text);
+  if (effect && typeof r === "string" && !fake.ended) {
+    const receipt: EffectReceipt = { key: effect[1]!, conversation: fake.conversation?.id ?? null, receipt: randomUUID() };
+    appendLine(effectsFile(fake.io.env), JSON.stringify(receipt) + "\n");
+  }
+  return r;
+}
+
+async function answer(fake: Fake, text: string, tool: (command: string) => void, refused?: () => void): Promise<string | { fail: FakeFailure } | { exit: true } | { interrupted: true }> {
   const { env, cwd } = fake.io;
   const nexus = (...args: string[]) => callNexus(fake, args);
   const nexusOut = (args: string[], input?: string) => callNexusOut(fake, args, input);
