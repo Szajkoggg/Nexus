@@ -1046,12 +1046,13 @@ not the process responsible; identifying a lock or permissions problem may still
 merge back and the cleanup itself, once every step is accepted and the integration step's checks pass. If the checkout
 of main has uncommitted changes, main is checked out nowhere, the checks failed, or main moved on again after two runs
 of the integration step, it waits and tells you: an item "Merging back" in Waiting for you, which opens the integration
-step with the reason; the card itself has Merge into <base>… to do the merge back right there. A step at work in the main checkout is held at its end for the moment of the fast-forward. The
+step with the reason, shown in full; the card itself has Merge into <base>… to do the merge back right there. Once the queue is merged back and only its cleanup waits (its worker process still ending, for example), the card offers Open alone. A step at work in the main checkout is held at its end for the moment of the fast-forward. The
 integration step's page says who merged it back ("Merged back by Nexus"). The cleanup waits until you have confirmed
 the queue's provisional acceptances. Turn it on where the project's checks are strong: everything then rests on them.
 "Worktree setup" (project only) is a command run once in each new worktree before its first step, for example `npm ci`;
 if it fails, the run stops with the reason. Pausing or stopping the queue while it runs does not count as a failure: it
-runs again when you resume.
+runs again when you resume. Ending it (its time limit, an update that cannot wait, a server shutdown) ends everything the command started,
+so nothing of it keeps the worktree's folder in use.
 
 **Checks for every step** (Settings → Defaults, project only, empty by default): commands Nexus runs after every step of
 every queue of the project, before the queue's own checks, one per line, for example `npm run lint`; a check the queue names
