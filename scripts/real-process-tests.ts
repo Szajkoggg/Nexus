@@ -19,6 +19,7 @@ export const REAL_PROCESS_TESTS: Readonly<Record<string, string>> = {
   "apps/server/test/agent-guard.test.ts": "the write guard tells an agent's process (in its job) from the user's",
   "apps/server/test/stop-at-once.test.ts": "Stop at once ends the runtime's OS process (process.kill(pid, 0) fails after)",
   "apps/server/test/clock-steps.test.ts": "runs stop-at-once and stopwork with the server's clock stepped, its children on the system clock",
+  "apps/server/test/setup-tree.test.ts": "the worktree setup command's child process ends with it (a drain, a shutdown, its time limit) and its folder is free: what it tests is the process tree",
   "apps/server/test/stopwork.test.ts": "clock-steps.test.ts runs it with the server's clock stepped: its agents and their CLI must keep the system clock, as processes of their own",
   // What the runtimes' processes leave in Nexus's records.
   "apps/server/test/runtime-records.test.ts": "the runtime record keeps the process id (pid) of the runtime's process",
@@ -77,7 +78,8 @@ function code(text: string): string {
  * fake-codex.ts in a string, not an import), a server (spawnServer, apps/server/test/helpers.ts; crashAt,
  * apps/server/test/crash-server.ts, one that dies), the CLI as a process (bin/nexus.js in a string), test files in a
  * Node process of their own ("--test" in a string), a Windows job host or its code in a PowerShell (spawnRuntimeChild,
- * new WorkerProcess, or a job host's or the End harness's script in a string: queue LCK). Empty: it starts none.
+ * new WorkerProcess, or a job host's or the End harness's script in a string: queue LCK), a command's process tree
+ * (runSetup or spawnTree, apps/server/src/capacity.ts: queue LKF). Empty: it starts none.
  */
 export function processStarts(text: string): string[] {
   const c = code(text).replace(/\bfrom\s+(["'])[^"'\n]*\1/g, "").replace(/\bimport\(\s*(["'])[^"'\n]*\1\s*\)/g, "");
@@ -88,6 +90,7 @@ export function processStarts(text: string): string[] {
   if (/["'`][^"'`\n]*bin\/nexus\.js["'`]/.test(c)) kinds.push("the CLI as a process");
   if (/["'`]--test["'`]/.test(c)) kinds.push("test files in a Node process of their own");
   if (/\bspawnRuntimeChild\(|\bnew WorkerProcess\(|["'`][^"'`\n]*worker-(?:job|gate|end)\.ps1["'`]/.test(c)) kinds.push("a Windows job host or its code in a PowerShell");
+  if (/\b(?:runSetup|spawnTree)\(/.test(c)) kinds.push("a command's process tree (on Windows in a job host)");
   return kinds;
 }
 

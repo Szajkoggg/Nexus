@@ -24,7 +24,7 @@ import {
   type ProjectStore, type QueueView, type RunFile, type StepView,
   queueView,
 } from "@nexus/protocol";
-import type { Capacity, Grant, HeavyProcess, Ticket } from "./capacity.ts";
+import { shellCommand, type Capacity, type Grant, type HeavyProcess, type Ticket } from "./capacity.ts";
 import { checkoutOf, checkoutStatus, git } from "./gitinfo.ts";
 import { lastPulled } from "./integration.ts";
 import { snapshotNote, type SnapshotReader } from "./snapshots.ts";
@@ -40,13 +40,6 @@ export const CHECK_DRAIN_WAIT_MS = 15 * 60_000;
 /** What the worker gets of a failing check's output: its last lines, at most this many characters (P15). */
 const TAIL_LINES = 80;
 const TAIL_CHARS = 6000;
-
-/**
- * The command runs through the system's shell (cmd.exe on Windows, sh elsewhere) as Node's `shell: true` runs it, in
- * a small Node launcher: the job host quotes each argument for CreateProcess, which cmd.exe's own switches do not
- * take, and the launcher's exit code is the command's.
- */
-const LAUNCHER = 'const r=require("node:child_process").spawnSync(process.argv[1],{shell:true,stdio:"inherit",windowsHide:true});process.exit(r.status===null?1:r.status)';
 
 /** A check's environment: the server's, without what makes a process a Nexus session or points at Nexus's own data. */
 function checkEnv(): NodeJS.ProcessEnv {
@@ -372,7 +365,7 @@ export class CheckRunner {
     const out = createWriteStream(log);
     let tail = "";
     const keep = (d: Buffer) => { out.write(d); tail = (tail + d.toString("utf8")).slice(-TAIL_CHARS * 4); };
-    const p = grant.spawn(process.execPath, ["-e", LAUNCHER, command], { cwd, env: checkEnv() });
+    const p = grant.spawn(...shellCommand(command), { cwd, env: checkEnv() });
     a.proc = p;
     // The output may still be on its way when the tree has ended: the log closes once both streams have.
     const drained = (s: NodeJS.ReadableStream) => new Promise<void>((r) => { s.once("end", () => r()); s.once("close", () => r()); s.once("error", () => r()); });

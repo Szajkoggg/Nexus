@@ -2,12 +2,13 @@
 // with a branch of its own that Nexus creates beside the checkout when the queue first starts, and the project's worktree
 // setup command, run once in each worktree Nexus makes.
 import { errorText } from "@nexus/protocol/errors";
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { ActionError, fileList, normPath, now, type ProjectState, type ProjectStore, type QueueView } from "@nexus/protocol";
 import { changedFiles, ownWorktree, patchGit, recordBase } from "./gitinfo.ts";
 import { branchFromFiles } from "./gitfiles.ts";
+import { shellCommand, spawnTree, type HeavyProcess } from "./capacity.ts";
 import { gitLabel, perf } from "./perf.ts";
 
 /** Two paths name the same folder (Windows: case does not matter, nor the kind of slash). */
@@ -131,27 +132,32 @@ const OUTPUT_TAIL = 1500;
 
 /**
  * Runs a setup command through the shell in `cwd`. Resolves with undefined when it succeeded, else with the reason (the
- * exit code or what stopped it, and the end of its output). `started`: the process, so its owner can end it.
+ * exit code or what stopped it, and the end of its output). `started`: the process, so its owner can end it. It runs
+ * as a whole process tree (src/capacity.ts, spawnTree: on Windows a Job Object, elsewhere a process group), so its end,
+ * by the time limit or by its owner's kill (an update that cannot wait, a shutdown), is that of everything it started,
+ * and the worktree's folder is free after (queue LKF); it resolves once the tree has ended.
  */
-export function runSetup(command: string, cwd: string, o: { limitMs?: number; started?: (p: ChildProcess) => void } = {}): Promise<string | undefined> {
+export function runSetup(command: string, cwd: string, o: { limitMs?: number; started?: (p: HeavyProcess) => void } = {}): Promise<string | undefined> {
   return new Promise((resolve) => {
     let out = "";
     const keep = (b: Buffer) => { out = (out + b.toString()).slice(-OUTPUT_TAIL * 2); };
-    let child: ChildProcess;
-    try { child = spawn(command, { cwd, shell: true, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }); }
+    let p: HeavyProcess;
+    try { p = spawnTree(...shellCommand(command), { cwd }); }
     catch (e) { return resolve(`it could not start: ${errorText(e)}`); }
-    o.started?.(child);
-    child.stdout?.on("data", keep);
-    child.stderr?.on("data", keep);
-    let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; child.kill(); }, o.limitMs ?? SETUP_LIMIT_MS);
+    let failed: string | undefined, timedOut = false, killed = false;
+    p.child.on("error", (e: Error) => { failed = e.message; });
+    p.child.stdout.on("data", keep);
+    p.child.stderr.on("data", keep);
+    const tree = p;
+    o.started?.({ ...tree, kill: () => { killed = true; tree.kill(); } });
+    const timer = setTimeout(() => { timedOut = true; tree.kill(); }, o.limitMs ?? SETUP_LIMIT_MS);
     const tail = () => { const t = out.trim().slice(-OUTPUT_TAIL); return t ? `; its output ends: ${t}` : ""; };
-    child.on("error", (e) => { clearTimeout(timer); resolve(`it could not start: ${e.message}`); });
-    child.on("close", (code, signal) => {
+    void tree.done.then((code) => {
       clearTimeout(timer);
-      if (timedOut) resolve(`it ran longer than ${Math.round((o.limitMs ?? SETUP_LIMIT_MS) / 60_000)} minutes and was ended${tail()}`);
-      else if (code === 0) resolve(undefined);
-      else resolve(`${code === null ? `it was ended (${signal})` : `exit code ${code}`}${tail()}`);
+      if (failed !== undefined && !timedOut) resolve(`it could not start: ${failed}`);
+      else if (timedOut) resolve(`it ran longer than ${Math.round((o.limitMs ?? SETUP_LIMIT_MS) / 60_000)} minutes and was ended${tail()}`);
+      else if (code === 0 && !killed) resolve(undefined);
+      else resolve(`${code === null || killed ? "it was ended" : `exit code ${code}`}${tail()}`);
     });
   });
 }

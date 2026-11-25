@@ -5,7 +5,6 @@
 import { changedFiles, checkoutOf, checkoutStatus, git as gitRead, headOnce, ownWorktree, recordStepEnd, recordStepStart, recordTurn, revParse } from "./gitinfo.ts";
 import { AcceptedPusher } from "./accepted.ts";
 import type { GitRunner } from "./deploy.ts";
-import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
@@ -35,7 +34,7 @@ import { perf } from "./perf.ts";
 import { logError } from "./log-error.ts";
 import { integrationContext, mergeBase, mergeConflicts, mergedText, pullBase, pullBefore, recoverPull, type IntegrationContext } from "./integration.ts";
 import { Coordinator, bringsBack, refusalText, waitingText, type Member } from "./coordinator.ts";
-import type { Capacity } from "./capacity.ts";
+import type { Capacity, HeavyProcess } from "./capacity.ts";
 import { CHECK_DRAIN_WAIT_MS, CheckRunner } from "./check-runs.ts";
 import type { SnapshotReader } from "./snapshots.ts";
 import { gitWritableRoots } from "./codex.ts";
@@ -277,7 +276,7 @@ export class Engine implements Member {
    */
   private readonly liveAnswerIds = new Set<string>();
   /** Worktree setup commands running, by queue (src/worktree.ts, runSetup). */
-  private readonly setups = new Map<string, ChildProcess | null>();
+  private readonly setups = new Map<string, HeavyProcess | null>();
   /** Setups an update's drain ended: their end is neither a success nor a failure. */
   private readonly setupsEnded = new Set<string>();
   /** The checks Nexus runs (src/check-runs.ts): only with the capacity coordinator. */

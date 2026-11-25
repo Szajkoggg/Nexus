@@ -218,6 +218,10 @@ and, where the work touches it, the build: a model-free integration is exactly a
 - The update's drain did not wait for a worktree setup run outside the checks (a new worktree's, or one after a merge
   at a step boundary): `Engine.idle()` looked only at the agents and the checks. It waits for it now, and a drain that
   cannot wait ends it without counting a failure.
+- Ending that setup (a drain that cannot wait, a shutdown, its time limit) ended only its shell on Windows: what the
+  command started ran on in the worktree and kept its folder (queue LKF). The setup now runs as a whole process tree,
+  as a check does (`spawnTree` in `apps/server/src/capacity.ts`: a Job Object on Windows, a process group elsewhere),
+  and its end is that of everything it started.
 - Found while testing: test temporary folders that nest (each test pointing TEMP inside the last one's) made worktree
   paths long enough that git commands failed on Windows; the new tests take their folders from the system's temporary
   folder as it was at the start.

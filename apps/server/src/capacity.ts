@@ -213,6 +213,26 @@ export class Capacity {
   }
 }
 
+/**
+ * The command runs through the system's shell (cmd.exe on Windows, sh elsewhere) as Node's `shell: true` runs it, in
+ * a small Node launcher: the job host quotes each argument for CreateProcess, which cmd.exe's own switches do not
+ * take, and the launcher's exit code is the command's.
+ */
+const LAUNCHER = 'const r=require("node:child_process").spawnSync(process.argv[1],{shell:true,stdio:"inherit",windowsHide:true});process.exit(r.status===null?1:r.status)';
+
+/** `bin` and `args` that run a shell command line through the launcher (for Grant.spawn and spawnTree). */
+export function shellCommand(command: string): [string, string[]] {
+  return [process.execPath, ["-e", LAUNCHER, command]];
+}
+
+/**
+ * Starts a process outside any grant whose `done` and `kill` take its whole tree, as Grant.spawn's do: on Windows in a
+ * Job Object of its own, elsewhere in a process group. The worktree setup the engine runs before a step (queue LKF).
+ */
+export function spawnTree(bin: string, args: string[], o: { cwd: string; env?: NodeJS.ProcessEnv }): HeavyProcess {
+  return track(bin, args, o, true);
+}
+
 /** Starts a process whose `done` follows its whole tree (see Grant.spawn). */
 function track(bin: string, args: string[], o: { cwd: string; env?: NodeJS.ProcessEnv }, jobs: boolean): HeavyProcess {
   const env = o.env ?? process.env;

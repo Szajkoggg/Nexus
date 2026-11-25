@@ -139,7 +139,8 @@ for (const how of ["pause", "stop", "drain", "drain-now", "shutdown"] as const) 
       else if (how === "drain-now") engine.drainForUpdate(true);
       else engine.shutdown();
       writeFileSync(s.go, "");
-      // Ending the setup ends its shell; its node child, on Windows, runs on to its end at the gate (worktree.ts runSetup).
+      // Ending the setup ends its whole tree, its node process too (worktree.ts runSetup; setup-tree.test.ts); else it
+      // runs on to its end at the gate.
       await x.until("the first try ended", () => !existsSync(s.hold) || (killed && !alive(pid)), LONGER.run);
       if (killed) rmSync(s.fail, { force: true });
       await x.until("the engine let go of it", () => how === "shutdown" || engine.idle(), LONGER.run);
