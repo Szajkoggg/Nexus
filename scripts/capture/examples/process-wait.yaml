@@ -1,0 +1,16 @@
+# A worktree cleanup that waits for the queue's worker process (queue LCK, survey LC3 F2): the Waiting list's items,
+# one still ending, one that outlived the forced kill, on the demo project of scripts/capture/seed-process-wait.ts.
+#   node scripts/capture.ts scripts/capture/examples/process-wait.yaml --no-before
+seed: scripts/capture/seed-process-wait.ts
+views:
+  - key: waiting-process-wait@1440
+    route: "#/demo"
+    label: "A cleanup waiting for the worker process (Waiting list)"
+    actions:
+      - click: "Mark as seen"
+      - wait: 600
+  - key: waiting-process-wait@492
+    route: "#/demo"
+    label: "A cleanup waiting for the worker process (Waiting list), narrow window"
+    actions:
+      - scroll: "all projects, newest first"
