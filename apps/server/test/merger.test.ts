@@ -16,9 +16,10 @@ import { Merger } from "../src/merger.ts";
 import { cleanUp, judgeMerge, mergeBack, withMergeLock } from "../src/mergeback.ts";
 import { judgePlan } from "../src/deploy-plan.ts";
 import { Engine } from "../src/engine.ts";
+import type { AgentProcess } from "../src/agent.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
 import { LONGER, QUICK_ENGINE, holdWork, sleep, until as waitUntil } from "./wait.ts";
-import { inProcessRuntime } from "./in-process-runtime.ts";
+import { inProcessRuntime, letEnd, type ProcessEnds } from "./in-process-runtime.ts";
 
 /** The system's temporary folder, read once: each project sets TEMP to a folder of its own (the report's folder). */
 const TMP = tmpdir();
@@ -521,10 +522,12 @@ test("a survey wait preserves cleanup proof and a restarted merger leaves its re
 // ---------------------------------------------------------------- with the engine and the fake runtimes
 
 /**
- * A project with a worktree queue W and the engine and Merger wired as the server wires them. `M`: a queue in the main
- * checkout; `B`: another queue, in a worktree of its own when `bWorktree`.
+ * A project with a worktree queue W and the engine and Merger wired as the server wires them (main.ts), the Merger's
+ * processesEnded included: a cleanup waits for the queue's worker processes. `M`: a queue in the main checkout; `B`:
+ * another queue, in a worktree of its own when `bWorktree`; `ends`: the workers' kill() and close() ignored or late;
+ * `wrap`: sees each process made.
  */
-function wired(steps: { W: StepDef[]; M?: StepDef[]; B?: StepDef[] }, o: { mergeBack?: boolean; bWorktree?: boolean } = {}) {
+function wired(steps: { W: StepDef[]; M?: StepDef[]; B?: StepDef[] }, o: { mergeBack?: boolean; bWorktree?: boolean; ends?: ProcessEnds; wrap?: (proc: AgentProcess) => AgentProcess } = {}) {
   const x = project({ mergeBack: o.mergeBack });
   x.store.writeQueue({ protocol: 1, id: "W", title: "Worktree", revision: 1, status: "proposed", worktree: "auto", stop_conditions: [], checks: [], steps: steps.W });
   approveQueue(x.store, "W");
@@ -534,6 +537,8 @@ function wired(steps: { W: StepDef[]; M?: StepDef[]; B?: StepDef[] }, o: { merge
     approveQueue(x.store, "B");
   }
   let merger: Merger | undefined;
+  /** How often the Merger asked whether a queue's processes have ended (a look at its cleanup). */
+  const looks = new Map<string, number>();
   /** Steps (`queue/step`) the test holds in review. */
   const inReview = new Set<string>();
   const tick = () => {
@@ -542,11 +547,14 @@ function wired(steps: { W: StepDef[]; M?: StepDef[]; B?: StepDef[] }, o: { merge
     merger!.onChange(s);
     engine.onChange(loadProjectState(x.store));
   };
-  const engine: Engine = new Engine(x.store, tick, { spawn: inProcessRuntime(), retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, boundary: (q, step, state) => merger!.atBoundary(q, step, state) });
-  merger = new Merger(x.store, { start: (q) => void engine.start(q, { runtime: "claude" }), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining, serverRoot: join(x.base, "elsewhere"), poke: tick, pollMs: 200 });
+  const engine: Engine = new Engine(x.store, tick, { spawn: inProcessRuntime({ ends: o.ends, wrap: o.wrap }), retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, boundary: (q, step, state) => merger!.atBoundary(q, step, state) });
+  merger = new Merger(x.store, {
+    start: (q) => void engine.start(q, { runtime: "claude" }), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining,
+    serverRoot: join(x.base, "elsewhere"), poke: tick, pollMs: 200, processesEnded: (q) => { looks.set(q, (looks.get(q) ?? 0) + 1); return engine.endQueueProcesses(q); },
+  });
   const until = (what: string, pred: () => boolean, ms: number = LONGER.processes) =>
     waitUntil(what, pred, ms, () => ["W", ...(steps.B ? ["B"] : [])].map((id) => `; ${id} ${JSON.stringify(x.queue(id).run)} ${x.queue(id).steps.map((s) => `${s.id}=${s.status}`).join(" ")}; git ${JSON.stringify(x.store.readGit(id)?.merge)}`).join(""));
-  return { ...x, engine, merger, until, inReview };
+  return { ...x, engine, merger, until, inReview, looks };
 }
 const step = (id: string, behaviour: string): StepDef => ({ id, title: `Step ${id}`, goal: `FAKE: ${behaviour}`, acceptance: [] });
 
@@ -621,6 +629,34 @@ test("engine: a step at work in the main checkout with uncommitted work is held 
     assert.ok(g.merged!.at <= x.queue("M").steps[1]!.started_at!, `the fast-forward (${g.merged!.at}) before M2 opened (${x.queue("M").steps[1]!.started_at})`);
     assert.ok(onlyForward(x), "main only moved by commits and fast-forwards");
   } finally { hold.done(); x.merger.shutdown(); x.engine.shutdown(); }
+});
+
+test("engine: a merged-back worktree is cleaned up only once the queue's worker process has ended; while it does not end, the cleanup waits with no reason recorded (survey LC3, F2/F3, as it stands)", async () => {
+  const ends: ProcessEnds = { dropped: [] };
+  let made = 0;
+  // The integration step's process (W1's ends before it starts) outlives its queue's end.
+  const wrap = (proc: AgentProcess) => { if (++made === 2) { ends.close = "ignore"; ends.kill = "ignore"; } return proc; };
+  const x = wired({ W: [step("W1", "commit")] }, { ends, wrap });
+  const wt = join(x.base, "project.worktrees", "W");
+  try {
+    x.engine.start("W", { runtime: "claude" });
+    await x.until("W merged back", () => !!x.store.readGit("W")?.merged);
+    await x.until("the end of W's process asked", () => ends.dropped.length > 0);
+    // The look after the fast-forward: the server's file watchers bring it on git.yaml's change; this fixture has none.
+    const before = x.looks.get("W") ?? 0;
+    x.merger.onChange(loadProjectState(x.store));
+    assert.equal(x.looks.get("W"), before + 1, "the cleanup asks whether W's processes have ended");
+    await x.until("two more looks at W's cleanup", () => (x.looks.get("W") ?? 0) >= before + 3); // every pollMs while it waits
+    const g = x.store.readGit("W")!;
+    assert.equal(g.cleaned, undefined, "no cleanup while the worker's process runs in the worktree");
+    assert.ok(existsSync(wt), "the worktree stays");
+    assert.equal(g.cleanup, undefined, "no waiting reason is recorded (F2: the dashboard shows nothing)");
+    assert.equal(g.merge?.waiting, undefined);
+    assert.ok(x.engine.endQueueProcesses("W") === false, "the process is still alive");
+    letEnd(ends);
+    await x.until("W cleaned up", () => !!x.store.readGit("W")?.cleaned);
+    assert.ok(!existsSync(wt), "the worktree went once the process ended");
+  } finally { letEnd(ends); x.merger.shutdown(); x.engine.shutdown(); }
 });
 
 // ---------------------------------------------------------------- the plan after a worktree queue

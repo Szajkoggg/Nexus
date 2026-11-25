@@ -1,5 +1,6 @@
 // A shared stand-in for the workers' cleanup barrier (AgentProcess.cleanup, queue LH): the runtimes' fakes as usual,
-// with every cleanup counted and passed through a gate a test holds, releases or makes fail. It replaces the one-off
+// with every cleanup counted and passed through a gate a test holds, releases or makes fail, and made slow or timed
+// out (queue LCK). It replaces the one-off
 // wrappers (integration-free's slowHosts, worker-processes' held and failing cleanups).
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -34,9 +35,12 @@ export interface GatedCleanup {
  * `make`: the process itself (by default Claude's or Codex's session, against their fakes); `failBeforeTurn`: a cleanup
  * asked of a process that has run no turn yet fails with this message, whatever the gate (a busy machine, where a new
  * process's Windows job host starts later than the cleanup limit: "worker cleanup timed out", queue CI8). The gate
- * starts open.
+ * starts open. `delayMs`: each cleanup that passes the gate takes this long before the process's own (a cleanup that
+ * takes time, as the job host's does; queue LCK). `timeoutMs`: each cleanup that passes the gate waits this long, then
+ * fails with "worker cleanup timed out" as the job host's limit does (worker-process.ts), never reaching the
+ * process's own.
  */
-export function gatedCleanup(o: { make?: (launch: Launch) => AgentProcess; failBeforeTurn?: string } = {}): GatedCleanup {
+export function gatedCleanup(o: { make?: (launch: Launch) => AgentProcess; failBeforeTurn?: string; delayMs?: number; timeoutMs?: number } = {}): GatedCleanup {
   const make = o.make ?? ((launch: Launch) => (launch.runtime === "claude" ? new ClaudeSession(launch.options) : new CodexSession(launch.options)));
   const calls: CleanupCall[] = [];
   let gate: { open: boolean; error?: string } = { open: true };
@@ -58,6 +62,11 @@ export function gatedCleanup(o: { make?: (launch: Launch) => AgentProcess; failB
       try {
         if (!turned && o.failBeforeTurn !== undefined) throw new Error(o.failBeforeTurn);
         await pass();
+        if (o.timeoutMs !== undefined) {
+          await new Promise((r) => setTimeout(r, o.timeoutMs));
+          throw new Error("worker cleanup timed out");
+        }
+        if (o.delayMs !== undefined) await new Promise((r) => setTimeout(r, o.delayMs));
         await own?.();
         call.outcome = "done";
       } catch (e) { call.outcome = "failed"; throw e; }

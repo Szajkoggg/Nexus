@@ -102,14 +102,49 @@ export const inProcessClaude: SpawnRuntimeChild = inProcessChild(runFakeClaude);
 export const inProcessCodex: SpawnRuntimeChild = inProcessChild(runFakeCodex);
 
 /**
- * The `spawn` option (AgentHostOptions.spawn) that runs the fake runtimes in this process: the real adapters, over
- * in-memory streams. `wrap` sees each process made (a test that counts or steers them).
+ * A process that does not end when it is told to (queue LCK; a refused TerminateProcess, a turn that never ends): the
+ * modes are read at each call, so a test changes them while its processes run. `kill`: "ignore" drops the call, a
+ * `delayMs` makes it that much later; `close`: "ignore" drops the call (the runtime's input stays open). `dropped`
+ * (given empty) gets each dropped call, with `make()` to make it after all (letEnd: a test's end, the hang's release).
  */
-export function inProcessRuntime(wrap?: (proc: AgentProcess, launch: Launch) => AgentProcess): NonNullable<AgentHostOptions["spawn"]> {
+export interface ProcessEnds {
+  kill?: "ignore" | { delayMs: number };
+  close?: "ignore";
+  readonly dropped: { call: "kill" | "close"; proc: AgentProcess; make(): void }[];
+}
+
+/** ProcessEnds' modes set off, and every dropped call made after all, in order. */
+export function letEnd(ends: ProcessEnds): void {
+  ends.kill = undefined;
+  ends.close = undefined;
+  for (const d of ends.dropped.splice(0)) d.make();
+}
+
+/**
+ * The `spawn` option (AgentHostOptions.spawn) that runs the fake runtimes in this process: the real adapters, over
+ * in-memory streams. `wrap` sees each process made (a test that counts or steers them); `ends` makes their kill() and
+ * close() ignored or late (ProcessEnds).
+ */
+export function inProcessRuntime(o: { wrap?: (proc: AgentProcess, launch: Launch) => AgentProcess; ends?: ProcessEnds } = {}): NonNullable<AgentHostOptions["spawn"]> {
   return (launch) => {
     const proc = launch.runtime === "codex"
       ? new CodexSession({ ...launch.options, spawnChild: inProcessCodex })
       : new ClaudeSession({ ...launch.options, spawnChild: inProcessClaude });
-    return wrap ? wrap(proc, launch) : proc;
+    if (o.ends) endsOf(proc, o.ends);
+    return o.wrap ? o.wrap(proc, launch) : proc;
+  };
+}
+
+function endsOf(proc: AgentProcess, ends: ProcessEnds): void {
+  const kill = proc.kill.bind(proc), close = proc.close.bind(proc);
+  proc.kill = () => {
+    const mode = ends.kill;
+    if (mode === "ignore") ends.dropped.push({ call: "kill", proc, make: kill });
+    else if (mode) setTimeout(kill, mode.delayMs);
+    else kill();
+  };
+  proc.close = () => {
+    if (ends.close === "ignore") ends.dropped.push({ call: "close", proc, make: close });
+    else close();
   };
 }

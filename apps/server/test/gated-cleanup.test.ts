@@ -51,3 +51,20 @@ test("gatedCleanup's failBeforeTurn fails a cleanup only before the process's fi
   await proc.cleanup();
   assert.equal(proc.cleaned, 1);
 });
+
+test("gatedCleanup's delayMs makes a cleanup that passes the gate take that long before the process's own; timeoutMs fails it as the job host's limit does (queue LCK)", async () => {
+  const slow = gatedCleanup({ make: () => new Stand(), delayMs: 40 });
+  const proc = slow.spawn(launch) as Stand;
+  const p = proc.cleanup();
+  assert.equal(await settled(p), "waiting");
+  assert.equal(proc.cleaned, 0, "not before the delay");
+  await p;
+  assert.equal(proc.cleaned, 1);
+  const late = gatedCleanup({ make: () => new Stand(), timeoutMs: 45 });
+  const stuck = late.spawn(launch) as Stand;
+  const q = stuck.cleanup();
+  assert.equal(await settled(q), "waiting");
+  await assert.rejects(q, /^Error: worker cleanup timed out$/);
+  assert.equal(stuck.cleaned, 0, "a timed-out cleanup never reaches the process's own");
+  assert.deepEqual(late.calls, [{ turned: false, outcome: "failed" }]);
+});

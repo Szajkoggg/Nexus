@@ -1,6 +1,6 @@
 // The shared setup of the engine tests (engine*.test.ts), against the fake runtimes (test/fake-claude.ts,
 // test/fake-codex.ts): no model, no tokens. Split from engine.test.ts so its parts run side by side (queue TS2).
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers, type StepDef } from "@nexus/protocol";
@@ -38,8 +38,33 @@ export function setup(behaviours: string[], options: EngineOptions = FAST) {
   return { store, engine, queue, received, until };
 }
 
-/** The next server on the same files, as after a restart. */
-export function restart(store: ProjectStore, options: EngineOptions = FAST): Engine {
+/**
+ * A saved file damaged before the next server reads it (queue LCK): a queue's file (run.yaml, plan.yaml, checks.yaml,
+ * any other under queues/<queue>/) or a session's runtime.json. `as`: "unparsable" (the default; not YAML or JSON at
+ * all) or "schema" (parsed, but not what the schema takes: a file an older server cannot read, as after a rollback).
+ */
+type Damage = ({ queue: string; file: string } | { session: string; file: "runtime.json" }) & { as?: "unparsable" | "schema" };
+
+const DAMAGED = {
+  yaml: { unparsable: "state: [unclosed\n", schema: "protocol: 1\nstate: 42\nsteps: nonsense\n" },
+  json: { unparsable: "{ \"state\": ", schema: "{ \"protocol\": 1, \"state\": 42 }\n" },
+} as const;
+
+/** Writes each damaged file (Damage); returns their paths, in order. */
+function damage(store: ProjectStore, files: Damage[]): string[] {
+  return files.map((d) => {
+    const path = "queue" in d ? join(store.dir, "queues", d.queue, d.file) : join(store.dir, "sessions", d.session, d.file);
+    writeFileSync(path, DAMAGED[d.file.endsWith(".json") ? "json" : "yaml"][d.as ?? "unparsable"]);
+    return path;
+  });
+}
+
+/**
+ * The next server on the same files, as after a restart. `corrupt`: files damaged first (damage()), as a server that
+ * died mid-write or a rollback to an older schema leaves them.
+ */
+export function restart(store: ProjectStore, options: EngineOptions = FAST, o: { corrupt?: Damage[] } = {}): Engine {
+  if (o.corrupt) damage(store, o.corrupt);
   const next: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store); next.onChange(loadProjectState(store)); }, options);
   return next;
 }
