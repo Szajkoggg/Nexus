@@ -17,7 +17,7 @@ import {
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateDirs, templateQueueId, unusableTemplate, type MergedTemplates,
   NoteMeta, Role, Runtime, type PictureRole, type ReviewItem, type SessionFile,
   noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, ideaStatuses, reportSourceHash,
-  capacityLines, latestCheckSet, stepChecks, readCapacity, reviewStats, reviewStatsText, switchReport, switchReportText, helperAbout, helperText, NEXUS_PASS_ON, PassOnReason,
+  capacityLines, latestCheckSet, stepChecks, readCapacity, reviewStats, reviewStatsText, switchReport, switchReportText, helperAbout, helperText, NEXUS_PASS_ON, PassOnReason, isUnreadableFile,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -263,6 +263,14 @@ const pathArg = (p: string) => normPath(p, workDir());
 const fullHelp = () => `${HELP}\n${topicList()}`;
 
 class UsageError extends Error {}
+/**
+ * A queue's or session's file, read: a missing one is `unknown` ("unknown queue W"); one that is there but cannot be
+ * read is refused naming the file (the store's UnreadableFileError: docs/design/state.md, "Missing and unreadable
+ * files"), not taken for unknown (queue LKF). Both are usage errors (exit code 2, no stack trace).
+ */
+function known<T>(read: () => T, unknown: string): T {
+  try { return read(); } catch (e) { throw new UsageError(isUnreadableFile(e) ? e.message : unknown); }
+}
 /** The roles a session attached by hand may have (`nexus attach --role`). */
 const ATTACH_ROLES = ["worker", "orchestrator"] as const;
 /** A file named on the command line (resolved with pathArg), read; one that is not there is a usage error naming it (H4), not a stack trace. */
@@ -332,7 +340,7 @@ function ownLine(st: ProjectStore, s: SessionFile): Set<string> {
 function session(st: ProjectStore): SessionFile {
   const id = need(sessionId(), "session (NEXUS_SESSION or --session; `nexus attach` creates one)");
   let s: SessionFile;
-  try { s = st.readSession(id); } catch { throw new UsageError(`unknown session ${id}`); }
+  s = known(() => st.readSession(id), `unknown session ${id}`);
   // What this call writes is stamped after what its session wrote and was told, and after what the server had seen
   // when it handed the agent its work (docs/design/state.md, "Clock steps"): reading them takes their times up.
   st.readEvents(id); st.readInbox(id); st.observeClock();
@@ -354,7 +362,7 @@ function queueFor(st: ProjectStore, s: SessionFile, step?: string): string {
 
 function checkStep(st: ProjectStore, queue: string, step: string): void {
   let q;
-  try { q = st.readQueue(queue); } catch { throw new UsageError(`unknown queue ${queue}`); }
+  q = known(() => st.readQueue(queue), `unknown queue ${queue}`);
   const steps = stepDefs(q); // with the closing refactoring step, when the queue has one
   if (!steps.some((x) => x.id === step)) throw new UsageError(`queue ${queue} has no step ${step} (has ${steps.map((x) => x.id).join(", ")})`);
 }
@@ -1018,7 +1026,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     const summary = need(o().summary, "--summary");
     const findings = o().findings === undefined ? undefined : Number(o().findings);
     if (findings !== undefined && (!Number.isInteger(findings) || findings < 0)) throw new UsageError(`--findings takes a whole number of findings (0 or more), not ${o().findings}`);
-    try { st.readQueue(queue); } catch { throw new UsageError(`unknown queue ${queue}`); }
+    known(() => st.readQueue(queue), `unknown queue ${queue}`);
     // The report lives in the queue's folder, where the dashboard and the run digest read it. Workers may not write
     // under .nexus with their file tools, so they write it anywhere and this command (its only writer) copies it in.
     const target = normPath(join(st.queueDir(queue), "report.md"));

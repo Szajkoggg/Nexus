@@ -4,7 +4,7 @@
 // unknown queues, H2 an empty standard input, H6 surplus positional arguments.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ProjectStore, approveQueue, loadProjectState, newId, type Event, type Role } from "@nexus/protocol";
@@ -145,4 +145,32 @@ test("H6: surplus positional arguments are refused (an unquoted text, a glob of 
   ok(await x.nexus("w", ["context", "Summary", "--files", "src/a.ts,src/b.ts"]));
   ok(await x.nexus("w", ["step", "progress", "Q1", "half way"]));
   ok(await x.nexus("w", ["log", "two words"]));
+});
+
+// Queue LKF (survey LC3): a session or queue file that is there but cannot be read is not "unknown": the refusal names
+// the file (the store's UnreadableFileError), still a usage error; a missing one stays "unknown …".
+test("an unreadable session.yaml or queue.yaml is refused naming the file; a missing one is still unknown", async () => {
+  const x = setup();
+  const badSession = join(x.store.sessionDir("bad"), "session.yaml");
+  mkdirSync(join(badSession, ".."), { recursive: true });
+  writeFileSync(badSession, "protocol: [1\nid: bad\n");
+  const badQueue = join(x.store.queueDir("BAD"), "queue.yaml");
+  mkdirSync(join(badQueue, ".."), { recursive: true });
+  writeFileSync(badQueue, "id: BAD\nsteps: 3\n");
+  const report = join(x.root, "report.md");
+  writeFileSync(report, "# Report\n");
+  /** The refusal names the file (forward slashes, as the store writes paths), then why it cannot be read. */
+  const unreadable = (r: CliResult, file: string) => {
+    refused(r, / cannot be read: /);
+    assert.ok(r.stderr.includes(`${file.replaceAll("\\", "/")} cannot be read: `), r.stderr);
+  };
+
+  unreadable(await x.nexus("bad", ["step", "progress", "Q1", "half"]), badSession);
+  refused(await x.nexus("nosuch", ["step", "progress", "Q1", "half"]), /^nexus: unknown session nosuch\n$/);
+
+  unreadable(await x.nexus("w", ["step", "progress", "Q1", "half", "--queue", "BAD"]), badQueue);
+  refused(await x.nexus("w", ["step", "progress", "Q1", "half", "--queue", "NOPE"]), /^nexus: unknown queue NOPE\n$/);
+
+  unreadable(await x.nexus("o", ["report", "BAD", "--file", report, "--summary", "s"]), badQueue);
+  refused(await x.nexus("o", ["report", "NOPE", "--file", report, "--summary", "s"]), /^nexus: unknown queue NOPE\n$/);
 });

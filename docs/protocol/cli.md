@@ -97,7 +97,8 @@ nexus server cancel                            # give up waiting for a deploy; t
 
 A command line the CLI cannot take (an unknown option, an option without its value, a value the protocol does not know,
 positional arguments beyond the command's own, such as an unquoted text or a list given as a glob, a text given as `-`
-with an empty standard input, a file named that is not there, an unknown queue, a `--session` other than a set
+with an empty standard input, a file named that is not there, an unknown queue or session (one whose `queue.yaml` or
+`session.yaml` is there but cannot be read is refused naming that file and why, not as unknown), a `--session` other than a set
 `NEXUS_SESSION`, a `nexus check` name that is not one of the step's checks, which the message lists)
 ends with `nexus: <what is wrong>` on stderr and exit code 2, as every refusal does, never with a stack trace. A
 negative number reads as an option: a positional one goes after `--` (`nexus metric record delta -- -5`), an option's
