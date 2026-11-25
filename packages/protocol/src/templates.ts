@@ -1,7 +1,7 @@
 // Queue templates (docs/protocol/planning.md, "Queue templates"): a queue's YAML with a `template:` header and `params:`, its texts
 // carrying {{name}} placeholders. Three layers, strongest last: shipped with Nexus, the user's global ones, the
 // project's. Parsing, merging the layers and filling are pure; reading the three folders is the last section.
-import { errorText } from "./errors.ts";
+import { errorText, formatIssues } from "./errors.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,9 +76,9 @@ export function parseTemplate(text: string, layer: TemplateLayer, path: string):
   if (!doc || typeof doc !== "object" || Array.isArray(doc)) throw new TemplateError("a template is a YAML mapping");
   const { template, params, id: _id, maintenance, ...queue } = doc as Record<string, unknown>;
   const header = TemplateHeader.safeParse(template);
-  if (!header.success) throw new TemplateError(`template: ${header.error.issues.map((i) => `${i.path.join(".") || "header"}: ${i.message}`).join("; ")}`);
+  if (!header.success) throw new TemplateError(`template: ${formatIssues(header.error, "header")}`);
   const list = z.array(TemplateParam).safeParse(params ?? []);
-  if (!list.success) throw new TemplateError(`params: ${list.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+  if (!list.success) throw new TemplateError(`params: ${formatIssues(list.error)}`);
   const names = list.data.map((p) => p.name);
   const repeated = names.filter((n, i) => names.indexOf(n) !== i);
   if (repeated.length) throw new TemplateError(`params: ${[...new Set(repeated)].join(", ")} declared more than once`);
@@ -176,7 +176,7 @@ export function fillTemplate(t: Template, given: Readonly<Record<string, string>
     if (mode === "survey") queue.coding = false;
   }
   const parsed = QueueFile.safeParse({ protocol: 1, ...queue });
-  if (!parsed.success) throw new TemplateError(`the filled template is not a valid queue: ${parsed.error.issues.map((i) => `${i.path.join(".") || "queue"}: ${i.message}`).join("; ")}`);
+  if (!parsed.success) throw new TemplateError(`the filled template is not a valid queue: ${formatIssues(parsed.error, "queue")}`);
   return queue;
 }
 

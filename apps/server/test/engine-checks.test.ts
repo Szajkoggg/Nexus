@@ -647,7 +647,7 @@ test("an unreadable checks.yaml while the checks run: the step does not go to it
     assert.deepEqual(seen.map(String), [], "no rejection nobody handled");
     assert.match(x.queue().run!.reason!, /queues\/Q\/checks\.yaml cannot be read/);
     const state = loadProjectState(x.store);
-    assert.ok(state.warnings.some((w) => /queue Q checks:/.test(w)), "the state warns of the file");
+    assert.ok(state.warnings.some((w) => /queues\/Q\/checks\.yaml cannot be read/.test(w)), "the state warns of the file");
     assert.notEqual(x.queue().steps[0]!.status, "review", "not to its review as if its checks had run");
     assert.equal(x.queue().steps[0]!.status, "checking");
   } finally { x.engine.shutdown(); x.cap.shutdown(); }

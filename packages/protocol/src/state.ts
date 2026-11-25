@@ -314,9 +314,9 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
   const project = store.readProject();
   const away = readAway(store.env, (w) => warnings.push(w));
   let tags: TagsFile;
-  try { tags = store.readTags(); } catch (e) { warnings.push(`tags.yaml: ${errorText(e)}`); tags = { protocol: 1, areas: [], activities: [], renames: [], proposals: [], decisions: [] }; }
+  try { tags = store.readTags(); } catch (e) { warnings.push(errorText(e)); tags = { protocol: 1, areas: [], activities: [], renames: [], proposals: [], decisions: [] }; }
   let metrics: MetricsFile;
-  try { metrics = store.readMetrics(); } catch (e) { warnings.push(`metrics.yaml: ${errorText(e)}`); metrics = { protocol: 1, metrics: [] }; }
+  try { metrics = store.readMetrics(); } catch (e) { warnings.push(errorText(e)); metrics = { protocol: 1, metrics: [] }; }
 
   const queues = new Map<string, QueueView>();
   const plans = new Map<string, PlanFile>();
@@ -326,19 +326,19 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
       const { notes, errors } = store.readNotes(id);
       warnings.push(...errors);
       const view = initQueue(q, notes, project, tags);
-      try { view.run = store.readRun(id); } catch (e) { warnings.push(`queue ${id} run: ${errorText(e)}`); }
-      try { view.push = store.readPush(id); } catch (e) { warnings.push(`queue ${id} push: ${errorText(e)}`); }
-      try { view.git = store.readGit(id); } catch (e) { warnings.push(`queue ${id} git: ${errorText(e)}`); }
-      try { view.check_runs = store.readChecks(id); } catch (e) { view.check_runs_error = errorText(e); warnings.push(`queue ${id} checks: ${view.check_runs_error}`); }
+      try { view.run = store.readRun(id); } catch (e) { warnings.push(errorText(e)); }
+      try { view.push = store.readPush(id); } catch (e) { warnings.push(errorText(e)); }
+      try { view.git = store.readGit(id); } catch (e) { warnings.push(errorText(e)); }
+      try { view.check_runs = store.readChecks(id); } catch (e) { view.check_runs_error = errorText(e); warnings.push(view.check_runs_error); }
       try {
         const plan = store.readStart(id);
         if (plan) view.start = { ...plan, waiting: "", blocked: false };
-      } catch (e) { warnings.push(`queue ${id} start: ${errorText(e)}`); }
+      } catch (e) { warnings.push(errorText(e)); }
       try {
         const plan = store.readPlan(id) ?? chainPlan(view.start);
         if (plan) plans.set(id, plan);
         if (view.start?.after) view.start.after = undefined;
-      } catch (e) { warnings.push(`queue ${id} plan: ${errorText(e)}`); }
+      } catch (e) { warnings.push(errorText(e)); }
       queues.set(id, view);
     } catch (e) { warnings.push(`queue ${id}: ${errorText(e)}`); }
   }

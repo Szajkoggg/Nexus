@@ -209,7 +209,9 @@ The rule, kept by `packages/protocol/src/store.ts`:
 - **A default only for a missing file.** A reader asks whether the file is there (`reader.has`, `hasQueue`,
   `hasSession`, or the read's `ENOENT`), never takes the read's error for its absence.
 - **An unreadable file is an error naming it** (`UnreadableFileError`: the path, and why: the parse, the schema, or
-  the system's refusal). A caller that acts on the file stops there: `applyDraft` refuses the draft (409) rather than
+  the system's refusal; a schema's refusal written by `formatIssues` in `packages/protocol/src/errors.ts`, each issue
+  as `path: message`, the one formatter of zod issues; queue CHB). The message already names the file, so a caller
+  passes it on without adding the name again (`deriveProjectState`'s warnings). A caller that acts on the file stops there: `applyDraft` refuses the draft (409) rather than
   write over the file, `ensureServerSession` does not make the session again, an action on an unreadable queue or
   session fails with the file's name instead of "unknown" (404). A caller that lists many (the conversations, the
   search, the checks recovered at a start, a session's lineage) leaves the one out and warns with its path

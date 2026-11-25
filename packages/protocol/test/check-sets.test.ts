@@ -215,7 +215,7 @@ test("an unreadable checks.yaml: a step waiting for its review is not taken as r
   x.sets([x.set(d, { state: "running", granted_at: at(2) })]);
   writeFileSync(join(x.store.queueDir("Q"), "checks.yaml"), "protocol: 1\nsteps: [unclosed\n");
   const state = loadProjectState(x.store);
-  assert.ok(state.warnings.some((w) => /^queue Q checks:/.test(w)), JSON.stringify(state.warnings));
+  assert.ok(state.warnings.some((w) => /queues\/Q\/checks\.yaml cannot be read/.test(w)), JSON.stringify(state.warnings));
   const q = state.queues[0]!;
   assert.match(q.check_runs_error ?? "", /./, "the queue says its checks file cannot be read");
   assert.deepEqual([q.steps[0]!.status, q.steps[0]!.checking?.phase], ["checking", "queued"]);

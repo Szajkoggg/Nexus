@@ -1,6 +1,6 @@
 // What the user does from the dashboard, as writes to a project's files. Run by the Nexus server, which is the
 // writer of queue definitions, notes and inboxes (docs/protocol/files.md, "Rules").
-import { errorText } from "./errors.ts";
+import { errorText, formatIssues } from "./errors.ts";
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { NEXUS_SESSION, ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type Effort, type StatusChange, type InboxEntry, ReviewLevel, type RunFile, type SessionFile } from "./schemas.ts";
@@ -425,7 +425,7 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   const lists = [input, ...(Array.isArray(input.steps) ? input.steps as unknown[] : [])].flatMap((x) => kindListIssue(x) ?? []);
   if (lists.length) throw new ActionError(lists[0]!);
   const parsed = QueueFile.safeParse({ protocol: 1, status: "proposed", ...input });
-  if (!parsed.success) throw new ActionError(parsed.error.issues.map((i) => `${i.path.join(".") || "queue"}: ${i.message}`).join("; "));
+  if (!parsed.success) throw new ActionError(formatIssues(parsed.error, "queue"));
   // The levels the user set are the user's, and old policies are the server's: a draft brings neither (an existing
   // queue's stay, below).
   const draft = { ...parsed.data, user_levels: undefined, legacy_policies: undefined, integration: undefined };
@@ -871,7 +871,7 @@ export function updateSettings(store: ProjectStore, patch: unknown): void {
       }),
   };
   const r = ProjectFile.safeParse(next);
-  if (!r.success) throw new ActionError(r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+  if (!r.success) throw new ActionError(formatIssues(r.error));
   const kinds = [...kindIssues(r.data.kinds), ...helperIssues(r.data.review_helper)];
   if (kinds.length) throw new ActionError(kinds.join("; "));
   r.data.defaults.checks = stepChecks(r.data.defaults.checks, []);
@@ -890,10 +890,7 @@ function helperIssues(h: { runtime: "claude" | "codex"; effort?: Effort }): stri
 export function updateGlobalSettings(patch: unknown): GlobalSettings {
   let next: GlobalSettings;
   try { next = changedGlobal(readGlobalSettings(), patch); }
-  catch (e) {
-    const issues = (e as { issues?: { path: (string | number)[]; message: string }[] }).issues;
-    throw new ActionError(issues ? issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") : errorText(e));
-  }
+  catch (e) { throw new ActionError(formatIssues(e)); }
   const kinds = [...kindIssues(next.kinds), ...helperIssues(next.review_helper)];
   if (kinds.length) throw new ActionError(kinds.join("; "));
   writeGlobalSettings(next);

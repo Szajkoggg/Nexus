@@ -1,6 +1,6 @@
 // The `nexus` command. Agents report through it; the user (or Nexus itself) also uses it for setup.
 // Every agent-side command validates its input and appends one event to the session's own log.
-import { errorText } from "@nexus/protocol/errors";
+import { errorText, formatIssues } from "@nexus/protocol/errors";
 import { readFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import YAML from "yaml";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
@@ -361,7 +361,7 @@ function checkStep(st: ProjectStore, queue: string, step: string): void {
 
 function emit(st: ProjectStore, s: SessionFile, body: Record<string, unknown>): Event {
   const r = Event.safeParse({ v: 1, id: newId(), at: now(), session: s.id, ...body });
-  if (!r.success) throw new UsageError(r.error.issues.map((i) => `${i.path.join(".") || "event"}: ${i.message}`).join("; "));
+  if (!r.success) throw new UsageError(formatIssues(r.error, "event"));
   st.appendEvent(r.data);
   return r.data;
 }

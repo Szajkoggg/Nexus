@@ -86,3 +86,23 @@ test("unreadable account-wide files warn with their path and are set aside befor
   assert.ok(lines.some((l) => l.includes("usage.json")) && lines.some((l) => l.includes("away.yaml")), lines.join(" | "));
   assert.ok(existsSync(join(home, "usage.json")), "a reader does not move the file");
 });
+
+test("a project.yaml its schema refuses: the project's state fails with the file's name and the issue as path: message", () => {
+  const { store } = setup();
+  writeFileSync(store.projectFile, `${readFileSync(store.projectFile, "utf8")}\nname: 42\n`.replace(/^name: .*\n/m, ""));
+  assert.throws(() => loadProjectState(store), (e: Error) => {
+    assert.match(e.message, /\/project\.yaml cannot be read: name: /, e.message);
+    assert.doesNotMatch(e.message, /"code"/, "zod's raw JSON is not the text");
+    return true;
+  });
+});
+
+test("a run.yaml its schema refuses is a warning naming the file once", () => {
+  const { store } = setup();
+  applyDraft(store, draft("First"));
+  writeFileSync(join(store.queueDir("Q"), "run.yaml"), "state: 7\n");
+  const warnings = loadProjectState(store).warnings.filter((w) => w.includes("run.yaml"));
+  assert.equal(warnings.length, 1, warnings.join(" | "));
+  assert.match(warnings[0]!, /queues\/Q\/run\.yaml cannot be read: \w+: /);
+  assert.doesNotMatch(warnings[0]!, /^queue Q run:/);
+});
