@@ -16,20 +16,12 @@ import { AgentHost, ROLE_RECORDS, type HostHandlers } from "../src/agent-host.ts
 import { ClaudeSession } from "../src/claude.ts";
 import { CodexSession } from "../src/codex.ts";
 import type { SpawnRuntimeChild } from "../src/worker-process.ts";
-import { FakeGates, saveFakeConversation, type FakeHeld, type FakePoint } from "./fake-behaviour.ts";
+import { FakeGates, saveFakeConversation } from "./fake-behaviour.ts";
 import { inProcessClaude, inProcessCodex } from "./in-process-runtime.ts";
 import { scriptedSpawn } from "./scripted-child.ts";
-import { holds, until } from "./wait.ts";
+import { arrival, holds, until } from "./wait.ts";
 
 const OLD = "019a0000-0000-7000-8000-000000000004";
-
-/** The next arrival at `point`, waited for. */
-async function arrival(gates: FakeGates, point: FakePoint): Promise<FakeHeld> {
-  let held: FakeHeld | undefined;
-  void gates.reached(point).then((h) => { held = h; });
-  await until(`the fake at ${point}`, () => !!held);
-  return held!;
-}
 
 const lines = (file: string) => existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).map((x) => JSON.parse(x) as Record<string, unknown>) : [];
 

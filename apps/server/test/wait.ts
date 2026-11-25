@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { appendFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import type { FakeGates, FakeHeld, FakePoint } from "./fake-behaviour.ts";
 import { tempDir } from "./temp-dirs.ts";
 
 /**
@@ -120,6 +121,14 @@ export async function holds(what: string, pred: () => boolean, ms: number): Prom
     await sleep(POLL_MS);
   } while (performance.now() - start <= ms);
   if (!pred()) assert.fail(`${what} stopped holding at the end of ${ms} ms`);
+}
+
+/** The next arrival of a held fake at `point` (FakeGates.reached), waited for as until waits. */
+export async function arrival(gates: FakeGates, point: FakePoint): Promise<FakeHeld> {
+  let held: FakeHeld | undefined;
+  void gates.reached(point).then((h) => { held = h; });
+  await until(`the fake at ${point}`, () => !!held);
+  return held!;
 }
 
 /** As until, for a condition that is asked asynchronously (an HTTP request); a rejection counts as not yet. */

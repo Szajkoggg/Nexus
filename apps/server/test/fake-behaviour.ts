@@ -470,6 +470,18 @@ export function recordArgs(fake: Fake, what: Record<string, unknown>): void {
   if (env.FAKE_ARGS) appendLine(env.FAKE_ARGS, JSON.stringify({ ...what, handover: env.NEXUS_HANDOVER ?? null }) + "\n");
 }
 
+/** The fakes' starts (FAKE_ARGS): Claude's as [flag, id]; Codex's thread calls as [method] or [method, thread id]. */
+export function fakeStarts(env: NodeJS.ProcessEnv = process.env): string[][] {
+  const f = env.FAKE_ARGS!;
+  if (!existsSync(f)) return [];
+  return readFileSync(f, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[]; method?: string; threadId?: string }).flatMap((c) => {
+    if (c.argv) { const i = c.argv.findIndex((x) => x === "--session-id" || x === "--resume"); return [[c.argv[i]!, c.argv[i + 1]!]]; }
+    if (c.method === "thread/start") return [[c.method]];
+    if (c.method === "thread/resume") return [[c.method, c.threadId!]];
+    return [];
+  });
+}
+
 /**
  * The conversations Claude's fake saved, across its processes: one id per line in a file in the test's temporary
  * folder (beside FAKE_LOG, else in NEXUS_HOME, else the system's). Claude Code 2.1.323 saves a session's

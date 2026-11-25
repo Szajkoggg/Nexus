@@ -9,10 +9,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { ClaudeSession } from "../src/claude.ts";
-import { FakeGates, fakeGateSets, fakeSaved, type FakeHeld, type FakePoint } from "./fake-behaviour.ts";
+import { FakeGates, fakeGateSets, fakeSaved } from "./fake-behaviour.ts";
 import { runFakeClaude } from "./fake-claude.ts";
 import { inProcessClaude } from "./in-process-runtime.ts";
-import { until } from "./wait.ts";
+import { arrival, until } from "./wait.ts";
 
 const root = mkdtempSync(join(tmpdir(), "nexus-fake-gates-"));
 // The adapter writes the `nexus` shims into NEXUS_HOME's bin: this test's own folder, never the user's.
@@ -33,14 +33,6 @@ function session(gates: FakeGates, resume = false) {
   const saved = () => fakeSaved(uuid, "claude", env);
   const has = (prefix: string) => events.some((e) => e.startsWith(prefix));
   return { proc, events, received, saved, has, waitFor: (prefix: string) => until(`"${prefix}" among ${events.join("; ")}`, () => has(prefix)) };
-}
-
-/** The next arrival at `point`, waited for (the fake acknowledges it is there). */
-async function arrival(gates: FakeGates, point: FakePoint): Promise<FakeHeld> {
-  let held: FakeHeld | undefined;
-  void gates.reached(point).then((h) => { held = h; });
-  await until(`the fake at ${point}`, () => !!held);
-  return held!;
 }
 
 /** Ends the session (if it still runs) and the gates; nothing of them may be left: no held fake, timer or set. */

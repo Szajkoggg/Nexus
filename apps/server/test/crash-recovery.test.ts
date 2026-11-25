@@ -15,7 +15,7 @@ import type { Engine } from "../src/engine.ts";
 import { RESTARTED } from "../src/chats.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
 import { crashAt, endCrashServers } from "./crash-server.ts";
-import { fakeSaved } from "./fake-behaviour.ts";
+import { fakeSaved, fakeStarts } from "./fake-behaviour.ts";
 import { restart, setup } from "./engine-setup.ts";
 import { inProcessRuntime } from "./in-process-runtime.ts";
 import { tempDir } from "./temp-dirs.ts";
@@ -24,18 +24,6 @@ import { LONGER, holds, until } from "./wait.ts";
 const PLAIN_RESTART = "the Nexus server restarted; resume to continue";
 
 after(async () => { assert.equal(await endCrashServers(), 0, "every server the tests started was ended by its test"); });
-
-/** The fake's starts (FAKE_ARGS): Claude's as [flag, id]; Codex's thread calls as [method] or [method, thread id]. */
-function calls(): string[][] {
-  const f = process.env.FAKE_ARGS!;
-  if (!existsSync(f)) return [];
-  return readFileSync(f, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[]; method?: string; threadId?: string }).flatMap((c) => {
-    if (c.argv) { const i = c.argv.findIndex((x) => x === "--session-id" || x === "--resume"); return [[c.argv[i]!, c.argv[i + 1]!]]; }
-    if (c.method === "thread/start") return [[c.method]];
-    if (c.method === "thread/resume") return [[c.method, c.threadId!]];
-    return [];
-  });
-}
 
 /** A two-step queue Q in a temporary project, its fake recording its starts; nothing started. */
 function project(behaviours = ["done", "done"]) {
@@ -121,10 +109,10 @@ test("claude worker: the server dies as the process starts, before its first rea
     assert.equal(fakeSaved(native, "claude"), false, "nothing saved");
     const n = await nextServer(root, session);
     next = n.next;
-    await holds("paused, no start", () => n.run()?.state === "paused" && calls().length === 1, 300);
+    await holds("paused, no start", () => n.run()?.state === "paused" && fakeStarts().length === 1, 300);
     next.resume("Q");
     await until("the run to finish", () => n.run()?.state === "finished", LONGER.run);
-    assert.deepEqual(calls(), [["--session-id", native], ["--session-id", native]], "the same session, afresh");
+    assert.deepEqual(fakeStarts(), [["--session-id", native], ["--session-id", native]], "the same session, afresh");
     assert.equal(n.store.readSession(session).native_id, native);
     assert.deepEqual(outcome(n.store, session), base);
   } finally { clean([next]); }
@@ -149,7 +137,7 @@ test("claude worker: the server dies after the conversation was saved, before th
     assert.equal(n.store.readRuntime(session)?.conversation_saved, false, "the mark the dead server left");
     next.resume("Q");
     await until("the run to finish", () => n.run()?.state === "finished", LONGER.run);
-    assert.deepEqual(calls(), [["--session-id", native], ["--session-id", native], ["--resume", native]]);
+    assert.deepEqual(fakeStarts(), [["--session-id", native], ["--session-id", native], ["--resume", native]]);
     assert.equal(n.store.readRuntime(session)?.conversation_saved, true);
     assert.deepEqual(outcome(n.store, session), base);
   } finally { clean([next]); }
@@ -169,13 +157,13 @@ test("codex worker: the server dies after the new thread's id was kept, before i
     });
     const session = x.queue().run!.session;
     const first = x.store.readSession(session).native_id!;
-    assert.deepEqual(calls(), [["thread/start"]]);
+    assert.deepEqual(fakeStarts(), [["thread/start"]]);
     const n = await nextServer(root, session);
     next = n.next;
-    await holds("paused, no start", () => n.run()?.state === "paused" && calls().length === 1, 300);
+    await holds("paused, no start", () => n.run()?.state === "paused" && fakeStarts().length === 1, 300);
     next.resume("Q");
     await until("the run to finish", () => n.run()?.state === "finished", LONGER.run);
-    assert.deepEqual(calls(), [["thread/start"], ["thread/resume", first], ["thread/start"]]);
+    assert.deepEqual(fakeStarts(), [["thread/start"], ["thread/resume", first], ["thread/start"]]);
     const second = n.store.readSession(session).native_id!;
     assert.notEqual(second, first, "the session names the new thread");
     assert.equal(fakeSaved(second, "codex"), true);
@@ -197,7 +185,7 @@ async function heldForUpdate(runtime: "claude" | "codex") {
   if (runtime === "claude") process.env.FAKE_START_MS = "60000"; else process.env.FAKE_TURN_START_MS = "60000";
   x.engine.start("Q", { runtime });
   const session = x.queue().run!.session;
-  await x.until("the first start", () => calls().length === 1 && (runtime === "claude" || !!x.store.readSession(session).native_id));
+  await x.until("the first start", () => fakeStarts().length === 1 && (runtime === "claude" || !!x.store.readSession(session).native_id));
   x.engine.drainForUpdate(true);
   await x.until("the process to exit", () => x.store.readRuntime(session)?.state === "exited");
   x.engine.shutdown();
@@ -225,15 +213,15 @@ test("claude worker, twice interrupted: the update's restart corrects its wrong 
     // The correction's "retry" activity began the step's turn (AgentHost: the first thing streamed after the last turn),
     // so the dead server left it open in the record (queue CK); the next server records it as interrupted.
     assert.deepEqual(x.store.readRuntime(x.session)?.turn_open, { started_at: x.store.readRuntime(x.session)!.turn_open!.started_at, queue: "Q", step: "Q1" });
-    assert.deepEqual(calls(), [["--session-id", native], ["--resume", native], ["--session-id", native]]);
+    assert.deepEqual(fakeStarts(), [["--session-id", native], ["--resume", native], ["--session-id", native]]);
     assert.equal(x.received().length, 0, "nothing was taken in as read");
     const n = await nextServer(x.root, x.session);
     next = n.next;
-    await holds("paused, no start", () => n.run()?.state === "paused" && calls().length === 3, 300);
+    await holds("paused, no start", () => n.run()?.state === "paused" && fakeStarts().length === 3, 300);
     next.resume("Q");
     await until("the run to finish", () => n.run()?.state === "finished", LONGER.run);
     // The mark says unsaved, the runtime saved it: refused once, corrected to a resume.
-    assert.deepEqual(calls().slice(3), [["--session-id", native], ["--resume", native]]);
+    assert.deepEqual(fakeStarts().slice(3), [["--session-id", native], ["--resume", native]]);
     assert.equal(n.store.readSession(x.session).native_id, native);
     assert.equal(n.store.readRuntime(x.session)?.conversation_saved, true);
     // As without the crashes, but for the turn the crash cut off: recorded once, as interrupted, by the next server.
@@ -260,19 +248,19 @@ for (const when of ["before", "after"] as const) {
       const kept = x.store.readSession(x.session).native_id!;
       if (when === "before") {
         assert.equal(kept, first, "the old id stays until the new thread's start is answered");
-        assert.deepEqual(calls(), [["thread/start"], ["thread/resume", first]]);
+        assert.deepEqual(fakeStarts(), [["thread/start"], ["thread/resume", first]]);
       } else {
         assert.notEqual(kept, first, "the new thread's id kept before its turn");
         assert.equal(fakeSaved(kept, "codex"), false, "its rollout not written");
-        assert.deepEqual(calls(), [["thread/start"], ["thread/resume", first], ["thread/start"]]);
+        assert.deepEqual(fakeStarts(), [["thread/start"], ["thread/resume", first], ["thread/start"]]);
       }
-      const before = calls().length;
+      const before = fakeStarts().length;
       const n = await nextServer(x.root, x.session);
       next = n.next;
-      await holds("paused, no start", () => n.run()?.state === "paused" && calls().length === before, 300);
+      await holds("paused, no start", () => n.run()?.state === "paused" && fakeStarts().length === before, 300);
       next.resume("Q");
       await until("the run to finish", () => n.run()?.state === "finished", LONGER.run);
-      assert.deepEqual(calls().slice(before), [["thread/resume", kept], ["thread/start"]], "the kept id resumed, no rollout, one new thread");
+      assert.deepEqual(fakeStarts().slice(before), [["thread/resume", kept], ["thread/start"]], "the kept id resumed, no rollout, one new thread");
       const last = n.store.readSession(x.session).native_id!;
       assert.ok(last !== first && last !== kept);
       assert.equal(fakeSaved(last, "codex"), true);
@@ -300,7 +288,7 @@ async function cutOffUnread(text: string) {
   process.env.FAKE_START_MS = "60000"; // the process never reads the message
   const first = orchestrator(store);
   first.say(text);
-  await until("the process to start", () => calls().length === 1);
+  await until("the process to start", () => fakeStarts().length === 1);
   first.cutOff();
   first.shutdown();
   const session = store.readProject().orchestrator!.session!;
@@ -318,7 +306,7 @@ test("the orchestrator, control: the message an update cut off before it was rea
     next.resumeCutOff();
     await until("the reply", () => next.view().chat.some((c) => c.from === "orchestrator" && c.text === "ok"));
     assert.equal(x.received().filter((t) => t.includes("PLAN-LCR5")).length, 1);
-    assert.deepEqual(calls(), [["--session-id", x.native], ["--session-id", x.native]]);
+    assert.deepEqual(fakeStarts(), [["--session-id", x.native], ["--session-id", x.native]]);
     assert.equal(x.store.readRuntime(x.session)?.interrupted, undefined);
   } finally { next.shutdown(); clean([]); }
 });
@@ -333,7 +321,7 @@ test("the orchestrator, twice interrupted: the next server takes up the cut-off 
       const chat = x.store.readChat(x.session).entries;
       assert.deepEqual(chat.map((c) => [c.from, c.text]), [["user", "PLAN-LCR5: plan the layout"], ["nexus", RESTARTED]]);
     });
-    assert.deepEqual(calls(), [["--session-id", x.native], ["--session-id", x.native]]);
+    assert.deepEqual(fakeStarts(), [["--session-id", x.native], ["--session-id", x.native]]);
     assert.deepEqual(x.received(), [], "no process read the message");
     // The next server, as main.ts starts one: the engine's recovery, then the chats' resumeCutOff.
     const store = ProjectStore.forRoot(x.root);
@@ -342,7 +330,7 @@ test("the orchestrator, twice interrupted: the next server takes up the cut-off 
     next = x.orchestrator(store);
     next.resumeCutOff();
     const o = next;
-    await holds("no start, nothing sent again", () => calls().length === 2 && x.received().length === 0 && !o.alive(), 300);
+    await holds("no start, nothing sent again", () => fakeStarts().length === 2 && x.received().length === 0 && !o.alive(), 300);
     const chat = () => o.view().chat;
     assert.deepEqual(chat().filter((c) => c.from === "user").map((c) => c.text), ["PLAN-LCR5: plan the layout"], "the message stays in the chat");
     assert.equal(chat().filter((c) => c.text === RESTARTED).length, 1, "one restart line, the cut-off's");
@@ -351,7 +339,7 @@ test("the orchestrator, twice interrupted: the next server takes up the cut-off 
     // The user asks again: the same session, afresh (nothing was saved), answered once.
     o.say("PLAN-LCR5 again: plan the layout");
     await until("the reply", () => chat().some((c) => c.from === "orchestrator" && c.text === "ok"));
-    assert.deepEqual(calls(), [["--session-id", x.native], ["--session-id", x.native], ["--session-id", x.native]]);
+    assert.deepEqual(fakeStarts(), [["--session-id", x.native], ["--session-id", x.native], ["--session-id", x.native]]);
     assert.deepEqual(x.received().filter((t) => t.includes("PLAN-LCR5")).length, 1);
     assert.equal(store.readSession(x.session).native_id, x.native);
   } finally { next?.shutdown(); clean([engine]); }

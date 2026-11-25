@@ -70,7 +70,7 @@ test("claude worker: Stop at once while its start is corrected ends it with no c
     assert.equal(w.queue().steps[0]!.status, "pending", "no process read the step: it never started");
     w.next.resume("Q");
     // The record still claims the conversation (the refusal never said otherwise): refused again, corrected once.
-    (await new Promise<FakeHeld>((r) => void gates.reached("refusal").then(r))).release();
+    (await gates.reached("refusal")).release();
     await w.until("the step at work", () => w.opened("Q1") === 1, LONGER.step);
     work.release();
     await w.until("the run to finish", () => w.queue().run?.state === "finished", LONGER.run);

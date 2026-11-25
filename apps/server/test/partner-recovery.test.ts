@@ -22,7 +22,7 @@ import { RESTARTED } from "../src/chats.ts";
 import { Conversations } from "../src/conversations.ts";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { fakeEffects, fakeHistory, fakeSaved } from "./fake-behaviour.ts";
+import { fakeEffects, fakeHistory, fakeSaved, fakeStarts } from "./fake-behaviour.ts";
 import { inProcessRuntime } from "./in-process-runtime.ts";
 import { tempDir } from "./temp-dirs.ts";
 import { QUICK_ENGINE, holds, until } from "./wait.ts";
@@ -48,18 +48,6 @@ function server(root: string) {
   return { store, engine, orchestrator, conversations, shutdown };
 }
 type Server = ReturnType<typeof server>;
-
-/** The fakes' starts (FAKE_ARGS): Claude's as [flag, id]; Codex's thread calls as [method] or [method, thread id]. */
-function calls(): string[][] {
-  const f = process.env.FAKE_ARGS!;
-  if (!existsSync(f)) return [];
-  return readFileSync(f, "utf8").trim().split("\n").map((l) => JSON.parse(l) as { argv?: string[]; method?: string; threadId?: string }).flatMap((c) => {
-    if (c.argv) { const i = c.argv.findIndex((x) => x === "--session-id" || x === "--resume"); return [[c.argv[i]!, c.argv[i + 1]!]]; }
-    if (c.method === "thread/start") return [[c.method]];
-    if (c.method === "thread/resume") return [[c.method, c.threadId!]];
-    return [];
-  });
-}
 
 /** What the fakes read (FAKE_LOG), with the session each was read in. */
 function read(): { text: string; session: string | null }[] {
@@ -110,7 +98,7 @@ for (const runtime of ["claude", "codex"] as const) {
       const c = first.conversations.create({ title: "Plans", runtime });
       const key = `unsaved-${runtime}`;
       first.conversations.say(c.id, question(key));
-      await until("the process to start", () => runtime === "claude" ? calls().length === 1 : !!first!.store.readSession(c.id).native_id);
+      await until("the process to start", () => runtime === "claude" ? fakeStarts().length === 1 : !!first!.store.readSession(c.id).native_id);
       const old = first.store.readSession(c.id).native_id!;
       await update(first, c.id);
       assert.deepEqual(first.store.readRuntime(c.id)?.interrupted?.asked, [question(key)], "the record keeps the question");
@@ -125,10 +113,10 @@ for (const runtime of ["claude", "codex"] as const) {
       const native = n.store.readSession(c.id).native_id!;
       if (runtime === "claude") {
         assert.equal(native, old);
-        assert.deepEqual(calls(), [["--session-id", old], ["--session-id", old]], "afresh, the same id");
+        assert.deepEqual(fakeStarts(), [["--session-id", old], ["--session-id", old]], "afresh, the same id");
       } else {
         assert.notEqual(native, old, "the session names the new thread");
-        assert.deepEqual(calls(), [["thread/start"], ["thread/resume", old], ["thread/start"]]);
+        assert.deepEqual(fakeStarts(), [["thread/start"], ["thread/resume", old], ["thread/start"]]);
       }
       assert.equal(read().filter((m) => m.text.includes(key)).length, 1, "the question read once");
       assert.equal(receipts(key).length, 1, "processed once");
@@ -164,7 +152,7 @@ test("claude partner, saved first turn cut off by an update, its record wrongly 
     const n = next;
     await until("the answer", () => replies(n, c.id).length === 1);
     afterRestart(n, c);
-    assert.deepEqual(calls(), [["--session-id", native], ["--session-id", native], ["--resume", native]]);
+    assert.deepEqual(fakeStarts(), [["--session-id", native], ["--session-id", native], ["--resume", native]]);
     assert.equal(n.store.readSession(c.id).native_id, native);
     assert.equal(n.store.readRuntime(c.id)?.conversation_saved, true);
     // Read before the cut and once in the restart's notice; completed once.
@@ -198,7 +186,7 @@ test("codex partner, saved first turn cut off by an update: the same thread is r
     const n = next;
     await until("the answer", () => replies(n, c.id).length === 1);
     afterRestart(n, c);
-    assert.deepEqual(calls(), [["thread/start"], ["thread/resume", thread]]);
+    assert.deepEqual(fakeStarts(), [["thread/start"], ["thread/resume", thread]]);
     assert.equal(n.store.readSession(c.id).native_id, thread);
     assert.equal(read().filter((m) => m.text.includes(key)).length, 2, "before the cut and in the notice");
     assert.equal(receipts(key).length, 1);
@@ -216,7 +204,7 @@ test("claude partner, a hand-over its unsaved process never read, cut off by an 
     first = server(root);
     const c = first.conversations.create({ title: "Plans", runtime: "claude" });
     first.conversations.handoff(c.id);
-    await until("the process to start", () => calls().length === 1);
+    await until("the process to start", () => fakeStarts().length === 1);
     await update(first, c.id);
     assert.equal(first.store.readRuntime(c.id)?.interrupted?.handoff, true, "the record keeps that it was the hand-over");
     delete process.env.FAKE_START_MS;
@@ -227,7 +215,7 @@ test("claude partner, a hand-over its unsaved process never read, cut off by an 
     await until("the summary handed over", () => handed().length === 1);
     afterRestart(n, c);
     const native = n.store.readSession(c.id).native_id!;
-    assert.deepEqual(calls().slice(0, 2), [["--session-id", native], ["--session-id", native]]);
+    assert.deepEqual(fakeStarts().slice(0, 2), [["--session-id", native], ["--session-id", native]]);
     assert.equal(read().filter((m) => m.session === c.id && m.text.includes("hands this conversation to the orchestrator")).length, 1, "the instruction read once");
     const orch = n.store.readProject().orchestrator!.session!;
     await until("the orchestrator's reply", () => n.orchestrator.view().chat.some((e) => e.from === "orchestrator" && e.text === "ok"));
@@ -288,7 +276,7 @@ for (const saved of [true, false]) {
           f.shutdown();
           await until("the process to exit", () => f.store.readRuntime(c.id)?.state === "exited");
         } else f.shutdown(); // never started: nothing saved
-        const before = calls().length;
+        const before = fakeStarts().length;
         const broken = recordAs(f.store, c.id, v);
         console.warn = (...a: unknown[]) => { warned.push(a.join(" ")); };
         next = server(root);
@@ -296,8 +284,8 @@ for (const saved of [true, false]) {
         n.conversations.say(c.id, "go on: FAKE-HISTORY");
         await until("the answer", () => replies(n, c.id).some((r) => r.text.startsWith("history:")));
         console.warn = warn;
-        assert.deepEqual(calls().slice(before).map((x) => x[0]), EXPECTED[v][saved ? "saved" : "unsaved"]);
-        assert.ok(calls().slice(before).every((x) => x[1] === native), "every start names the session's id");
+        assert.deepEqual(fakeStarts().slice(before).map((x) => x[0]), EXPECTED[v][saved ? "saved" : "unsaved"]);
+        assert.ok(fakeStarts().slice(before).every((x) => x[1] === native), "every start names the session's id");
         assert.equal(n.store.readSession(c.id).native_id, native, "the id kept");
         // A legacy record resumed as it was taken (saved) gets no mark: the runtime said nothing new. Every other ends saying saved.
         assert.equal(n.store.readRuntime(c.id)?.conversation_saved, saved && v === "legacy" ? undefined : true, "the record's mark now");
@@ -340,7 +328,7 @@ test("codex partner, saved thread, a truncated record: the record plays no part 
     n.conversations.say(c.id, "go on: FAKE-HISTORY");
     await until("the answer", () => replies(n, c.id).some((r) => r.text.startsWith("history:")));
     console.warn = warn;
-    assert.deepEqual(calls(), [["thread/start"], ["thread/resume", thread]]);
+    assert.deepEqual(fakeStarts(), [["thread/start"], ["thread/resume", thread]]);
     assert.equal(n.store.readSession(c.id).native_id, thread);
     assert.equal(replies(n, c.id).find((r) => r.text.startsWith("history:"))!.text, "history: SENTINEL-codex remember this. FAKE-EFFECT: once-codex | go on: FAKE-HISTORY");
     assert.equal(receipts("once-codex").length, 1);
