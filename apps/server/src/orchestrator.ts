@@ -922,7 +922,7 @@ ${n.text}` });
       // Approvals and withdrawals by their position, so withdrawing and approving the same revision again is told again.
       q.approvals.forEach((a, i) => {
         if (a.at < since) return;
-        items.push({ key: `notify:approval:${q.id}:${i}`, ...approvalNotice(q, a) });
+        items.push({ key: `notify:approval:${q.id}:${i}`, ...approvalNotice(q, a, state.away.on) });
       });
       // A lift by the user's Continue: told once, by its position in the queue's changes.
       q.changes.forEach((c, i) => {
@@ -985,7 +985,7 @@ ${n.text}` });
       // the user's answers to proposals and the dependencies handed back. Each told once.
       const plan = openPlan(q);
       if (plan && q.status !== "done" && q.status !== "cancelled") {
-        for (const e of plan.after) if (e.cause) items.push({ key: `notify:planheld:${q.id}:${e.queue}:${e.cause}`, ...planHeldNotice(q, e) });
+        for (const e of plan.after) if (e.cause) items.push({ key: `notify:planheld:${q.id}:${e.queue}:${e.cause}`, ...planHeldNotice(q, e, state.away.on) });
       }
       q.plan?.decisions.forEach((d, i) => {
         if (d.at < since) return;

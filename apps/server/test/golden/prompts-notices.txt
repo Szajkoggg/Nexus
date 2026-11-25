@@ -42,6 +42,8 @@ The worker recommends: grid Answer it if the answer is settled, otherwise escala
 [Nexus] Queue QN revision 1 approved. It is not in the plan, so nothing starts it: start it now, or put it into the plan (nexus run QN start --after <queue>... --reason "..."; or --next, or --at), or tell the user why it waits.
 == approvalNotice: no run, in the plan (ACX, O3)
 [Nexus] Queue QN revision 1 approved. It is in the plan (QB is running): Nexus starts it itself, so start nothing; tell the user if anything follows from the approval.
+== approvalNotice: no run, not in the plan, the user away (ACX5)
+[Nexus] Queue QN revision 1 approved. It is not in the plan, and the user is away: until they are back, Nexus refuses to start it or put it into the plan (only the plan's queues start meanwhile). Leave it for the user's return, and say so in the chat.
 == liftNotice: with the stop's reason
 [Nexus] The user lifted the stop of queue QN with Continue (the stop was: condition: the disk is full); its run goes on. Nothing to start: the run goes on by itself. Tell the user briefly if anything follows from it for the plan.
 == levelToUserNotice: 
@@ -80,6 +82,8 @@ Decide with one of: nexus review accept QN N1 [--note "..."] (the run goes on); 
 [Nexus] Queue QN waits in the plan, but QB is stopped. Nexus does not start QN until QB is done. If it should not wait for QB, the user made it wait for QB: propose a change with nexus plan propose QN [--after <queue>]... --reason "..."; else tell the user what it waits for.
 == planHeldNotice: the orchestrator's dependency
 [Nexus] Queue QN waits in the plan, but QB is cancelled. Nexus does not start QN until QB is done. If it should not wait for QB, you made it wait for QB: change it with nexus run QN start --after <queue>... --reason "..." (or --next for none before it; without either the command starts the queue now, outside the plan) (or take it out with nexus run QN cancel-start --reason "..."); else tell the user what it waits for.
+== planHeldNotice: the orchestrator's dependency, the user away (ACX5)
+[Nexus] Queue QN waits in the plan, but QB is cancelled. Nexus does not start QN until QB is done. If it should not wait for QB, you made it wait for QB: change it with nexus run QN start --after <queue>... --reason "..." (or --next for none before it; without either Nexus refuses it while the user is away) (or take it out with nexus run QN cancel-start --reason "..."); else tell the user what it waits for.
 == planDecisionNotice: accepted
 [Nexus] The user accepted your proposal: queue QN starts after QB. The plan is changed; go on from it.
 == planDecisionNotice: declined

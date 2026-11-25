@@ -712,25 +712,32 @@ The worker recommends: ${x.recommended}` : ""}` : ""}`,
 
 /**
  * What to do with an approved queue that has no run to go on: one in the plan is started by Nexus itself once what it
- * waits for is done (the orchestrator's own start would race it); one not in the plan waits for the orchestrator.
+ * waits for is done (the orchestrator's own start would race it); one not in the plan waits for the orchestrator, or,
+ * while the user is away, for the user (the orchestrator's start and planning of it are refused then: orchestrator.ts,
+ * awayRule).
  */
-function notPlanned(q: QueueView, start: string): string {
+function notPlanned(q: QueueView, start: string, away: boolean): string {
   return q.start
     ? `It is in the plan (${q.start.waiting || "nothing to wait for"}): Nexus starts it itself, so start nothing; tell the user if anything follows from the approval.`
+    : away
+      ? "It is not in the plan, and the user is away: until they are back, Nexus refuses to start it or put it into the plan (only the plan's queues start meanwhile). Leave it for the user's return, and say so in the chat."
     : `It is not in the plan, so nothing starts it: ${start}, or put it into the plan (nexus run ${q.id} start --after <queue>... --reason "..."; or --next, or --at), or tell the user why it waits.`;
 }
 
-/** The user approved revision `a.revision` of the queue; what to do depends on its run. */
-export function approvalNotice(q: QueueView, a: { revision: number }): Notice {
+/**
+ * The user approved revision `a.revision` of the queue; what to do depends on its run, on the plan and on whether the
+ * user is away (`away`).
+ */
+export function approvalNotice(q: QueueView, a: { revision: number }, away = false): Notice {
   const r = q.run;
   // A run of an older revision goes on under the new one (a revision changes no started step); a finished one is over:
   // the new revision's steps need a start.
   const todo = !r
-    ? notPlanned(q, "start it now")
+    ? notPlanned(q, "start it now", away)
     : r.rejected && r.state === "paused" && !q.rejection
       ? `Its run was paused because the user rejected step ${r.rejected}; this revision lifts that. If the plan puts it next, resume it now (it goes on at the first pending step); otherwise tell the user why not.`
     : r.state === "finished" && runIsOlder(r, a.revision, q.history)
-      ? `Its earlier run is finished. ${notPlanned(q, "start it now (it begins at the first pending step)")}`
+      ? `Its earlier run is finished. ${notPlanned(q, "start it now (it begins at the first pending step)", away)}`
     : r.state === "finished"
       ? "Its run is finished; tell the user if anything follows from the approval."
     : r.state === "paused" || r.state === "halted"
@@ -898,11 +905,15 @@ export function awayStuckNotice(q: QueueView, st: StepView, why: string, next: {
   };
 }
 
-/** A planned queue waits for a predecessor that is stopped, cancelled or gone: the plan holds it. */
-export function planHeldNotice(q: QueueView, e: { queue: string; by: "user" | "orchestrator"; waiting: string }): Notice {
+/**
+ * A planned queue waits for a predecessor that is stopped, cancelled or gone: the plan holds it. `away`: the user is
+ * away, so a start outside the plan is refused (orchestrator.ts, awayRule).
+ */
+export function planHeldNotice(q: QueueView, e: { queue: string; by: "user" | "orchestrator"; waiting: string }, away = false): Notice {
+  const neither = away ? "without either Nexus refuses it while the user is away" : "without either the command starts the queue now, outside the plan";
   const change = e.by === "user"
     ? `the user made it wait for ${e.queue}: propose a change with nexus plan propose ${q.id} [--after <queue>]... --reason "..."`
-    : `you made it wait for ${e.queue}: change it with nexus run ${q.id} start --after <queue>... --reason "..." (or --next for none before it; without either the command starts the queue now, outside the plan) (or take it out with nexus run ${q.id} cancel-start --reason "...")`;
+    : `you made it wait for ${e.queue}: change it with nexus run ${q.id} start --after <queue>... --reason "..." (or --next for none before it; ${neither}) (or take it out with nexus run ${q.id} cancel-start --reason "...")`;
   return {
     fact: `Queue ${q.id} waits in the plan, but ${e.waiting}.`,
     todo: `Nexus does not start ${q.id} until ${e.queue} is done. If it should not wait for ${e.queue}, ${change}; else tell the user what it waits for.`,

@@ -545,6 +545,7 @@ test("every notice of prompts.ts, rendered from fixtures, matches the golden fil
   show("questionNotice", "with options", prompts.questionNotice({ qid: "q-1", queue: "QN", step: "N1", text: "Which layout?", options: ["grid", "list"], recommended: "grid", can_continue: true } as never));
   show("approvalNotice", "no run", prompts.approvalNotice(q, { revision: 1 }));
   show("approvalNotice", "no run, in the plan (ACX, O3)", prompts.approvalNotice({ ...q, start: { waiting: "QB is running", blocked: false } as never }, { revision: 1 }));
+  show("approvalNotice", "no run, not in the plan, the user away (ACX5)", prompts.approvalNotice(q, { revision: 1 }, true));
   show("liftNotice", "with the stop's reason", prompts.liftNotice(q, { reason: "condition: the disk is full" }));
   show("levelToUserNotice", "", prompts.levelToUserNotice(q, st));
   show("withdrawalNotice", "with a reason", prompts.withdrawalNotice(q, { revision: 1, reason: "Not yet." }));
@@ -556,6 +557,7 @@ test("every notice of prompts.ts, rendered from fixtures, matches the golden fil
   show("awayStuckNotice", "nothing in the plan", prompts.awayStuckNotice(q, st, "a question", []));
   show("planHeldNotice", "the user's dependency", prompts.planHeldNotice(q, { queue: "QB", by: "user", waiting: "QB is stopped" }));
   show("planHeldNotice", "the orchestrator's dependency", prompts.planHeldNotice(q, { queue: "QB", by: "orchestrator", waiting: "QB is cancelled" }));
+  show("planHeldNotice", "the orchestrator's dependency, the user away (ACX5)", prompts.planHeldNotice(q, { queue: "QB", by: "orchestrator", waiting: "QB is cancelled" }, true));
   for (const d of [
     { at, kind: "accepted", after: ["QB"] }, { at, kind: "declined", after: [] }, { at, kind: "handed_back", queues: ["QB"] },
     { at, kind: "removed", queues: ["QB"], set_by: "user", change: "c-1" }, { at, kind: "undone", change: "c-1" },

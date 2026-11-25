@@ -511,6 +511,9 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
     review_level: draft.review_level ?? old.review_level,
     // Left out, it stays as it was; `coding: false` takes it back before the queue has started.
     coding: draft.coding ?? old.coding,
+    // A maintenance queue's mode: given, it is the draft's (a change needs a new approval, the hash pins it); left
+    // out, it stays (ACX, S1: a revision used to drop the draft's silently).
+    maintenance: draft.maintenance ?? old.maintenance,
     source: draftSource(draft, old),
     // The queue's tags, runtime, model, effort and fallback are its steps' defaults, as drafted (left out: none), like
     // the steps' own.

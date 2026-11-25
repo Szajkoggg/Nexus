@@ -255,6 +255,28 @@ the file; any other value refuses the whole draft, listing the steps. A new step
 that leaves out a step that has started or stopped (one with a stretch at work, or a status other than `pending` or
 `skipped`) is refused: keep the step and skip it with `nexus queue set`.
 
+**What a revision does with a field its draft leaves out.** A draft of an existing queue is not a patch: some
+fields it leaves out stay as they were, others are cleared, as the table says (`title` and `steps` are required; a
+step's own fields are the step's, see above). Given, a field is always the draft's, within the refusals of this
+section. `packages/protocol/test/revision-fields.test.ts` sets, changes and leaves out each one and compares the
+result with this table.
+
+| Field | Left out of a revision | Given |
+|---|---|---|
+| `description`, `track`, `review_level` | kept | the draft's |
+| `worktree`, `branch`, `base` | kept | the draft's; once the queue has run, a different value is refused |
+| `coding` | kept | the draft's; once the queue has started, `false` is refused |
+| `maintenance` | kept | the draft's (a change needs the user's approval again); a revision does not clear it |
+| `source` | kept | its note references replace the queue's; the import record stays |
+| `kind`, `activities`, `area`, `size`, `origin` | cleared | the draft's; a change of the tags a started step inherits is refused |
+| `runtime`, `model`, `effort`, `fallback` | cleared | the draft's |
+| `stop_conditions`, `checks` | cleared | the draft's |
+
+`status` is the draft's (`proposed` when left out) when the revision changes what an approval pins and the queue was
+`draft`, `proposed` or `approved`; otherwise the queue's stays. What the server writes (`revision`, `status_note`,
+`user_levels`, `legacy_policies`, `integration`, `approvals`, `withdrawals`, `history`, `changes`, `created_at`,
+`updated_at`) a revision never takes from a draft.
+
 ### The closing refactoring step
 
 A queue with `coding: true` contains coding, and ends with a step Nexus keeps (`packages/protocol/src/closing.ts`).

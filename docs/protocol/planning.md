@@ -100,7 +100,8 @@ in `start.yaml`.
   orchestrator's direct start of a queue is refused unless the queue is in the plan, its predecessors done and it is
   approved, and so is putting an approved queue that is not in the plan into it (an unapproved one may be planned: it
   waits for the user anyway). Its notice when a queue waits for the user lists the plan's next queues with what each
-  waits for.
+  waits for; the approval notice of a queue not in the plan says to leave it for the user's return, and the notice of
+  a held plan that a start without `--after` or `--next` is refused.
 - Before the plan, a chain was `start.yaml` with `after` (one queue). The server moves such a file into `plan.yaml` at
   its start (the predecessor set by whoever made the chain; `start.yaml` keeps the options); until then the state reads
   it as that plan.

@@ -116,8 +116,10 @@ user-message behaviour remain.
   and prints the server's result: housekeeping (see ["Housekeeping by the orchestrator"](queues.md#queueyaml) under `queue.yaml`). A worker
   session is refused by the CLI.
 - With `notify` on, the server tells the orchestrator (starting it if needed) when a worker asks a question, when the
-  user approves a revision of a queue ("Queue X revision N approved.", with the instruction to start it, or to resume
-  its paused or halted run, also one of an older revision, if the plan puts it next; a running run, or one waiting for the approval, continues by itself: nothing to start), when the user withdraws an approval, when the user lifts a stop with Continue ("The user lifted the stop of queue X with Continue (the stop was: …); its run goes on.", told once), when a run reaches a
+  user approves a revision of a queue ("Queue X revision N approved."; with no run to go on, a queue in the plan is started by Nexus itself, so nothing
+  to start, and one not in the plan is to be started or put into the plan, or, while the user is away, left for the
+  user's return, since both are refused then; a paused or halted run, also one of an older revision, is to be resumed
+  if the plan puts it next; a running run, or one waiting for the approval, continues by itself: nothing to start), when the user withdraws an approval, when the user lifts a stop with Continue ("The user lifted the stop of queue X with Continue (the stop was: …); its run goes on.", told once), when a run reaches a
   requested pause ("Run of X paused after step S.": a pause asked for by the user or the orchestrator, not a stop now,
   nor the pause of a server restart or of an update), when a step waits for its review ("Step S of queue X is done and
   waits for your review: <summary>", with the step's goal, acceptance, the checks reported this round and those of the
