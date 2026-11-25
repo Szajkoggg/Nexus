@@ -2,7 +2,7 @@
 
 Part of [the design](../DESIGN.md).
 
-See also: [One full test run on the machine](tests.md#one-full-test-run-on-the-machine-queue-fx).
+See also: [One full test run on the machine](test-runs.md#one-full-test-run-on-the-machine-queue-fx).
 
 ## Nexus runs the checks (queue EC)
 
