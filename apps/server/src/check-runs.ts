@@ -449,7 +449,7 @@ export class CheckRunner {
       this.update(queue, step, done, (s) => { s.dispute!.base = { state: "running", commit: base }; });
       this.host.ended(queue);
       try { await run("git", ["worktree", "add", "--detach", dir, base], { cwd, windowsHide: true }); added = true; }
-      catch (e) { return this.endBase(queue, step, done, state, "unrunnable", `git worktree add of ${base} failed: ${String(errorText(e)).split("\n")[0]}`); }
+      catch (e) { return this.endBase(queue, step, done, state, "unrunnable", `git worktree add of ${base} failed: ${errorText(e).split("\n")[0]}`); }
       // Stopped while the worktree was added (queue LF, F1): the grant has ended, nothing more runs under it.
       if (a.stopped) return;
       const setup = state.project.defaults.worktree_setup?.trim();

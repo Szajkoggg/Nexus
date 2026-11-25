@@ -818,16 +818,15 @@ function continuedRefs(refs: readonly string[]): string[] {
  */
 function checkContinuedRefs(store: ProjectStore, queue: string, step: string, refs: readonly string[]): void {
   const state = loadProjectState(store);
-  const queues = state.queues;
   const own = queueView(state, queue);
   for (const r of refs) {
     const [a, b] = r.split("/") as [string, string | undefined];
     if (b === undefined ? (a === step) : (a === queue && b === step)) throw new ActionError(`--continued-in names the step itself (${r})`);
     if (b !== undefined) {
-      const other = queues.find((x) => x.id === a);
+      const other = state.queues.find((x) => x.id === a);
       if (!other) throw new ActionError(`--continued-in: no queue ${a} in this project`, 404);
       if (!other.steps.some((x) => x.id === b)) throw new ActionError(`--continued-in: queue ${a} has no step ${b} (has ${other.steps.map((x) => x.id).join(", ")})`, 404);
-    } else if (!own.steps.some((x) => x.id === a) && !queues.some((x) => x.id === a)) {
+    } else if (!own.steps.some((x) => x.id === a) && !state.queues.some((x) => x.id === a)) {
       throw new ActionError(`--continued-in: ${a} is neither a step of queue ${queue} nor a queue of this project`, 404);
     }
   }

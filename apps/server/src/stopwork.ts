@@ -32,8 +32,7 @@ export function decideStoppedWork(store: ProjectStore, queueId: string, choice: 
   const q = loadProjectState(store).queues.find((x) => x.id === queueId);
   if (!q || q.status !== "stopped") return { proceed: true };
   // What the lift itself would refuse is refused first, so no choice is recorded for a lift that does not happen.
-  const going = runActive(q.run);
-  if (going) throw new ActionError(`queue ${queueId}'s run is still going; stop it first`, 409);
+  if (runActive(q.run)) throw new ActionError(`queue ${queueId}'s run is still going; stop it first`, 409);
   if (by === "user_continue" && !q.approved) throw new ActionError(`revision ${q.revision} of queue ${queueId} is not approved: approve it instead, which lifts the stop`, 409);
   if (by === "user_approval" && q.approved) throw new ActionError("this revision is already approved", 409);
   // Once Discard is recorded, approving a revision (the orchestrator's revert) lifts without asking again.
