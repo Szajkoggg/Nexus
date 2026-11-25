@@ -757,7 +757,10 @@ export class Engine implements Member {
   heldRuns(): { queue: string; since: string }[] {
     if (!this.accepting()) return [];
     return this.store.queueIds().flatMap((q) => {
-      const run = this.store.readRun(q);
+      // An unreadable run.yaml holds no place (queue LCK, F9): the project's state warns with its name; a throw here
+      // would stop the coordinator's pass for every project.
+      let run: RunFile | undefined;
+      try { run = this.store.readRun(q); } catch { return []; }
       return run?.state === "running" && run.held ? [{ queue: q, since: run.held.since }] : [];
     });
   }
@@ -1958,12 +1961,27 @@ export class Engine implements Member {
   // ---------------------------------------------------------------- helpers
 
   private recoverAfterRestart(): void {
+    // A queue whose run.yaml cannot be read is left out, as it is (queue LCK, F9; docs/design/state.md, "Missing and
+    // unreadable files"): the project's state warns with the file's name, the log says it is not recovered, the file is
+    // not written over, and the other queues are recovered.
+    const unreadable = new Set<string>();
+    const runOf = (q: string): RunFile | undefined => {
+      try { return this.store.readRun(q); } catch (e) {
+        if (!unreadable.has(q)) console.warn(`nexus: ${errorText(e)}; queue ${q} is not recovered: it is left as it is until the file can be read`);
+        unreadable.add(q);
+        return undefined;
+      }
+    };
     // A step an earlier run left open while a newer revision went on (no live run of it) goes back to pending. One
     // state for every queue (queue SM): between two queues it changes only by such a release, read again after one.
     let state = loadProjectState(this.store);
-    for (const q of this.store.queueIds()) if (releaseOrphanedSteps(this.store, q, { state }).length) state = loadProjectState(this.store);
     for (const q of this.store.queueIds()) {
-      const run = this.store.readRun(q);
+      runOf(q);
+      if (!unreadable.has(q) && releaseOrphanedSteps(this.store, q, { state }).length) state = loadProjectState(this.store);
+    }
+    for (const q of this.store.queueIds()) {
+      if (unreadable.has(q)) continue;
+      const run = runOf(q);
       const view = state.queues.find((x) => x.id === q);
       const left = view && (questionsHold(state, q, run?.step) || view.steps.some((s) => !stepClosed(view, s)));
       if (run && (runActive(run) || run.resume_after_restart) && left === false) {
@@ -1995,7 +2013,16 @@ export class Engine implements Member {
       if (run?.state === "usage_wait" && run.resume_at) this.schedule(q, run.resume_at, this.usageMarginMs);
     }
     for (const s of this.store.sessionIds()) {
-      const r = this.store.readRuntime(s);
+      let broken: string | undefined;
+      const r = this.store.readRuntime(s, (w) => { broken = w; });
+      if (broken !== undefined) {
+        // Unreadable (queue LCK, F10): what it said of the process and of a turn left open is lost. The session is
+        // marked exited as any other, the turn is knowingly not recorded, and the write sets the file aside as
+        // runtime.json.corrupt. Nothing is known of the conversation either: it starts as one without a record would.
+        console.warn(`nexus: ${broken.replace(/; going on as if it were missing.*$/, "")}; the session is marked exited, and a turn the old server left open is not recorded`);
+        this.store.writeRuntime(s, { state: "exited", turns: 0, conversation_saved: false, updated_at: now() });
+        continue;
+      }
       if (!r || r.state === "exited") continue;
       // Windows workers belong to their host's job, which closes when the server pipe closes. A persisted PID
       // alone is not ownership evidence: it may already refer to another program after a restart.

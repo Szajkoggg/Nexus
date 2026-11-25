@@ -229,6 +229,15 @@ The rule, kept by `packages/protocol/src/store.ts`:
   default with a warning: into the project state's `warnings` where `deriveProjectState` reads it (`away.yaml`,
   `runtime.json`; the dashboard shows them), else `console.warn`, once per file. A session whose `runtime.json` cannot
   be read starts on as one without a record, with the warning.
+- **A start never fails on one queue's or session's file** (queue LCK, survey LC3 F9/F10, the user's decisions). An
+  engine whose recovery finds a queue's `run.yaml` unreadable leaves that queue out, as it is: the project state's
+  warning names the file, the log says the queue is not recovered, nothing writes over the file, and the other
+  queues are recovered (the coordinator's pass skips it too). An unreadable `start.yaml` or `plan.yaml` leaves that
+  queue's schedule or undo unarmed, with the same warning and a line in the log. An unreadable `runtime.json` met by
+  the recovery is written anew as `exited` with `conversation_saved: false` (the session starts as one without a
+  record would), so it is set aside as `runtime.json.corrupt`; a turn the old server left open in it is knowingly not
+  recorded, and the log's warning says so. An unreadable `checks.yaml` leaves that queue's checks unrecovered (the
+  log: "its checks are not recovered").
 - **Nothing overwrites an unreadable file.** Its writer first moves it aside as `<file>.corrupt` (the latest one;
   `writeFileAtomic` does this for every file a reader with a default found unreadable in its content, and tells the
   log), so the damage can still be looked at. A file the system only refused for a moment (another process holding

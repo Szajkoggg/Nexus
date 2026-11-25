@@ -71,9 +71,11 @@ export function restart(store: ProjectStore, options: EngineOptions = FAST, o: {
 
 export const activityOf = (store: ProjectStore, session: string) => store.readActivity(session).entries;
 
-/** A queue's run, written as a test fixture. */
-/** A run left paused or halted, in a worktree of its own (a paused run holds its checkout). */
-export function fixtureRun(store: ProjectStore, id: string, state: "paused" | "halted", reason: string) {
+/**
+ * A queue's run, written as a test fixture: one left paused or halted, or running (as a server that ended left it), in
+ * a worktree of its own (a paused run holds its checkout).
+ */
+export function fixtureRun(store: ProjectStore, id: string, state: "paused" | "halted" | "running", reason?: string) {
   store.writeQueue({ protocol: 1, id, title: id, revision: 1, status: "approved", stop_conditions: [], checks: [], steps: [{ id: `${id}1`, title: "x", goal: "FAKE: done", acceptance: [] }], approvals: [], history: [], worktree: join(store.dir, "..", `wt-${id}`) });
   approveQueue(store, id);
   store.writeSession({ protocol: 1, id: `s-${id}`, project: "p", role: "worker", runtime: "claude", native_id: "00000000-0000-4000-8000-000000000000", cwd: store.dir, launched_by: "nexus", created_at: new Date().toISOString() });

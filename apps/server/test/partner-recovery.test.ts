@@ -8,8 +8,9 @@
 // - LC-F4: a partner's first turn an update cut off (cutOff, shutdown) goes on after the restart (resumeCutOff) once:
 //   unsaved Claude and Codex, saved Claude whose record wrongly says unsaved, saved Codex, and a hand-over.
 // - LC-F5: the runtime record a partner is started with (absent, legacy without the mark, false, true, truncated JSON, a
-//   wrong-typed mark) behind a saved and an unsaved conversation: how it starts, that its id stays, what readRuntime
-//   makes of a broken record (undefined, a warning, set aside as runtime.json.corrupt at the next write).
+//   wrong-typed mark) behind a saved and an unsaved conversation: how it starts, that its id stays, what the recovery
+//   makes of a broken record (queue LCK, F10: a warning, the session marked exited with conversation_saved false, so it
+//   starts as one without a record; the file set aside as runtime.json.corrupt).
 // - LC-F9: what a saved conversation held (a sentinel, an effect done) is there after a normal resume, a legacy record
 //   and a false mark corrected to a resume, and the effect is not done again; an unsaved Codex thread's fallback holds
 //   only the input that waited.
@@ -251,13 +252,14 @@ const EXPECTED: Record<Variant, { saved: string[]; unsaved: string[] }> = {
   legacy: { saved: ["--resume"], unsaved: ["--resume", "--session-id"] },
   false: { saved: ["--session-id", "--resume"], unsaved: ["--session-id"] },
   true: { saved: ["--resume"], unsaved: ["--resume", "--session-id"] },
+  // Broken: the recovery writes it anew as exited with conversation_saved false (queue LCK, F10): as `false`.
   truncated: { saved: ["--session-id", "--resume"], unsaved: ["--session-id"] },
   "wrong-type": { saved: ["--session-id", "--resume"], unsaved: ["--session-id"] },
 };
 
 for (const saved of [true, false]) {
   for (const v of VARIANTS) {
-    test(`claude partner, ${saved ? "saved" : "unsaved"} conversation, record ${v}: ${EXPECTED[v][saved ? "saved" : "unsaved"].join(" then ")}; the same id${saved ? ", its sentinel kept and its effect not done again" : ", nothing before the new message"}${v === "truncated" || v === "wrong-type" ? "; the broken record is read as none, with a warning, and set aside" : ""}`, async () => {
+    test(`claude partner, ${saved ? "saved" : "unsaved"} conversation, record ${v}: ${EXPECTED[v][saved ? "saved" : "unsaved"].join(" then ")}; the same id${saved ? ", its sentinel kept and its effect not done again" : ", nothing before the new message"}${v === "truncated" || v === "wrong-type" ? "; the recovery warns, marks the broken record exited and sets it aside" : ""}`, async () => {
       const root = world();
       let first: Server | undefined, next: Server | undefined;
       const warned: string[] = [];
@@ -297,8 +299,8 @@ for (const saved of [true, false]) {
         assert.ok(!chatOf(n, c.id).some((e) => e.kind === "error"), "no error in the chat");
         const corrupt = join(n.store.sessionDir(c.id), "runtime.json.corrupt");
         if (broken !== undefined) {
-          assert.ok(warned.some((w) => w.includes("runtime.json") && w.includes("going on as if it were missing")), `a warning names the file: ${warned.join(" / ")}`);
-          assert.equal(readFileSync(corrupt, "utf8"), broken, "set aside as it was, at the next write");
+          assert.ok(warned.some((w) => w.includes("runtime.json cannot be read") && w.includes("marked exited")), `a warning names the file: ${warned.join(" / ")}`);
+          assert.equal(readFileSync(corrupt, "utf8"), broken, "set aside as it was, by the recovery");
         } else {
           assert.ok(!existsSync(corrupt));
           assert.ok(!warned.some((w) => w.includes("runtime.json")));

@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ProjectStore, applyDraft, approveQueue, ensureUserSession, loadProjectState, newId, now, readAway, readUsage, USER_SESSION,
+  ProjectStore, applyDraft, approveQueue, ensureUserSession, loadProjectState, newId, now, readAway, readUsage, writeAway, USER_SESSION,
 } from "../src/index.ts";
 
 function setup() {
@@ -85,6 +85,22 @@ test("unreadable account-wide files warn with their path and are set aside befor
   const lines = warned(() => { assert.equal(readUsage(), undefined); assert.equal(readAway().current, undefined); });
   assert.ok(lines.some((l) => l.includes("usage.json")) && lines.some((l) => l.includes("away.yaml")), lines.join(" | "));
   assert.ok(existsSync(join(home, "usage.json")), "a reader does not move the file");
+});
+
+test("an unreadable away.yaml is a warning in the project's state, and set aside as away.yaml.corrupt at the next write (survey LC3, F15)", () => {
+  const { store } = setup();
+  const home = process.env.NEXUS_HOME!;
+  mkdirSync(home, { recursive: true });
+  const file = join(home, "away.yaml");
+  const broken = "current: [unclosed";
+  writeFileSync(file, broken);
+  const state = loadProjectState(store);
+  assert.ok(state.warnings.some((w) => w.includes("away.yaml cannot be read")), `a warning with the path: ${state.warnings.join(" | ")}`);
+  assert.equal(state.away.on, false, "away mode off: the default");
+  const lines = warned(() => writeAway({ protocol: 1, past: [] }));
+  assert.equal(readFileSync(`${file}.corrupt`, "utf8"), broken, "set aside as it was");
+  assert.ok(lines.some((l) => l.includes("away.yaml") && l.includes(".corrupt")), `told: ${lines.join(" | ")}`);
+  assert.ok(!loadProjectState(store).warnings.some((w) => w.includes("away.yaml")), "and the warning is gone");
 });
 
 test("a project.yaml its schema refuses: the project's state fails with the file's name and the issue as path: message", () => {

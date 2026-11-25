@@ -147,11 +147,18 @@ export class Scheduler {
 
   /** Arms the schedules again (a new server): what came due while no server ran is looked at by checkStarts. */
   armAll(): void {
+    // A start.yaml or plan.yaml that cannot be read leaves that schedule or undo unarmed, as it is (queue LCK, F9): the
+    // project's state warns with the file's name, the log says what is not armed, and the other queues are armed.
+    const unarmed = (id: string, e: unknown) => console.warn(`nexus: ${errorText(e)}; queue ${id}'s plan is not armed again until the file can be read`);
     for (const id of this.store.queueIds()) {
-      const plan = this.store.readStart(id);
-      if (plan?.at && !plan.failed) this.armStart(id, Date.parse(plan.at));
-      const undo = this.store.readPlan(id)?.undo;
-      if (undo && Date.parse(undo.until) > this.timers.clock.now()) this.armUndo(id, Date.parse(undo.until));
+      try {
+        const plan = this.store.readStart(id);
+        if (plan?.at && !plan.failed) this.armStart(id, Date.parse(plan.at));
+      } catch (e) { unarmed(id, e); }
+      try {
+        const undo = this.store.readPlan(id)?.undo;
+        if (undo && Date.parse(undo.until) > this.timers.clock.now()) this.armUndo(id, Date.parse(undo.until));
+      } catch (e) { unarmed(id, e); }
     }
   }
 
