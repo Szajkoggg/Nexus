@@ -339,8 +339,7 @@ function ownLine(st: ProjectStore, s: SessionFile): Set<string> {
 
 function session(st: ProjectStore): SessionFile {
   const id = need(sessionId(), "session (NEXUS_SESSION or --session; `nexus attach` creates one)");
-  let s: SessionFile;
-  s = known(() => st.readSession(id), `unknown session ${id}`);
+  const s = known(() => st.readSession(id), `unknown session ${id}`);
   // What this call writes is stamped after what its session wrote and was told, and after what the server had seen
   // when it handed the agent its work (docs/design/state.md, "Clock steps"): reading them takes their times up.
   st.readEvents(id); st.readInbox(id); st.observeClock();
@@ -361,8 +360,7 @@ function queueFor(st: ProjectStore, s: SessionFile, step?: string): string {
 }
 
 function checkStep(st: ProjectStore, queue: string, step: string): void {
-  let q;
-  q = known(() => st.readQueue(queue), `unknown queue ${queue}`);
+  const q = known(() => st.readQueue(queue), `unknown queue ${queue}`);
   const steps = stepDefs(q); // with the closing refactoring step, when the queue has one
   if (!steps.some((x) => x.id === step)) throw new UsageError(`queue ${queue} has no step ${step} (has ${steps.map((x) => x.id).join(", ")})`);
 }
