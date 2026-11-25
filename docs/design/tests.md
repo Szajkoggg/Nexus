@@ -444,3 +444,25 @@ cleanup's lock, the monitor ends the host once it has it), so the engine either 
 process and retries it once, or takes the host's end as the process's exit; the work runs once either way. A helper
 whose exit Node already sees may hold its directory a moment longer, and a dying runtime's helper may outlive the
 2000 ms wait on a busy machine: the tests wait for the directory and the helper, not only for a PID.
+
+The job's membership and Clean's deadlines (queue WHR, WHR6). Clean's two inputs, the job's membership list and its
+clock, go through the same seam (`Members`, `StartTimer`, `ElapsedMilliseconds` on EndCalls); the default
+(Kernel32EndCalls) calls the host's own Members() and a Stopwatch exactly as Clean did before, and as for End, nothing
+at run time selects another seam: only a test's own compiled copy sets one by reflection. On the scripted seam
+(`apps/server/test/worker-end-calls.cs`, request `clean`) `worker-end.test.ts` gives Clean its lists and clock: children
+joining after a list, a member gone or exited before its open, the job's end, the 10 s checkpoint (read only after a
+whole list, so it is no wall-clock limit) and several members each waiting 2000 ms. `worker-process-frames.test.ts`
+separates the host's "worker job did not settle" from the server's 15 s. With real processes,
+`apps/server/test/worker-cleanup-membership.test.ts` has the step's helper start a child after Clean's first list
+(`apps/server/test/worker-helper.ps1` with -Late, fake behaviour `ownedholdsharedlate`): the child is a member by inheritance and is ended
+before C; and a member exits between its listing and its open. The gate traces every list and every End call for any
+member (`trace.log`; a failed call's error is kept before the gate writes its files, so End reads its own) and can
+hold a wait and a later open in one cleanup (the kth hold answers in `arrived-k`, goes on at `open-k`).
+
+What these tests do not show, and how far each layer reaches: the deadline branches (10 s, several 2000 ms waits) are
+scripted, never waited out on a real job; the server's 15 s is shown on mock timers only; a member's exit racing its
+termination was seen with real calls (the zero-time wait 258, TerminateProcess refused, the 2000 ms wait sees the
+exit), but that is a process the test started, not the historical PT process, whose origin stays open; a real
+TerminateProcess refusal of a live member comes only from the DACL helper (`worker-exit.test.ts`). The seams and gates
+are test-only and leave the host's defaults unchanged. Extending the nexus-lifecycle template with these files is a
+separate proposal, not done.
