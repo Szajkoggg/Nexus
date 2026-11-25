@@ -70,3 +70,72 @@ test("with no seam set, End makes the real calls: it ends a member of its job an
     await Promise.all([memberExit, strangerExit]);
   }
 });
+
+// H3 and H5 of the LWH survey (queue WHR, WHR2): the whole End, every branch, on scripted native results. Each case
+// gives the replies in the order End consumes them and the exact calls it must make. The results here are injected:
+// the real-handle wait and the DACL denial stay in worker-exit.test.ts, the real calls in the test above.
+const WAIT_TIMEOUT = 258, WAIT_FAILED = 0xffffffff;
+const MEMBER = `IsProcessInJob ${HANDLE} ${JOB}`, POLL = `WaitForSingleObject ${HANDLE} 0`;
+const TERMINATE = `TerminateProcess ${HANDLE} 1`, WAIT = `WaitForSingleObject ${HANDLE} 2000`, CLOSE = `CloseHandle ${HANDLE}`;
+const win32 = (code: number, text: string) => new RegExp(`^outcome threw System\.ComponentModel\.Win32Exception ${code} ${text}: `);
+const TIMED_OUT = "outcome threw System.TimeoutException - worker child did not exit";
+
+const CASES: { name: string; replies: string[]; calls: string[]; outcome: string | RegExp }[] = [
+  { name: "OpenProcess fails with 87 (the process is gone): it returns, and there is nothing to close",
+    replies: ["open 0 87"], calls: [OPEN, "LastError 87"], outcome: "outcome returned" },
+  { name: "OpenProcess fails with 5: a Win32Exception with code 5 naming OpenProcess, nothing to close",
+    replies: ["open 0 5"], calls: [OPEN, "LastError 5"], outcome: win32(5, `OpenProcess for worker job member ${PID}`) },
+  { name: "OpenProcess fails with another error (6): that code, naming OpenProcess",
+    replies: ["open 0 6"], calls: [OPEN, "LastError 6"], outcome: win32(6, `OpenProcess for worker job member ${PID}`) },
+  { name: "a process outside the job (a reused PID): the handle is closed, never waited on or terminated",
+    replies: [`open ${HANDLE} 0`, "member 1 0 0", "close 1"], calls: [OPEN, MEMBER, CLOSE], outcome: "outcome returned" },
+  { name: "a member that has already exited: the handle is closed, nothing terminated",
+    replies: [`open ${HANDLE} 0`, "member 1 1 0", "wait 0 0", "close 1"], calls: [OPEN, MEMBER, POLL, CLOSE], outcome: "outcome returned" },
+  { name: "IsProcessInJob fails with 5: its code naming IsProcessInJob, the handle closed, nothing terminated",
+    replies: [`open ${HANDLE} 0`, "member 0 0 5", "close 1"], calls: [OPEN, MEMBER, "LastError 5", CLOSE],
+    outcome: win32(5, `IsProcessInJob for worker job member ${PID}`) },
+  { name: "TerminateProcess false/5, then the process exits within the 2000 ms wait: success",
+    replies: [`open ${HANDLE} 0`, "member 1 1 0", `wait ${WAIT_TIMEOUT} 0`, "terminate 0 5", "wait 0 0", "close 1"],
+    calls: [OPEN, MEMBER, POLL, TERMINATE, "LastError 5", WAIT, CLOSE], outcome: "outcome returned" },
+  { name: "TerminateProcess false/5 and the process stays alive through the wait: code 5, TerminateProcess did not complete",
+    replies: [`open ${HANDLE} 0`, "member 1 1 0", `wait ${WAIT_TIMEOUT} 0`, "terminate 0 5", `wait ${WAIT_TIMEOUT} 0`, "close 1"],
+    calls: [OPEN, MEMBER, POLL, TERMINATE, "LastError 5", WAIT, CLOSE], outcome: win32(5, "TerminateProcess did not complete") },
+  { name: "TerminateProcess succeeds but the exit does not come within 2000 ms: a TimeoutException, no error read",
+    replies: [`open ${HANDLE} 0`, "member 1 1 0", `wait ${WAIT_TIMEOUT} 0`, "terminate 1 0", `wait ${WAIT_TIMEOUT} 0`, "close 1"],
+    calls: [OPEN, MEMBER, POLL, TERMINATE, WAIT, CLOSE], outcome: TIMED_OUT },
+  { name: "WAIT_FAILED after a successful TerminateProcess: today's TimeoutException",
+    replies: [`open ${HANDLE} 0`, "member 1 1 0", `wait ${WAIT_TIMEOUT} 0`, "terminate 1 0", `wait ${WAIT_FAILED} 6`, "close 1"],
+    calls: [OPEN, MEMBER, POLL, TERMINATE, WAIT, CLOSE], outcome: TIMED_OUT },
+  { name: "WAIT_FAILED after TerminateProcess false/5: the original code 5, not the wait's",
+    replies: [`open ${HANDLE} 0`, "member 1 1 0", `wait ${WAIT_TIMEOUT} 0`, "terminate 0 5", `wait ${WAIT_FAILED} 6`, "close 1"],
+    calls: [OPEN, MEMBER, POLL, TERMINATE, "LastError 5", WAIT, CLOSE], outcome: win32(5, "TerminateProcess did not complete") },
+  { name: "last errors left by earlier calls and set by the later wait do not replace TerminateProcess's 5",
+    replies: [`open ${HANDLE} 1400`, "member 1 1 183", `wait ${WAIT_TIMEOUT} 1400`, "terminate 0 5", `wait ${WAIT_TIMEOUT} 1400`, "close 1"],
+    calls: [OPEN, MEMBER, POLL, TERMINATE, "LastError 5", WAIT, CLOSE], outcome: win32(5, "TerminateProcess did not complete") },
+];
+
+// One driver for all cases: a PowerShell and its compile per case would cost seconds each.
+let matrix: Promise<string[][]> | undefined;
+const answers = () => matrix ??= endHarness(CASES.map((c) => [`scripted ${PID} ${JOB}`, ...c.replies].join("\n")));
+
+CASES.forEach((c, i) => {
+  test(`End, ${c.name}`, windows, async () => {
+    const lines = (await answers())[i]!;
+    const calls = lines.slice(0, -2), [outcome, restored] = lines.slice(-2);
+    assert.deepEqual(calls, c.calls, lines.join("\n"));
+    if (typeof c.outcome === "string") assert.equal(outcome, c.outcome);
+    else assert.match(outcome!, c.outcome);
+    assert.equal(restored, `restored ${DEFAULT_SEAM}`);
+    // The identity rules on every branch: one open, never a second; every call on a handle uses the opened one;
+    // an opened handle is closed exactly once, as the last call; terminate at most once, and only after a membership check.
+    assert.equal(calls.filter((l) => l.startsWith("OpenProcess")).length, 1);
+    const handles = calls.filter((l) => /^(IsProcessInJob|WaitForSingleObject|TerminateProcess|CloseHandle) /.exec(l));
+    for (const l of handles) assert.equal(l.split(" ")[1], String(HANDLE), l);
+    const closes = calls.filter((l) => l.startsWith("CloseHandle")).length;
+    assert.equal(closes, handles.length > 0 ? 1 : 0);
+    if (closes) assert.equal(calls.at(-1), CLOSE);
+    const terminates = calls.filter((l) => l.startsWith("TerminateProcess")).length;
+    assert.ok(terminates <= 1);
+    if (terminates) assert.ok(calls.indexOf(MEMBER) >= 0 && calls.indexOf(MEMBER) < calls.indexOf(TERMINATE));
+  });
+});

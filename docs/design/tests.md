@@ -401,4 +401,10 @@ algorithm exists in the tests. `ScriptedEndCalls` records every call with its ha
 with the results and last errors the test scripts, for the ones Windows gives only in a race (a refused open, a false
 TerminateProcess with error 5, WAIT_FAILED). `worker-end.test.ts` pins the call order on one handle and proves, with
 the seam left at its default, that End ends a real member of a real job (exit code 1, from its TerminateProcess) and
-leaves a process outside the job alive.
+leaves a process outside the job alive. Its matrix (queue WHR, WHR2) runs the whole End on every branch: OpenProcess
+87 and other errors, a non-member, an exited member, an IsProcessInJob failure, TerminateProcess false/5 with a late exit
+or a survivor, a timeout after a successful terminate, WAIT_FAILED after either, and last errors left or set by other
+calls. Each case pins the exact calls and the outcome (exception type, NativeErrorCode, the operation's name), and the
+identity rules hold on every branch: one open, every call on that handle, one close as the last call, a terminate only
+after the membership check. These results are injected; the real-handle wait and the DACL denial stay in
+`worker-exit.test.ts` as the Windows evidence.
