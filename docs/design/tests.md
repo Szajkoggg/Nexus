@@ -386,3 +386,19 @@ Findings from building them, pinned as today's behaviour and not changed (the us
 
 Stability of the new files was measured with `node scripts/load-tests.mjs` (12 busy loops, four copies, five rounds, 20
 runs each, all green); none of the new test code sleeps longer than the 25 ms poll, except on the mock clock.
+
+## The job host's End through a native seam (queue WHR)
+
+`End` and `AwaitExit` in `apps/server/src/worker-job.cs` make their native calls (OpenProcess, IsProcessInJob,
+WaitForSingleObject, TerminateProcess, CloseHandle and the last error after them) through one seam, the `EndCalls`
+interface and its private field `calls`. The default, `Kernel32EndCalls`, forwards each call to the same P/Invoke the
+code called directly before, and reads `Marshal.GetLastWin32Error()` right after it, so the job host behaves as before;
+nothing at run time (no environment variable, no frame) selects another implementation.
+
+A test compiles its own copy of `worker-job.cs` together with `apps/server/test/worker-end-calls.cs`
+(`apps/server/test/worker-end.ps1`) and reaches the production `End` by reflection: no second implementation of the
+algorithm exists in the tests. `ScriptedEndCalls` records every call with its handle, job and arguments, and answers
+with the results and last errors the test scripts, for the ones Windows gives only in a race (a refused open, a false
+TerminateProcess with error 5, WAIT_FAILED). `worker-end.test.ts` pins the call order on one handle and proves, with
+the seam left at its default, that End ends a real member of a real job (exit code 1, from its TerminateProcess) and
+leaves a process outside the job alive.

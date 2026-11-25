@@ -85,34 +85,57 @@ public static class NexusWorkerJob
         throw new InvalidOperationException("worker job membership exceeded the limit");
     }
 
+    // The native calls End and AwaitExit make, and the thread's last error after them. One seam, so that a test can
+    // record the calls and give the results Windows returns only in a race (queue WHR, WHR1): the test compiles its
+    // own copy of this file with apps/server/test/worker-end-calls.cs and sets `calls` by reflection. The default is
+    // the kernel32 calls themselves, and nothing at run time (no variable, no frame) selects another.
+    internal interface EndCalls {
+        IntPtr OpenProcess(uint access, bool inherit, uint pid);
+        bool IsProcessInJob(IntPtr process, IntPtr job, out bool member);
+        uint WaitForSingleObject(IntPtr handle, uint ms);
+        bool TerminateProcess(IntPtr process, uint code);
+        bool CloseHandle(IntPtr handle);
+        int LastError();
+    }
+    sealed class Kernel32EndCalls : EndCalls {
+        public IntPtr OpenProcess(uint access, bool inherit, uint pid) { return NexusWorkerJob.OpenProcess(access, inherit, pid); }
+        public bool IsProcessInJob(IntPtr process, IntPtr job, out bool member) { return NexusWorkerJob.IsProcessInJob(process, job, out member); }
+        public uint WaitForSingleObject(IntPtr handle, uint ms) { return NexusWorkerJob.WaitForSingleObject(handle, ms); }
+        public bool TerminateProcess(IntPtr process, uint code) { return NexusWorkerJob.TerminateProcess(process, code); }
+        public bool CloseHandle(IntPtr handle) { return NexusWorkerJob.CloseHandle(handle); }
+        // No other SetLastError call runs between the one above and this read: the value is the call's own.
+        public int LastError() { return Marshal.GetLastWin32Error(); }
+    }
+    static EndCalls calls = new Kernel32EndCalls();
+
     // A PID is only a way to open a handle. Check membership on that same handle before terminating it: Windows
     // can reuse the enumerated PID before OpenProcess. Holding the handle pins the identity through termination.
     static void End(uint pid) {
-        IntPtr handle = OpenProcess(0x100000 | 0x1000 | 1, false, pid); // synchronize, query limited, terminate
+        IntPtr handle = calls.OpenProcess(0x100000 | 0x1000 | 1, false, pid); // synchronize, query limited, terminate
         if (handle == IntPtr.Zero) {
-            int error = Marshal.GetLastWin32Error();
+            int error = calls.LastError();
             if (error == 87) return; // already gone
             throw new Win32Exception(error, "OpenProcess for worker job member " + pid + ": " + new Win32Exception(error).Message);
         }
         try {
             bool member;
-            if (!IsProcessInJob(handle, job, out member)) {
-                int error = Marshal.GetLastWin32Error();
+            if (!calls.IsProcessInJob(handle, job, out member)) {
+                int error = calls.LastError();
                 throw new Win32Exception(error, "IsProcessInJob for worker job member " + pid + ": " + new Win32Exception(error).Message);
             }
             if (!member) return;
-            if (WaitForSingleObject(handle, 0) == 0) return;
-            bool terminated = TerminateProcess(handle, 1);
-            int terminationError = terminated ? 0 : Marshal.GetLastWin32Error();
+            if (calls.WaitForSingleObject(handle, 0) == 0) return;
+            bool terminated = calls.TerminateProcess(handle, 1);
+            int terminationError = terminated ? 0 : calls.LastError();
             AwaitExit(handle, terminationError);
-        } finally { CloseHandle(handle); }
+        } finally { calls.CloseHandle(handle); }
     }
 
     // TerminateProcess can report ACCESS_DENIED while another termination is still completing (observed with
     // a Codex worker's descendants). A zero-time wait is not proof of failure. Keep the same verified handle until
     // exit or the existing deadline; an actual refusal that leaves it alive must still fail the cleanup barrier.
     static void AwaitExit(IntPtr handle, int terminationError) {
-        if (WaitForSingleObject(handle, 2000) == 0) return;
+        if (calls.WaitForSingleObject(handle, 2000) == 0) return;
         if (terminationError != 0) throw new Win32Exception(terminationError,
             "TerminateProcess did not complete: " + new Win32Exception(terminationError).Message);
         throw new TimeoutException("worker child did not exit");
