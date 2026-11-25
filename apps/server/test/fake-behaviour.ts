@@ -87,6 +87,10 @@
 // first-output, refusal, stderr, exit) until the test releases each arrival; the set's env() goes into the adapter's
 // options, never into process.env. "FAKE-EXIT: <code | signal> [<stderr text>]" as a message (Claude's fake): the process
 // ends that way as it takes the message in, writing the text to stderr first; before any output if it is the first.
+// FAKE_CODEX_RPC (Codex's fake): a JSON object of method to what it does instead of its answer: {"error": {code,
+// message}}, {"result": ...} (a malformed answer), "silent" (no answer), {"exit": <code | "signal">}, "pass"; one
+// action for every request of the method, or a list, one per request (its own answers after the list). Its turn/start
+// in a thread it did not start or resume fails ("thread not found"), as Codex's does.
 import { errorText } from "@nexus/protocol/errors";
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -148,8 +152,10 @@ export function later(fake: Fake, fn: () => void, ms: number): void {
  * - refusal     a start the CLI refuses, before it writes anything of the refusal (detail: the refusal's text)
  * - stderr      before the process writes to stderr (detail: the text)
  * - exit        before the process exits (detail: the exit code, or "signal"); after what it wrote to stdout
+ * Codex's fake: "answer:<method>", before it handles a request of that method (its answer and every line after it
+ * wait; detail: the method).
  */
-export type FakePoint = "first-read" | "save" | "first-output" | "refusal" | "stderr" | "exit";
+export type FakePoint = "first-read" | "save" | "first-output" | "refusal" | "stderr" | "exit" | `answer:${string}`;
 
 /** A fake held at a point: what the test waited for (FakeGates.reached). */
 export interface FakeHeld {

@@ -77,7 +77,7 @@ const NO_ROLLOUT = /no rollout found for thread id/i;
 /** How a request fails that the process's exit leaves unanswered (CodexSession.request). */
 const EXITED = "codex exited";
 /** How long after its exit event a process's stdout may still drain before the exit is handled. */
-const EXIT_DRAIN_MS = 1000;
+export const EXIT_DRAIN_MS = 1000;
 
 /** CodexErrorInfo values worth trying again: overloaded, the server's own error, the network, a short rate limit. */
 const CODEX_PASSING = new Set([

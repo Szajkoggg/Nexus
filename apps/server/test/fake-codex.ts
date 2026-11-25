@@ -6,14 +6,42 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
-  PARTIAL, actOnRead, contextTokens, contextWindow, endFake, fakeSaved, interrupt, later, onBackgroundEnd, record, recordArgs, respond, runAsScript, saveFakeConversation,
+  PARTIAL, actOnRead, contextTokens, contextWindow, endFake, fakeGatesOf, fakeSaved, interrupt, later, onBackgroundEnd, record, recordArgs, respond, runAsScript, saveFakeConversation,
   type Background, type Fake, type FakeFailure, type FakeIo,
 } from "./fake-behaviour.ts";
+
+/**
+ * What the fake does with a request instead of its own answer (FAKE_CODEX_RPC, queue LCR): an error with any code and
+ * message ("${threadId}" in it becomes the request's threadId), another result (a malformed one), no answer ever
+ * ("silent"), the process's exit, or its own answer ("pass").
+ */
+type RpcAction = "pass" | "silent" | { error: { code: number; message: string } } | { result: unknown } | { exit: number | "signal" };
+
+/**
+ * FAKE_CODEX_RPC: a JSON object of method to action: one action, for every request of that method; or a list, one per
+ * request in order, the fake's own answer after the list. Read once, at the process's start.
+ */
+function rpcScript(env: NodeJS.ProcessEnv): (method: string) => RpcAction {
+  const script = JSON.parse(env.FAKE_CODEX_RPC ?? "{}") as Record<string, RpcAction | RpcAction[]>;
+  const used = new Map<string, number>();
+  return (method) => {
+    const a = script[method];
+    if (!Array.isArray(a)) return a ?? "pass";
+    const n = used.get(method) ?? 0;
+    used.set(method, n + 1);
+    return a[n] ?? "pass";
+  };
+}
 
 /** Runs Codex's fake on `io` until it exits (FakeIo.exit); returns what ends it from outside (a kill). */
 export function runFakeCodex(io: FakeIo): () => void {
   const env = io.env;
   const fake: Fake = { io, history: [] };
+  // FAKE_GATES: a test holds the handling of a request at "answer:<method>" (FakeGates in fake-behaviour.ts): its answer
+  // and every line after it wait until released. Unarmed, it goes on in the same call.
+  const gates = fakeGatesOf(env);
+  const processNo = gates?.join(fake) ?? 0;
+  const scripted = rpcScript(env);
   const out = (m: unknown) => { if (!fake.ended) io.stdout.write(JSON.stringify(m) + "\n"); };
   const notify = (method: string, params: unknown) => out({ method, params });
   /** Messages steered into the running turn, not taken in yet: taken in at its end, dropped by an interrupt (as Codex does). */
@@ -184,14 +212,37 @@ export function runFakeCodex(io: FakeIo): () => void {
     if (hold && /"method":"(turn\/start|thread\/compact\/start)"/.test(buffer)) { const rest = buffer; buffer = ""; later(fake, () => take(rest), hold); return; }
     take("");
   });
+  /** Held at an answer gate: the lines after the held request wait in `buffer`. */
+  let holding = false;
   function take(more: string): void {
     buffer += more;
     let i: number;
-    while ((i = buffer.indexOf("\n")) >= 0) {
+    while (!holding && (i = buffer.indexOf("\n")) >= 0) {
       const line = buffer.slice(0, i); buffer = buffer.slice(i + 1);
       if (!line.trim()) continue;
       const m = JSON.parse(line) as { id?: number; method?: string; params?: any };
-    if (m.id === undefined || !m.method) continue; // notifications (initialized) and responses
+      if (m.id === undefined || !m.method) continue; // notifications (initialized) and responses
+      const req = { id: m.id, method: m.method, params: m.params };
+      if (gates) {
+        holding = true;
+        gates.pass(fake, `answer:${req.method}`, processNo, () => { holding = false; handle(req); take(""); }, req.method);
+        if (holding) return;
+        continue;
+      }
+      handle(req);
+    }
+  }
+  function handle(m: { id: number; method: string; params?: any }): void {
+    {
+      const action = scripted(m.method);
+      if (action !== "pass") {
+        recordArgs(fake, { method: m.method, scripted: typeof action === "string" ? action : Object.keys(action)[0] });
+        if (typeof action === "string") return; // silent: no answer, ever
+        if ("error" in action) out({ id: m.id, error: { code: action.error.code, message: action.error.message.replaceAll("${threadId}", String(m.params?.threadId ?? "")) } });
+        else if ("result" in action) out({ id: m.id, result: action.result });
+        else if (action.exit === "signal") io.signal(); else io.exit(action.exit);
+        return;
+      }
       const reply = (result: unknown) => out({ id: m.id, result });
       const fail = (message: string) => out({ id: m.id, error: { code: -32000, message } });
       const text = () => (m.params?.input ?? []).map((x: { text?: string }) => x.text ?? "").join("\n");
@@ -219,7 +270,10 @@ export function runFakeCodex(io: FakeIo): () => void {
           reply({ rateLimits: { primary: { usedPercent: 5, windowDurationMins: 10080, resetsAt: Math.floor(Date.now() / 1000) + 86400 }, secondary: null } });
           break;
         case "turn/start": {
-          recordArgs(fake, { method: m.method, effort: m.params.effort ?? null, model: m.params.model ?? null, writableRoots: m.params.sandboxPolicy?.writableRoots ?? null, networkAccess: m.params.sandboxPolicy?.networkAccess ?? null, images: images() });        const t = text();
+          recordArgs(fake, { method: m.method, effort: m.params.effort ?? null, model: m.params.model ?? null, writableRoots: m.params.sandboxPolicy?.writableRoots ?? null, networkAccess: m.params.sandboxPolicy?.networkAccess ?? null, images: images() });
+          // A turn in another thread than this process started or resumed (or none): Codex finds no such thread.
+          if (m.params.threadId !== threadId) { out({ id: m.id, error: { code: -32600, message: `thread not found: ${m.params.threadId ?? "(none)"}` } }); break; }
+          const t = text();
           record(fake, t, null, !!turnId);
           if (turnId) { fail("a turn is already running"); break; }
           save();

@@ -109,6 +109,19 @@ function logLong(what: string, ms: number): void {
   if (file && ms > 2000) appendFileSync(file, [Math.round(ms), basename(process.argv[1] ?? "?"), what].join("\t") + "\n");
 }
 
+/**
+ * Checks that `pred` keeps holding for `ms`, looking every POLL_MS (no sleep longer than that): what must not change
+ * over a window, as a late callback could change it (queue LCR: the state after a Codex process's exit drain).
+ */
+export async function holds(what: string, pred: () => boolean, ms: number): Promise<void> {
+  const start = performance.now();
+  do {
+    if (!pred()) assert.fail(`${what} stopped holding after ${Math.round(performance.now() - start)} ms`);
+    await sleep(POLL_MS);
+  } while (performance.now() - start <= ms);
+  if (!pred()) assert.fail(`${what} stopped holding at the end of ${ms} ms`);
+}
+
 /** As until, for a condition that is asked asynchronously (an HTTP request); a rejection counts as not yet. */
 export async function untilAsync(what: string, pred: () => Promise<boolean>, ms: number = WAIT_MS, detail: () => string = () => ""): Promise<void> {
   const start = performance.now();
