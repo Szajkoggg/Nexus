@@ -264,9 +264,8 @@ const fullHelp = () => `${HELP}\n${topicList()}`;
 class UsageError extends Error {}
 /** The roles a session attached by hand may have (`nexus attach --role`). */
 const ATTACH_ROLES = ["worker", "orchestrator"] as const;
-/** A file named on the command line, read; one that is not there is a usage error naming it (H4), not a stack trace. */
-function readArgFile(given: string): string {
-  const file = pathArg(given);
+/** A file named on the command line (resolved with pathArg), read; one that is not there is a usage error naming it (H4), not a stack trace. */
+function readArgFile(file: string): string {
   if (!existsSync(file) || !statSync(file).isFile()) throw new UsageError(`no such file: ${file}`);
   return readFileSync(file, "utf8");
 }
@@ -1127,7 +1126,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (o().set?.length) throw new UsageError("--set goes with --template");
     const st = store(); const s = orchestrator(st);
     const src = need(args()[2], "<file.yaml|->");
-    const text = src === "-" ? stdin() : readArgFile(src);
+    const text = src === "-" ? stdin() : readArgFile(pathArg(src));
     let definition: unknown;
     try { definition = YAML.parse(text); } catch (e) { throw new UsageError(`not valid YAML: ${(e as Error).message}`); }
     const id = (definition as { id?: unknown } | null)?.id;

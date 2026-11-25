@@ -716,7 +716,7 @@ The worker recommends: ${x.recommended}` : ""}` : ""}`,
  * while the user is away, for the user (the orchestrator's start and planning of it are refused then: orchestrator.ts,
  * awayRule).
  */
-function notPlanned(q: QueueView, start: string, away: boolean): string {
+function startAdvice(q: QueueView, start: string, away: boolean): string {
   return q.start
     ? `It is in the plan (${q.start.waiting || "nothing to wait for"}): Nexus starts it itself, so start nothing; tell the user if anything follows from the approval.`
     : away
@@ -733,11 +733,11 @@ export function approvalNotice(q: QueueView, a: { revision: number }, away = fal
   // A run of an older revision goes on under the new one (a revision changes no started step); a finished one is over:
   // the new revision's steps need a start.
   const todo = !r
-    ? notPlanned(q, "start it now", away)
+    ? startAdvice(q, "start it now", away)
     : r.rejected && r.state === "paused" && !q.rejection
       ? `Its run was paused because the user rejected step ${r.rejected}; this revision lifts that. If the plan puts it next, resume it now (it goes on at the first pending step); otherwise tell the user why not.`
     : r.state === "finished" && runIsOlder(r, a.revision, q.history)
-      ? `Its earlier run is finished. ${notPlanned(q, "start it now (it begins at the first pending step)", away)}`
+      ? `Its earlier run is finished. ${startAdvice(q, "start it now (it begins at the first pending step)", away)}`
     : r.state === "finished"
       ? "Its run is finished; tell the user if anything follows from the approval."
     : r.state === "paused" || r.state === "halted"
