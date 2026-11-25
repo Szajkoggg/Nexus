@@ -6,13 +6,15 @@
 //
 // Run by the test as `node --import model-reads.ts crash-server.ts <plan JSON>`; the test's side is crashAt().
 import { spawn, type ChildProcess } from "node:child_process";
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore } from "@nexus/protocol";
 import type { Engine } from "../src/engine.ts";
 import { Orchestrator } from "../src/orchestrator.ts";
-import { restart } from "./engine-setup.ts";
+import { REAL_PROCESSES, restart } from "./engine-setup.ts";
 import { FakeGates, type FakePoint } from "./fake-behaviour.ts";
+import { nativeGate } from "./gated-cleanup.ts";
 import { inProcessRuntime } from "./in-process-runtime.ts";
 import { assertTempHome } from "./helpers.ts";
 import { LONGER, until } from "./wait.ts";
@@ -26,17 +28,21 @@ const MODEL_READS = new URL("./model-reads.ts", import.meta.url).href;
  * - `restart`: only builds the engine, whose recovery goes on with a run an update held (resume_after_restart);
  * - `chat`: builds the orchestrator and goes on with the turn an update cut off (resumeCutOff), as main.ts's activate.
  * It holds the `process`-th fake (1: the first it starts) at `point`; earlier arrivals at the point go on.
+ * `gate` (queue WHR, WHR5; with `start`, Windows only): instead, the worker's processes run as real processes in gate
+ * hosts (gated-cleanup.ts, nativeGate) on that folder, which the test drives; the server is held once End waits at the
+ * gate (its "arrived" file), and says so with the point "native-gate".
  */
 export interface CrashPlan {
   root: string;
   does: "start" | "restart" | "chat";
   runtime?: "claude" | "codex";
-  point: FakePoint;
+  point: FakePoint | "native-gate";
   process?: number;
+  gate?: string;
 }
 
 /** What the server said as it was held: the point, the fake's number, the point's detail. */
-export interface Held { point: FakePoint; process: number; detail?: string }
+export interface Held { point: FakePoint | "native-gate"; process: number; detail?: string }
 
 /**
  * The server's environment: the test's, without what names a Nexus outside the test (a worker's own session and project,
@@ -87,6 +93,14 @@ export async function endCrashServers(): Promise<number> {
 async function serve(plan: CrashPlan): Promise<void> {
   // Stays up until it is killed: its input (the test's pipe) is never closed.
   process.stdin.resume();
+  if (plan.gate) {
+    const gate = nativeGate(plan.gate);
+    restart(ProjectStore.forRoot(plan.root), { ...REAL_PROCESSES, spawn: gate.make }).start("Q", { runtime: plan.runtime ?? "claude" });
+    await until("End waits at the native gate", () => existsSync(join(plan.gate!, "arrived")), LONGER.run);
+    process.stdout.write(JSON.stringify({ point: "native-gate", process: gate.hosts.length } satisfies Held) + "\n");
+    return; // held until the test kills this process
+  }
+  if (plan.point === "native-gate") throw new Error("the point native-gate needs a gate folder");
   const gates = new FakeGates([plan.point]);
   process.env.FAKE_GATES = gates.id; // the fakes the engine or orchestrator starts take this process's environment
   const store = ProjectStore.forRoot(plan.root);

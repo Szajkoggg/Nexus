@@ -10,6 +10,8 @@
 //   arrived   written by the gate when End waits at it: "<pid> <handle> member" (the handle End checked)
 //   holdopen  N: End holds before its Nth OpenProcess of any member instead ("arrived" then reads "<pid> 0 open")
 //   open      written by the test: the held wait (or open) goes on, as the real call
+//   crash     written by the test while End is held at the wait: the host ends its runtime through its own Process
+//             object (a runtime crash during the cleanup), then writes "crashed" ("<pid> <exit code>") and holds on
 //   calls.log every native call End made for the target, one line each
 using System;
 using System.Collections.Generic;
@@ -66,6 +68,16 @@ public sealed class GatedEndCalls : NexusWorkerJob.EndCalls {
         }
         return handle;
     }
+    // The host's runtime, by the Process object the host started it with (never by a PID): killed and waited for.
+    void CrashRuntime() {
+        var runtime = (System.Diagnostics.Process)typeof(NexusWorkerJob).GetField("runtime", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null);
+        runtime.Kill();
+        runtime.WaitForExit();
+        Log("runtime killed " + runtime.Id);
+        string temp = Path.Combine(dir, "crashed.tmp");
+        File.WriteAllText(temp, runtime.Id + " " + runtime.ExitCode);
+        File.Move(temp, Path.Combine(dir, "crashed"));
+    }
     public bool IsProcessInJob(IntPtr process, IntPtr job, out bool member) {
         bool ok = real.IsProcessInJob(process, job, out member);
         if (IsTarget(process)) Log("IsProcessInJob " + process.ToInt64() + " " + ok + " " + member);
@@ -78,8 +90,12 @@ public sealed class GatedEndCalls : NexusWorkerJob.EndCalls {
             if (first) {
                 Log("held " + handle.ToInt64());
                 Arrive(Target() + " " + handle.ToInt64() + " member");
-                string open = Path.Combine(dir, "open");
-                while (!File.Exists(open)) Thread.Sleep(10);
+                string open = Path.Combine(dir, "open"), crash = Path.Combine(dir, "crash");
+                bool crashed = false;
+                while (!File.Exists(open)) {
+                    if (!crashed && File.Exists(crash)) { crashed = true; CrashRuntime(); }
+                    Thread.Sleep(10);
+                }
             }
         }
         uint result = real.WaitForSingleObject(handle, ms);

@@ -98,16 +98,24 @@ export interface NativeGate {
   open(): void;
   /** The native calls End made for the target, in order. */
   calls(): string[];
+  /** While End is held at the wait: the host ends its runtime by its own Process object (a runtime crash, WHR5). */
+  crashRuntime(): void;
+  /** The runtime the host ended on crashRuntime: its PID and exit code, once it has exited; else undefined. */
+  crashed(): { pid: number; code: number } | undefined;
+  /** For each gate host started, in order: how many earlier ones had not exited when it started (WHR5). */
+  overlaps: number[];
 }
 
-export function nativeGate(): NativeGate {
-  const dir = tempDir("nexus-gate-");
+/** `dir`: the gate's folder, when a server process of the test's own makes the hosts (crash-server.ts); else a new one. */
+export function nativeGate(dir = tempDir("nexus-gate-")): NativeGate {
   const hosts: ChildProcessWithoutNullStreams[] = [];
+  const overlaps: number[] = [];
   const script = fileURLToPath(new URL("./worker-gate.ps1", import.meta.url));
   const start: StartJobHost = (cwd, env) => {
     const host = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script], {
       cwd, env: { ...env, NEXUS_TEST_GATE_DIR: dir }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
+    overlaps.push(hosts.filter((h) => h.exitCode === null && h.signalCode === null).length);
     hosts.push(host);
     return host;
   };
@@ -116,8 +124,9 @@ export function nativeGate(): NativeGate {
     const options = { ...launch.options, spawnChild };
     return launch.runtime === "claude" ? new ClaudeSession(options as ClaudeOptions) : new CodexSession(options as CodexOptions);
   };
+  const read = (name: string) => { const file = join(dir, name); return existsSync(file) ? readFileSync(file, "utf8").trim().split(" ").map(Number) : undefined; };
   return {
-    make, dir, hosts,
+    make, dir, hosts, overlaps,
     target: (pid) => writeFileSync(join(dir, "target"), String(pid)),
     refuse: () => writeFileSync(join(dir, "refuse"), ""),
     holdOpen: (n) => writeFileSync(join(dir, "holdopen"), String(n)),
@@ -129,5 +138,7 @@ export function nativeGate(): NativeGate {
     },
     open: () => writeFileSync(join(dir, "open"), ""),
     calls: () => (existsSync(join(dir, "calls.log")) ? readFileSync(join(dir, "calls.log"), "utf8").trim().split("\n").filter(Boolean) : []),
+    crashRuntime: () => writeFileSync(join(dir, "crash"), ""),
+    crashed: () => { const x = read("crashed"); return x && { pid: x[0]!, code: x[1]! }; },
   };
 }

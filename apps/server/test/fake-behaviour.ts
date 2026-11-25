@@ -41,6 +41,7 @@
 //   ownedholdshared, owneddenyshared  the same two, the helper sharing the job host's console: started with
 //               windowsHide, a console helper gets a conhost of its own inside the job, and ending that conhost first
 //               ends the helper too, whatever its DACL; the job's member order decides (worker-cleanup-gate.test.ts)
+//   ownedholdsharedstop  ownedholdshared, but the step reports a stop condition instead of done (its step unfinished)
 //   noopexit1   Codex's fake only: the first time (counted beside FAKE_LOG, any process of the step), end the turn
 //               without an outcome, then exit with its stdout held open (exitHeld below); after: done
 // The closing refactoring step's standard goal has no "FAKE:": it does FAKE_CLOSING's behaviour, by default done, with a
@@ -632,7 +633,7 @@ async function answer(fake: Fake, text: string, tool: (command: string) => void,
     }
     // Own a real Windows directory handle, optionally denying new PROCESS_TERMINATE handles. Held until the test
     // lets this turn finish; the worker job must release it before the next step. No model or foreign process.
-    if (/^owned(hold|deny)(shared)?$/.test(behaviour)) {
+    if (/^owned(hold|deny)(shared)?(stop)?$/.test(behaviour)) {
       const dir = join(cwd, `.owned-${step}`);
       mkdirSync(dir, { recursive: true });
       const ready = `${env.FAKE_LOG}.helper-${step}`;
@@ -641,7 +642,7 @@ async function answer(fake: Fake, text: string, tool: (command: string) => void,
       { cwd: dir, stdio: "ignore", windowsHide: !behaviour.endsWith("shared") });
       child.unref();
       await work(fake, step);
-      behaviour = "done";
+      behaviour = behaviour.endsWith("stop") ? "stop" : "done";
     }
     const fail = failure(fake, step, behaviour);
     if (fail) return { fail };

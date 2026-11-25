@@ -429,3 +429,18 @@ fake runtimes. Two Windows facts shaped it: a console helper started with `windo
 job, and ending that conhost ends the helper whatever its DACL; Node puts its children in a kill-on-close job of its
 own, so ending a runtime ends its helpers. The tests' helpers therefore share the host's console
 (`ownedholdshared`, `owneddenyshared` in `apps/server/test/fake-behaviour.ts`).
+
+A restart while the cleanup is held there (queue WHR, WHR5): `apps/server/test/worker-cleanup-restart.test.ts` puts an
+update's hand-over, the server's own shutdown, its sudden death (`crashAt` with a gate folder: the server process of
+`apps/server/test/crash-server.ts` runs the worker in gate hosts and is killed by its handle), a runtime crash (the gate
+host ends its runtime by its own Process object) and a restart for changed settings at the held wait, and starts the
+next server on the files. The workers are shared with WHR4 (`apps/server/test/worker-gate-fixture.ts`); the gate counts,
+for every host it starts, how many earlier ones still ran, so "no new process beside the old job" is asserted, not
+inferred. What building it showed, pinned and not changed: an update's drain counts a held cleanup as idle (it is no
+turn), and main.ts's release then waits for the old processes, which end only after the cleanup; a server killed at the
+held wait takes the job with it at once (Node's own kill-on-close job holds the host), before any next server; a
+runtime crash under the cleanup races two of the host's threads (the control thread sends C after releasing the
+cleanup's lock, the monitor ends the host once it has it), so the engine either opens the next step in the dead
+process and retries it once, or takes the host's end as the process's exit; the work runs once either way. A helper
+whose exit Node already sees may hold its directory a moment longer, and a dying runtime's helper may outlive the
+2000 ms wait on a busy machine: the tests wait for the directory and the helper, not only for a PID.

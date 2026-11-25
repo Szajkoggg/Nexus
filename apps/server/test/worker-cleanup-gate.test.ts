@@ -10,124 +10,14 @@
 // with that conhost when the cleanup ends it first, and the job's member order would decide the test.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadProjectState, sendMessage, setStepLevel } from "@nexus/protocol";
-import { setup, REAL_PROCESSES } from "./engine-setup.ts";
-import { gatedCleanup, nativeGate } from "./gated-cleanup.ts";
+import { loadProjectState, sendMessage } from "@nexus/protocol";
 import { LONGER, holds, until } from "./wait.ts";
+import { FAILED, RUNTIMES, alive, atGate, isLocked, locked, sameHandle, windows, workerA, workerB } from "./worker-gate-fixture.ts";
 
 // The fake runtimes as processes of their own (scripts/real-process-tests.ts).
 process.env.NEXUS_CLAUDE = fileURLToPath(new URL("./fake-claude.ts", import.meta.url));
 process.env.NEXUS_CODEX = fileURLToPath(new URL("./fake-codex.ts", import.meta.url));
-
-const windows = { skip: process.platform !== "win32" };
-type Runtime = "claude" | "codex";
-const RUNTIMES: Runtime[] = ["claude", "codex"];
-
-function alive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch { return false; } }
-const isLocked = (dir: string) => { try { rmdirSync(dir); return false; } catch (e) { const c = (e as NodeJS.ErrnoException).code; if (c === "EBUSY" || c === "EPERM") return true; throw e; } };
-const locked = (dir: string) => assert.ok(isLocked(dir), `${dir} is held`);
-
-/** Worker B: an independent queue whose helper holds its own directory through the whole test, in a normal host. */
-async function workerB(runtime: Runtime) {
-  const b = setup(["ownedhold"], REAL_PROCESSES);
-  const log = process.env.FAKE_LOG!;
-  process.env.FAKE_RELEASE = join(dirname(log), "release");
-  const end = async () => {
-    writeFileSync(`${log}.helper-Q1.release`, "");
-    b.engine.shutdown();
-    await until("B's host exit", () => !b.engine.alive(), LONGER.processes);
-  };
-  try {
-    b.engine.start("Q", { runtime });
-    await until("B's helper ready", () => existsSync(`${log}.helper-Q1`), LONGER.step);
-    const dir = join(dirname(log), ".owned-Q1");
-    locked(dir);
-    return { dir, pid: Number(readFileSync(`${log}.helper-Q1`, "utf8")), end };
-  } catch (error) { await end(); throw error; }
-}
-
-/**
- * Worker A in a git checkout with a modified tracked file and an untracked one, its steps' processes in gate hosts.
- * `level`: Q1's review level (1: the user's review, accepted by the test).
- */
-async function workerA(runtime: Runtime, behaviours: string[], o: { level?: number; refuse?: boolean } = {}) {
-  const gate = nativeGate();
-  const cleanups = gatedCleanup({ make: gate.make });
-  const a = setup(behaviours, { ...REAL_PROCESSES, spawn: cleanups.spawn });
-  const log = process.env.FAKE_LOG!, root = dirname(log), release = join(root, "release");
-  process.env.FAKE_RELEASE = release;
-  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: root, stdio: "ignore", windowsHide: true });
-  git("init", "-q", "-b", "main");
-  writeFileSync(join(root, ".gitignore"), ".nexus/\nhome/\nfake.log*\nrelease*\n.owned-*/\n");
-  writeFileSync(join(root, "tracked.txt"), "committed\n");
-  git("add", ".gitignore", "tracked.txt"); git("commit", "-qm", "initial");
-  writeFileSync(join(root, "tracked.txt"), "changed, not committed\n");
-  writeFileSync(join(root, "untracked.txt"), "never added\n");
-  if (o.level) setStepLevel(a.store, "Q", "Q1", o.level);
-  const end = async () => {
-    gate.open();
-    writeFileSync(`${log}.helper-Q1.release`, "");
-    writeFileSync(release, "");
-    a.engine.shutdown();
-    await until("A's hosts exit", () => !a.engine.alive(), LONGER.processes);
-  };
-  let helper: number;
-  try {
-    a.engine.start("Q", { runtime });
-    await until("A's helper ready", () => existsSync(`${log}.helper-Q1`), LONGER.step);
-    helper = Number(readFileSync(`${log}.helper-Q1`, "utf8"));
-  } catch (error) { await end(); throw error; }
-  const dir = join(root, ".owned-Q1");
-  gate.target(helper);
-  if (o.refuse !== false) gate.refuse();
-  if (!isLocked(dir)) { await end(); assert.fail("A's helper holds its directory"); }
-  const openings = (step: string) => a.received().filter((m) => new RegExp(`step ${step} \\(`).test(m.text)).length;
-  const session = () => a.store.readRun("Q")!.session;
-  return {
-    ...a, gate, cleanups, helper, dir, root, session, openings,
-    /** Lets Q1's turn end (the fake reports done); the cleanup follows. */
-    finishTurn: () => writeFileSync(`${release}-Q1`, ""),
-    /** The helper ends by itself (the held wait's success once opened). */
-    releaseHelper: () => writeFileSync(`${log}.helper-Q1.release`, ""),
-    runtimeState: () => a.store.readRuntime(session())?.state,
-    /** The working content is as the test left it. */
-    contentKept() {
-      assert.equal(readFileSync(join(root, "tracked.txt"), "utf8"), "changed, not committed\n");
-      assert.equal(readFileSync(join(root, "untracked.txt"), "utf8"), "never added\n");
-    },
-    end,
-  };
-}
-type A = Awaited<ReturnType<typeof workerA>>;
-
-/** Waits for the gate's acknowledgement and checks it names the helper; Q1 done and durable, Q2 pending, no new turn. */
-async function atGate(a: A): Promise<void> {
-  await until("End waits at the gate", () => !!a.gate.arrived(), LONGER.step);
-  const at = a.gate.arrived()!;
-  assert.equal(at.pid, a.helper, "the gate holds the helper the test named");
-  assert.ok(alive(a.helper));
-  locked(a.dir);
-  const q = a.queue();
-  assert.equal(q.steps[0]!.status === "done" || q.steps[0]!.status === "review", true, `Q1 reported: ${q.steps[0]!.status}`);
-  assert.equal(q.steps[1]!.status, "pending");
-  assert.equal(a.openings("Q2"), 0, "no turn while the cleanup is held");
-  assert.deepEqual(a.cleanups.calls.map((c) => c.outcome), [undefined], "one cleanup, pending");
-}
-
-/** End's calls for the helper, all on the one handle the gate acknowledged, closed once, last. */
-function sameHandle(a: A, waits: string[]): void {
-  const h = a.gate.arrived()!.handle, pid = a.helper;
-  assert.deepEqual(a.gate.calls().slice(0, 7), [
-    `OpenProcess ${pid} ${h}`, `IsProcessInJob ${h} True True`, `WaitForSingleObject ${h} 0 258`,
-    `TerminateProcess ${h} injected false 5`, `held ${h}`, ...waits.map((w) => `WaitForSingleObject ${h} 2000 ${w}`), `CloseHandle ${h}`,
-  ].slice(0, 7));
-}
-
-const FAILED = /worker process cleanup failed: .*TerminateProcess did not complete/;
 
 for (const runtime of RUNTIMES) {
   test(`${runtime}: End -> AwaitExit -> C -> next turn: a late exit after false/5 acknowledges once and the next step runs once`, windows, async () => {
