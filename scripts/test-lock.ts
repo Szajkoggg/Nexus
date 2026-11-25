@@ -140,24 +140,26 @@ export async function acquire(o: LockOptions = {}): Promise<Lock | undefined> {
   let lastSaid: number | undefined;
   let refusedSince: number | undefined;
   const sleep = () => new Promise((r) => setTimeout(r, pollMs));
-  /** A passing refusal: undefined to wait for the next poll, or thrown once it has lasted REFUSED_MS. */
-  const refused = (r: { refused: unknown }) => {
+  /** Creates the lock; "refused" for a passing refusal (wait for the next poll), thrown once one has lasted REFUSED_MS. */
+  const attempt = (): Lock | "refused" | undefined => {
+    const made = create(file, me, staleMs);
+    if (!made || !("refused" in made)) { refusedSince = undefined; return made; }
     refusedSince ??= Date.now();
-    if (Date.now() - refusedSince >= REFUSED_MS) throw r.refused;
+    if (Date.now() - refusedSince >= REFUSED_MS) throw made.refused;
+    return "refused";
   };
   for (;;) {
     if (o.signal?.aborted) return undefined;
-    const fresh = create(file, me, staleMs);
-    if (fresh && "refused" in fresh) { refused(fresh); await sleep(); continue; }
+    const fresh = attempt();
+    if (fresh === "refused") { await sleep(); continue; }
     if (fresh) return fresh;
-    refusedSince = undefined;
     const gone = fullTestStale(file, staleMs);
     if (gone) {
       // Taken over: removed, then created exclusively again (of two runs taking it over at once, one gets it). A run
       // that held it too long is left running: it is not this run's to end, and its end leaves the lock alone.
       try { unlinkSync(file); } catch { /* another run removed it */ }
-      const taken = create(file, me, staleMs);
-      if (taken && "refused" in taken) { refused(taken); await sleep(); continue; }
+      const taken = attempt();
+      if (taken === "refused") { await sleep(); continue; }
       if (taken) {
         const h = gone.holder;
         if (h?.lease) say(`npm test: took over an expired full-test lease (pid ${h.pid}, ${h.cwd})`);
