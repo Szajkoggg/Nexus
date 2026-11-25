@@ -333,6 +333,6 @@ nothing invented before it; it says nothing of a model's context. A real runtime
 where a fake cannot answer (AGENTS.md); the probes of 2026-11-15 stay the basis of the save rules the fakes copy.
 
 The fakes' controllable points (gates, scripted failures, RPC answers, history and receipts) are listed in
-[tests.md](tests.md), "Startup and recovery tests, and their helpers (queue LCR)", with the findings the tests pinned.
+[process-tests.md](process-tests.md), "Startup and recovery tests, and their helpers (queue LCR)", with the findings the tests pinned.
 Nothing an agent reads or writes changed in the queue (no briefing, no CLI command, no file format), so no `Agents:`
 line is needed.
