@@ -239,8 +239,7 @@ export function reintegrate(store: ProjectStore, q: QueueView, d: Extract<MergeD
 /** A finished queue with a worktree of its own, its branch and base. */
 function finishedWorktreeQueue(store: ProjectStore, queueId: string, cleanup = false) {
   const state = loadProjectState(store);
-  const q = state.queues.find((x) => x.id === queueId);
-  if (!q) throw new ActionError(`unknown queue ${queueId}`, 404);
+  const q = queueView(state, queueId);
   const root = normPath(state.project.root);
   const path = checkoutOf(store, q);
   if (!path || samePath(path, root)) throw new ActionError(`queue ${queueId} works in the project's own checkout, not a worktree of its own`, 409);

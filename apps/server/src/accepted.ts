@@ -12,7 +12,7 @@
 // own): the push is recorded `held`, with what holds it, and is tried again once one of those is confirmed (or sent to
 // a fix: the user has seen it, and the fix is a step reviewed on its own).
 import { errorText } from "@nexus/protocol/errors";
-import { ActionError, loadProjectState, normPath, now, pendingProvisional, type ProjectState, type ProjectStore, type PushFile, type QueueView } from "@nexus/protocol";
+import { ActionError, loadProjectState, queueView, normPath, now, pendingProvisional, type ProjectState, type ProjectStore, type PushFile, type QueueView } from "@nexus/protocol";
 import { checkoutOf, revParse } from "./gitinfo.ts";
 import { PUSH_ENV, PUSH_TIMEOUT_MS, pushFailure, runGit, type GitRunner } from "./deploy.ts";
 import { perf } from "./perf.ts";
@@ -65,9 +65,7 @@ export class AcceptedPusher {
   }
 
   private view(queueId: string): QueueView {
-    const q = loadProjectState(this.store).queues.find((x) => x.id === queueId);
-    if (!q) throw new ActionError(`unknown queue ${queueId}`, 404);
-    return q;
+    return queueView(loadProjectState(this.store), queueId);
   }
 
   /** The HEAD of the queue's checkout for each step that entered review in a round not recorded yet. */

@@ -106,8 +106,9 @@ split only moved text.
 
 - **The files are the contract.** Everything durable is a file under a project's `.nexus/`; the server can be
   restarted at any time and rebuilds its view from them. A reader gives a default only for a missing file; an
-  unreadable one is an error or a warning with its path, and is never overwritten (set aside as `<file>.corrupt`):
-  docs/design/state.md, "Missing and unreadable files".
+  unreadable one is an error or a warning with its path (an action on it is refused with 409 naming the file, not
+  "unknown"), and is never overwritten: set aside as `<file>.corrupt` (`.corrupt.2`, … beside an earlier copy; put
+  back if the write after it fails): docs/design/state.md, "Missing and unreadable files".
 - **One writer per file.** A session appends only to its own logs; the server writes queue definitions, inboxes and
   the runtime files, and the CLI is the one writer of what it writes itself (a queue's report and review files, notes, drafts, the setup files: docs/protocol/files.md). Do not add a second writer to any file.
 - **Agents never call the server.** They use the `nexus` CLI, which writes files. Only `nexus server …` talks HTTP.

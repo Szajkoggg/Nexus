@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   runCounted, runHoldsCheckout, runEnded, runGoing,
-  ActionError, INTEGRATION_CONDITION, NEXUS_SESSION, ProjectStore, USER_SESSION, acceptedByNexus, ensureNexusSession, fileList, ensureUserSession, lastDone, stepChecks, liftByContinue, loadProjectState, openPlanFile, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
+  ActionError, INTEGRATION_CONDITION, queueView, sessionView, NEXUS_SESSION, ProjectStore, USER_SESSION, acceptedByNexus, ensureNexusSession, fileList, ensureUserSession, lastDone, stepChecks, liftByContinue, loadProjectState, openPlanFile, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
   RETRY_LIMIT, START_KEYS, chooseRoute, contextBeyond, effortIssue, formatClock, kindDefaults, overThreshold, routeStep, runStart, type Effort, type Routed, type ProjectFile, type StartValues, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView, type PlanBy,
   addNote, errorText,
@@ -862,7 +862,8 @@ export class Engine implements Member {
     // `checking` (protocol checks.ts, holdUnread). Nothing here can run them or tell: the run halts with the reason
     // (queue LF, F6).
     if (current?.status === "checking" && q.check_runs_error !== undefined) {
-      return this.halt(queueId, `queues/${queueId}/checks.yaml cannot be read (${q.check_runs_error.split("\n")[0]}): Nexus cannot tell whether the checks of step ${current.id} passed. Repair the file, or move it aside (the step then goes to its review without Nexus's checks), and Resume`);
+      // The error names the file already (UnreadableFileError): the reason does not name it again.
+      return this.halt(queueId, `${q.check_runs_error.split("\n")[0]}. Nexus cannot tell whether the checks of step ${current.id} passed. Repair the file, or move it aside (the step then goes to its review without Nexus's checks), and Resume`);
     }
     // A survey step that reported its end is checked at once, while its turn may still be going and before its review.
     if (current && this.surveyLeftWork(queueId, q, current)) return;
@@ -2144,16 +2145,14 @@ export class Engine implements Member {
     if (old?.state !== run.state && !this.stopped) this.coordinator.wake();
   }
 
+  /** The queue's view: an unreadable queue is refused naming its file (409), an unknown one is a 404 (queueView). */
   private queue(state: ProjectState, id: string): QueueView {
-    const q = state.queues.find((x) => x.id === id);
-    if (!q) throw new ActionError(`unknown queue ${id}`, 404);
-    return q;
+    return queueView(state, id);
   }
 
+  /** The session: an unreadable one is refused naming its file (409), an unknown one is a 404 (sessionView). */
   private sessionFile(state: ProjectState, id: string): SessionFile {
-    const s = state.sessions.find((x) => x.id === id);
-    if (!s || s.id === USER_SESSION) throw new ActionError(`unknown session ${id}`, 404);
-    return s;
+    return sessionView(state, id);
   }
 }
 

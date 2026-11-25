@@ -4,11 +4,12 @@
 // it writes a new one. Nothing overwrites an unreadable file.
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
+import { errorText } from "../src/errors.ts";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  ProjectStore, applyDraft, approveQueue, ensureUserSession, loadProjectState, newId, now, readAway, readUsage, writeAway, USER_SESSION,
+  ActionError, ProjectStore, addNote, applyDraft, approveQueue, ensureUserSession, loadProjectState, newId, now, queueView, readAway, readUsage, refuseUnreadable, sendMessage, sessionView, setAsideCorrupt, writeAway, USER_SESSION,
 } from "../src/index.ts";
 
 function setup() {
@@ -121,4 +122,92 @@ test("a run.yaml its schema refuses is a warning naming the file once", () => {
   assert.equal(warnings.length, 1, warnings.join(" | "));
   assert.match(warnings[0]!, /queues\/Q\/run\.yaml cannot be read: \w+: /);
   assert.doesNotMatch(warnings[0]!, /^queue Q run:/);
+});
+
+// ---------------------------------------------------------------- queue LCK (survey LC3, F12 and F14)
+
+/** The ActionError an action threw: its status and message. */
+function refusal(fn: () => unknown): { status: number; message: string } {
+  try { fn(); } catch (e) {
+    assert.ok(e instanceof ActionError, `an ActionError, not: ${errorText(e)}`);
+    return { status: e.status, message: e.message };
+  }
+  assert.fail("not refused");
+}
+
+test("F12: actions on an unreadable queue.yaml are refused (409) with the file's name, never as an unknown queue or a server failure", () => {
+  const { store } = setup();
+  applyDraft(store, draft("First"));
+  approveQueue(store, "Q");
+  const file = join(store.queueDir("Q"), "queue.yaml");
+  writeFileSync(file, "steps: [unclosed\n");
+  for (const [what, fn] of [
+    ["applyDraft", () => applyDraft(store, draft("Second"))],
+    ["approveQueue", () => approveQueue(store, "Q")],
+    ["addNote", () => addNote(store, "Q", "Q1", "a note")],
+    ["queueView", () => queueView(loadProjectState(store), "Q")],
+  ] as const) {
+    const r = refusal(fn);
+    assert.equal(r.status, 409, `${what}: ${r.message}`);
+    assert.match(r.message, /queues\/Q\/queue\.yaml cannot be read/, what);
+  }
+  assert.equal(readFileSync(file, "utf8"), "steps: [unclosed\n", "the file is untouched");
+  assert.equal(refusal(() => approveQueue(store, "X")).status, 404, "a queue that is not there is still unknown");
+});
+
+test("F12: a message to a session whose session.yaml cannot be read is refused (409) with the file's name", () => {
+  const { store } = setup();
+  const s = { protocol: 1 as const, id: newId(), project: "p", role: "conversation" as const, runtime: "claude" as const, title: "S", native_id: null, cwd: store.dir, launched_by: "nexus" as const, created_at: now() };
+  store.writeSession(s);
+  writeFileSync(join(store.sessionDir(s.id), "session.yaml"), "role: [unclosed\n");
+  const r = refusal(() => sendMessage(store, s.id, "hello"));
+  assert.equal(r.status, 409, r.message);
+  assert.match(r.message, /session\.yaml cannot be read/);
+  const v = refusal(() => sessionView(loadProjectState(store), s.id));
+  assert.equal(v.status, 409, v.message);
+  assert.match(v.message, /session\.yaml cannot be read/);
+  assert.equal(refusal(() => sessionView(loadProjectState(store), "none")).status, 404);
+  const other = new Error("other");
+  assert.equal(refuseUnreadable(other), other, "any other error goes through as it is (the API's 500)");
+});
+
+/** A conversation session with an unreadable runtime.json that a reader with a default has met; its path. */
+function metUnreadableRuntime(store: ProjectStore, text: string): { id: string; file: string } {
+  const s = { protocol: 1 as const, id: newId(), project: "p", role: "conversation" as const, runtime: "claude" as const, title: "S", native_id: null, cwd: store.dir, launched_by: "nexus" as const, created_at: now() };
+  store.writeSession(s);
+  const file = join(store.sessionDir(s.id), "runtime.json");
+  writeFileSync(file, text);
+  assert.equal(store.readRuntime(s.id, () => {}), undefined);
+  return { id: s.id, file };
+}
+
+test("F14: a write that fails after the unreadable file was set aside puts it back; the next write sets it aside again", () => {
+  const { store } = setup();
+  const { id, file } = metUnreadableRuntime(store, "{ half");
+  const fault = ProjectStore.faultWrites({ file: `sessions/${id}/runtime.json` });
+  let lines: string[] = [];
+  try {
+    lines = warned(() => assert.throws(() => store.writeRuntime(id, { state: "idle", turns: 0, updated_at: now() }), /injected write fault/));
+  } finally { fault.clear(); }
+  assert.equal(readFileSync(file, "utf8"), "{ half", "the unreadable file is back in its place");
+  assert.ok(!existsSync(`${file}.corrupt`), "and not left aside");
+  assert.ok(lines.some((l) => l.includes("runtime.json") && l.includes("back in its place")), `told: ${lines.join(" | ")}`);
+  assert.ok(loadProjectState(store).warnings.some((w) => w.includes("runtime.json")), "a read still warns of it");
+  warned(() => store.writeRuntime(id, { state: "idle", turns: 0, updated_at: now() }));
+  assert.equal(readFileSync(`${file}.corrupt`, "utf8"), "{ half", "set aside at the next write");
+  assert.equal(store.readRuntime(id)?.state, "idle");
+});
+
+test("F14: a second damage is set aside as <file>.corrupt.2, the first one's copy kept", () => {
+  const { store } = setup();
+  const { id, file } = metUnreadableRuntime(store, "{ first");
+  warned(() => store.writeRuntime(id, { state: "idle", turns: 0, updated_at: now() }));
+  writeFileSync(file, "{ second");
+  assert.equal(store.readRuntime(id, () => {}), undefined);
+  const lines = warned(() => store.writeRuntime(id, { state: "idle", turns: 1, updated_at: now() }));
+  assert.equal(readFileSync(`${file}.corrupt`, "utf8"), "{ first", "the first damage is kept");
+  assert.equal(readFileSync(`${file}.corrupt.2`, "utf8"), "{ second", "the second goes beside it");
+  assert.ok(lines.some((l) => l.includes("runtime.json.corrupt.2")), `told by its name: ${lines.join(" | ")}`);
+  writeFileSync(file, "{ third");
+  assert.equal(setAsideCorrupt(file), `${file}.corrupt.3`, "and a third after it");
 });

@@ -4,7 +4,7 @@ import { errorText, formatIssues } from "./errors.ts";
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { NEXUS_SESSION, ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type Effort, type StatusChange, type InboxEntry, ReviewLevel, type RunFile, type SessionFile } from "./schemas.ts";
-import { ProjectStore, wrote, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
+import { ProjectStore, isUnreadableFile, wrote, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
 import { OVERRIDABLE, changedGlobal, settingKey } from "./settings.ts";
 import { reviewedByOrchestrator, runActive, runGoing } from "./status-rules.ts";
 import { commentTarget, isApproved, loadProjectState, pendingProvisional, type ProjectState, type QueueView, type StepView } from "./state.ts";
@@ -24,10 +24,23 @@ export class ActionError extends Error {
   constructor(message: string, status = 400) { super(message); this.status = status; }
 }
 
-/** The queue: unknown (404) when it has no queue.yaml; an unreadable one is an error naming the file. */
+/**
+ * An action meets a file that is there but cannot be read (queue LCK, F12): a refusal (409) naming the file, not an
+ * "unknown" queue or session (404) and not the server's own failure (500). Any other error goes through as it is.
+ */
+export function refuseUnreadable(e: unknown): unknown {
+  return isUnreadableFile(e) ? new ActionError(`${e.message}: repair the file, or move it away`, 409) : e;
+}
+
+/** Reads through `read`; a file it finds unreadable is refused (refuseUnreadable). */
+function readForAction<T>(read: () => T): T {
+  try { return read(); } catch (e) { throw refuseUnreadable(e); }
+}
+
+/** The queue: unknown (404) when it has no queue.yaml; an unreadable one is a refusal naming the file (409). */
 function queueOf(store: ProjectStore, id: string): QueueFile {
   if (!store.hasQueue(id)) throw new ActionError(`unknown queue ${id}`, 404);
-  return store.readQueue(id);
+  return readForAction(() => store.readQueue(id));
 }
 
 function stepOf(store: ProjectStore, queue: string, step: string): QueueFile {
@@ -45,13 +58,26 @@ export function findStep(state: ProjectState, queue: string, step: string): { q:
 
 /**
  * The queue's view in a derived state: unknown (404) when it is not there. The derivation leaves out a queue whose files
- * cannot be read: the refusal then gives the state's warning about it.
+ * cannot be read: that is a refusal (409) with the state's warning about it, which names the file (queue LCK, F12).
  */
 export function queueView(state: ProjectState, queue: string): QueueView {
   const q = state.queues.find((x) => x.id === queue);
   if (q) return q;
   const why = state.warnings.find((w) => w.startsWith(`queue ${queue}: `));
-  throw new ActionError(`unknown queue ${queue}${why ? ` (${why})` : ""}`, 404);
+  if (why) throw new ActionError(`${why}: repair the file, or move it away`, 409);
+  throw new ActionError(`unknown queue ${queue}`, 404);
+}
+
+/**
+ * A session in a derived state: unknown (404) when it is not there, or is the dashboard's own; one the derivation left
+ * out because its files cannot be read is a refusal (409) with the state's warning about it, which names the file.
+ */
+export function sessionView<S extends { id: string }>(state: { sessions: S[]; warnings: string[] }, id: string): S {
+  const s = state.sessions.find((x) => x.id === id);
+  if (s && s.id !== USER_SESSION) return s;
+  const why = s ? undefined : state.warnings.find((w) => w.startsWith(`session ${id}: `) && w.includes(" cannot be read"));
+  if (why) throw new ActionError(`${why}: repair the file, or move it away`, 409);
+  throw new ActionError(`unknown session ${id}`, 404);
 }
 
 /** The step's view in a derived state: unknown (404) when its queue or the step is not there. */
@@ -118,7 +144,7 @@ export function deleteNote(store: ProjectStore, queue: string, step: string, id:
 
 export function sendMessage(store: ProjectStore, session: string, text: unknown, about?: { queue?: string; step?: string }): string {
   if (!store.hasSession(session)) throw new ActionError(`unknown session ${session}`, 404);
-  const s = store.readSession(session);
+  const s = readForAction(() => store.readSession(session));
   if (s.role === "user") throw new ActionError("cannot message the dashboard's own session");
   const entry: InboxEntry = { v: 1, id: newId(), at: now(), from: "user", type: "message", text: nonEmpty(text, "the message"), queue: about?.queue, step: about?.step };
   store.appendInbox(session, entry);

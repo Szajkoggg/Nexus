@@ -172,6 +172,11 @@ function renameOnce(from: string, to: string): void {
  */
 export function renameRetrying(from: string, to: string): void {
   try { faultCheck(to); } catch (e) { try { unlinkSync(from); } catch { /* already gone */ } throw e; }
+  renameTried(from, to);
+}
+
+/** renameRetrying's retries, without a test's write fault (which stands for the new content failing to go in). */
+function renameTried(from: string, to: string): void {
   const start = Date.now();
   for (let wait = 5; ; wait = Math.min(wait * 2, 200)) {
     try { renameOnce(from, to); wrote(from); wrote(to); return; }
@@ -200,6 +205,8 @@ class UnreadableFileError extends Error {
     this.content = typeof (cause as { syscall?: unknown } | undefined)?.syscall !== "string";
   }
 }
+/** Whether an error is a file found unreadable (UnreadableFileError: its message names the file). */
+export const isUnreadableFile = (e: unknown): e is Error & { readonly file: string } => e instanceof UnreadableFileError;
 const isMissing = (e: unknown): boolean => (e as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
 const unreadable = (file: string, e: unknown): UnreadableFileError => e instanceof UnreadableFileError ? e : new UnreadableFileError(file, e);
 
@@ -234,32 +241,69 @@ function orDefault<T>(file: string, read: () => T, fallback: T, warn?: Warn): T 
   }
 }
 
-/** Before a file is replaced: if a reader with a default found its content unreadable, it is moved to <file>.corrupt. */
-function setAsideUnreadable(file: string): void {
+/**
+ * Where an unreadable file goes: `<file>.corrupt`, or when that is taken (an earlier damage) `<file>.corrupt.2`, `.3`,
+ * …: a second damage never replaces the first one's copy (queue LCK, F14).
+ */
+function corruptName(file: string): string {
+  if (!existsSync(`${file}.corrupt`)) return `${file}.corrupt`;
+  for (let n = 2; ; n++) if (!existsSync(`${file}.corrupt.${n}`)) return `${file}.corrupt.${n}`;
+}
+
+/** Moves an unreadable file aside under its first free `.corrupt` name (corruptName); returns the path it went to. */
+export function setAsideCorrupt(file: string): string {
+  const to = corruptName(file);
+  renameRetrying(file, to);
+  return to;
+}
+
+/**
+ * Before a file is replaced: if a reader with a default found its content unreadable, it is moved aside
+ * (setAsideCorrupt). Returns where it went, and what was wrong with it, so that a failed write can put it back.
+ */
+function setAsideUnreadable(file: string): { aside: string; met: UnreadableFileError } | undefined {
   const key = normPath(file);
   const met = metUnreadable.get(key);
-  if (!met) return;
+  if (!met) return undefined;
   metUnreadable.delete(key);
-  if (!met.content || !existsSync(file)) return;
-  renameRetrying(file, `${file}.corrupt`);
-  console.warn(`nexus: ${key} could not be read; set aside as ${basename(file)}.corrupt before it is written anew`);
+  if (!met.content || !existsSync(file)) return undefined;
+  const aside = setAsideCorrupt(file);
+  console.warn(`nexus: ${key} could not be read; set aside as ${basename(aside)} before it is written anew`);
+  return { aside, met };
+}
+
+/**
+ * A write that failed after the unreadable file was set aside: the file goes back in its place (queue LCK, F14), so
+ * that the next read warns of it again rather than silently finding nothing, and the next write sets it aside again.
+ */
+function putBack(file: string, set: { aside: string; met: UnreadableFileError }, why: unknown): void {
+  const key = normPath(file);
+  try {
+    renameTried(set.aside, file);
+    metUnreadable.set(key, set.met);
+    console.warn(`nexus: ${key} could not be written (${errorText(why)}); the unreadable file is back in its place`);
+  } catch (e) {
+    console.warn(`nexus: ${key} could not be written (${errorText(why)}), nor put back (${errorText(e)}): it is missing now, its unreadable content is in ${basename(set.aside)}`);
+  }
 }
 
 /**
  * Atomic replace: creates the folder, writes the whole text to a temporary file next to the target (named by this
  * process's id, so two processes writing the same file never share one), then renames it over the target
  * (renameRetrying). A reader sees the old content or the new one, never half of it. When the write or the rename
- * fails, the temporary file is removed and the error thrown; the target is untouched.
+ * fails, the temporary file is removed and the error thrown; the target is untouched (an unreadable one set aside
+ * first is put back).
  */
 export function writeFileAtomic(file: string, text: string | Uint8Array): void {
   mkdirSync(dirname(file), { recursive: true });
-  setAsideUnreadable(file);
+  const aside = setAsideUnreadable(file);
   const tmp = `${file}.${process.pid}.tmp`;
   try {
     if (typeof text === "string") writeFileSync(tmp, text, "utf8"); else writeFileSync(tmp, text);
     renameRetrying(tmp, file);
   } catch (e) {
     try { unlinkSync(tmp); } catch { /* not written, or already gone */ }
+    if (aside) putBack(file, aside, e);
     throw e;
   }
 }

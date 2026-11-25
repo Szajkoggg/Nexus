@@ -29,6 +29,12 @@ writes files. The only exceptions are `POST /api/server/update`, `POST /api/serv
 `POST /api/server/cancel-plan` and `POST /api/server/away`, which `nexus server` sends (see the CLI; it refuses `away`
 from every agent session, and the others from every session but an orchestrator's).
 
+A refused write answers `{ error }` with its status: 400 for a request that is wrong, 404 for a queue, session or step
+that is not there, 409 for one the action cannot be done to now. A queue or session whose file is there but cannot be
+read is not "unknown": an action on it is refused with 409 and the file's path and why it cannot be read ("…/queues/Q/
+queue.yaml cannot be read: …: repair the file, or move it away"), wherever the action read it (queue LCK, F12;
+[design/state.md](../design/state.md#missing-and-unreadable-files-queue-cha)).
+
 A browser's headers can be sent by any program, so on Windows the server also asks who opened the connection (queue
 HG, [Security on this machine](../design/security.md#the-local-http-gap-queue-hg)): every agent process runs in a job
 of its own (["Windows worker process host"](runtimes.md#windows-worker-process-host-pt)), and every write and

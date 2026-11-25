@@ -179,8 +179,9 @@ Queue CHB added two more: `runActive` (running or pausing: the run the engine ad
 engine, the merger, the stop-work check, the digest, the train and an action) and `REPORTED_STEP` / `stepReported`
 (in its review or checks, done, skipped or rejected: a step not run again at a resume, whose worker's exit is no
 failure; the engine had it twice, in two orders). Finding a queue or a step in a derived state is `queueView` /
-`stepView` (`packages/protocol/src/actions.ts`): a 404 `ActionError` when it is not there (the derivation leaves out a
-queue whose files cannot be read, with the state's warning in the refusal), where `find(...)!` gave a `TypeError`;
+`stepView` (`packages/protocol/src/actions.ts`): a 404 `ActionError` when it is not there (a queue the derivation left
+out because its files cannot be read is a 409 with the state's warning instead, queue LCK), where `find(...)!` gave a
+`TypeError`;
 `findStep` is the lookup that may find nothing (a conversation about a removed step).
 
 ## The cost of rebuilding state (queue RX5)
@@ -221,7 +222,10 @@ The rule, kept by `packages/protocol/src/store.ts`:
   as `path: message`, the one formatter of zod issues; queue CHB). The message already names the file, so a caller
   passes it on without adding the name again (`deriveProjectState`'s warnings). A caller that acts on the file stops there: `applyDraft` refuses the draft (409) rather than
   write over the file, `ensureServerSession` does not make the session again, an action on an unreadable queue or
-  session fails with the file's name instead of "unknown" (404). A caller that lists many (the conversations, the
+  session is refused with 409 and the file's name, never as "unknown" (404) nor as the server's own failure (500)
+  (queue LCK, survey LC3 F12): the engine's and the scheduler's lookups in the derived state (`queueView`,
+  `sessionView`) give the state's warning about the file; the protocol's actions that read the file turn its error
+  into the refusal (`refuseUnreadable`), and so does the API for any read an action makes. A caller that lists many (the conversations, the
   search, the checks recovered at a start, a session's lineage) leaves the one out and warns with its path
   (`console.warn`, the server's log).
 - **Where the server goes on with a default** (the files it writes for itself: `runtime.json`, `pins.json`,
@@ -238,11 +242,20 @@ The rule, kept by `packages/protocol/src/store.ts`:
   record would), so it is set aside as `runtime.json.corrupt`; a turn the old server left open in it is knowingly not
   recorded, and the log's warning says so. An unreadable `checks.yaml` leaves that queue's checks unrecovered (the
   log: "its checks are not recovered").
-- **Nothing overwrites an unreadable file.** Its writer first moves it aside as `<file>.corrupt` (the latest one;
-  `writeFileAtomic` does this for every file a reader with a default found unreadable in its content, and tells the
-  log), so the damage can still be looked at. A file the system only refused for a moment (another process holding
-  it) is not set aside. `auth.json` is set aside at once, before the new token is made: every device signs in again,
-  and the log says why.
+- **Nothing overwrites an unreadable file.** Its writer first moves it aside as `<file>.corrupt` (`writeFileAtomic`
+  does this for every file a reader with a default found unreadable in its content, and tells the log), so the damage
+  can still be looked at. A second damage does not replace the first one's copy: it goes to `<file>.corrupt.2`, then
+  `.3`, … (`setAsideCorrupt`; queue LCK, F14). When the write after the set-aside fails, the unreadable file is put
+  back in its place, with a line in the log, so that the next read still warns of it rather than finding nothing, and
+  the next write sets it aside again. A file the system only refused for a moment (another process holding it) is not
+  set aside. `auth.json` is set aside at once, before the new token is made: every device signs in again, and the log
+  says why.
+- **The server's own files outside a project** (queue LCK, F13): an unreadable `deploy-plan.json` is not a silent
+  "no plan" that the next plan replaces: when the server takes the files over (the planner's `recover`) the log names
+  the file and says the plan it held is lost, and the file is set aside. The hand-over files
+  (`<NEXUS_HOME>/handover/<id>/`) are written whole and renamed, so one unreadable read is taken for a moment's state
+  and read again at the next poll; the same file unreadable at the next read too is lasting damage, and the log names
+  it once. It still reads as not there: the hand-over's waits run into their own limits, as for a file never written.
 
 A reader in another process (an agent's `nexus`) warns but never sets a file aside: the server is the files' only
 writer.

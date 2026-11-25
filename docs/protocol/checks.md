@@ -164,8 +164,9 @@ one sends the step to its review as of the done (its `finished_at` and `review_w
 **An unreadable checks.yaml** (queue LF, F6): the state warns (`queue <id> checks: <error>`), the queue view carries
 `check_runs_error` (the error), and every step its events put in `review` is `checking` (`{ phase: queued, since: the
 done }`) instead: whether its checks passed is unknown, and it is not reviewed as if they had. The engine halts the
-run whose current step that is, with the reason (`queues/<id>/checks.yaml cannot be read (…): Nexus cannot tell
-whether the checks of step <step> passed …`). Repaired, the file is read again; moved aside, the step goes to its review
+run whose current step that is, with the reason (`<path>/queues/<id>/checks.yaml cannot be read: <why>. Nexus cannot
+tell whether the checks of step <step> passed …`: the error names the file, the reason does not name it again, queue
+LCK). Repaired, the file is read again; moved aside, the step goes to its review
 without Nexus's checks.
 
 **Failures inside the checks' work** (queue LF, F1): a stop ends the grant, and nothing starts under it afterwards (the

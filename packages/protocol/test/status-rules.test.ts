@@ -145,7 +145,7 @@ test("stepReported: the step is in its review or checks, done, skipped or reject
   }
 });
 
-test("queueView and stepView: the views, or a 404 ActionError naming what is missing (never a TypeError)", () => {
+test("queueView and stepView: the views, or an ActionError naming what is missing (404) or unreadable (409), never a TypeError", () => {
   const root = mkdtempSync(join(tmpdir(), "nexus-views-"));
   process.env.NEXUS_HOME = join(root, "home");
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
@@ -158,6 +158,8 @@ test("queueView and stepView: the views, or a 404 ActionError naming what is mis
   refused(() => queueView(state, "X"), /^unknown queue X$/);
   refused(() => stepView(state, "X", "Q1"), /^unknown queue X$/);
   refused(() => stepView(state, "Q", "Q9"), /^queue Q has no step Q9$/);
-  // A queue the derivation left out: the refusal gives the state's warning about it.
-  refused(() => queueView({ ...state, queues: [], warnings: ["queue Q: something broke"] }, "Q"), /^unknown queue Q \(queue Q: something broke\)$/);
+  // A queue the derivation left out because its files cannot be read: not unknown, a refusal (409) with the state's
+  // warning about it, which names the file (queue LCK, F12).
+  assert.throws(() => queueView({ ...state, queues: [], warnings: ["queue Q: /p/.nexus/queues/Q/queue.yaml cannot be read: broken"] }, "Q"), (e: unknown) =>
+    e instanceof ActionError && e.status === 409 && /^queue Q: \/p\/\.nexus\/queues\/Q\/queue\.yaml cannot be read: broken/.test(e.message));
 });

@@ -14,7 +14,7 @@ import { errorText } from "@nexus/protocol/errors";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { ProjectStore, loadProjectState, newId, nexusHome, now, readRegistry, writeJson } from "@nexus/protocol";
+import { ProjectStore, loadProjectState, newId, nexusHome, normPath, now, readRegistry, writeJson } from "@nexus/protocol";
 
 /** How long a predecessor waits for its successor's ready signal. */
 export const HANDOVER_TIMEOUT_MS = 60_000;
@@ -34,10 +34,31 @@ interface FailedFile { pid: number; at: string; reason: string }
 /** `ref`: what the update deployed (absent from older predecessors). */
 export interface ReleasedFile { at: string; log: string[]; ref?: string }
 
+/** The hand-over files found unreadable at their last read, and those already warned of, by path. */
+const unreadableOnce = new Set<string>();
+const warnedUnreadable = new Set<string>();
+/**
+ * A hand-over file, or undefined while it is not there or cannot be read: the other side writes it whole and renames
+ * it (writeJson), so one unreadable read is taken for a moment's state and read again at the next poll. The same file
+ * unreadable at the next read too is lasting damage (queue LCK, F13): the log names it, once; it still reads as not
+ * there, so the waits run into their own limits, as they do for a file never written.
+ */
 const read = <T>(dir: string, name: string): T | undefined => {
   const f = join(dir, name);
-  if (!existsSync(f)) return undefined;
-  try { return JSON.parse(readFileSync(f, "utf8")) as T; } catch { return undefined; } // half written: next poll
+  if (!existsSync(f)) { unreadableOnce.delete(f); return undefined; }
+  try {
+    const v = JSON.parse(readFileSync(f, "utf8")) as T;
+    unreadableOnce.delete(f);
+    warnedUnreadable.delete(f);
+    return v;
+  } catch (e) {
+    if (unreadableOnce.has(f) && !warnedUnreadable.has(f)) {
+      warnedUnreadable.add(f);
+      console.warn(`nexus: ${normPath(f)} cannot be read (${errorText(e)}), at two reads in a row: the hand-over goes on as if it were not there`);
+    }
+    unreadableOnce.add(f);
+    return undefined;
+  }
 };
 /** Written whole, then renamed: the other side never reads half a file. */
 const write = (dir: string, name: string, value: unknown) => writeJson(join(dir, name), value);

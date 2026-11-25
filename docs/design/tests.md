@@ -156,7 +156,10 @@ git dozens of times. In the full suite every core is busy, so each file takes ab
 - **Damaged saved state at a start** (queue LCK): `restart(store, options, { corrupt })` in engine-setup.ts writes an
   unparsable (or `as: "schema"`, parsed but not the schema's) queue file or session `runtime.json` before the next
   Engine (damaged-start.test.ts). Wait for the old engine's process to exit first: its exit handler reads the run, and
-  a damaged run.yaml would throw there, after the test.
+  a damaged run.yaml would throw there, after the test. Unreadable files met by an action or by the server's own
+  readers outside a project (queue LCK, F12/F13) are in unreadable-actions.test.ts: the engine's refusals, the
+  `DeployPlanner` with a stand-in lifecycle and a plan file of its own (`file`), the hand-over's `Standby` on a folder
+  of its own; the store's set-aside cases (F14) in packages/protocol/test/unreadable.test.ts, with `faultWrites`.
 - **A server that ends between two writes** is `ProjectStore.faultWrites({ file, after })` (queue LH): the named file's
   writes past the first `after` throw, in this process, leaving the file as it was and no temporary file, until
   `clear()`; no file contents forged by hand.

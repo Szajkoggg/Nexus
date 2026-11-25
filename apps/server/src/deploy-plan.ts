@@ -23,8 +23,8 @@
 import { errorText } from "@nexus/protocol/errors";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { newId, nexusHome, notMergedBack, now, pendingProvisional, stepClosed, writeJson, type NotifyKind, type ProjectState } from "@nexus/protocol";
+import { basename, join } from "node:path";
+import { newId, nexusHome, normPath, notMergedBack, now, pendingProvisional, setAsideCorrupt, stepClosed, writeJson, type NotifyKind, type ProjectState } from "@nexus/protocol";
 import type { UpdateAsker } from "./handover.ts";
 import type { UpdateStatus } from "./lifecycle.ts";
 import { gitLabel, perf } from "./perf.ts";
@@ -70,11 +70,23 @@ export interface PlanNotice { key: string; project: string; session?: string; at
 export const deployPlanFile = () => join(nexusHome(), "deploy-plan.json");
 
 export function readPlanFile(file = deployPlanFile()): PlanFile {
-  if (!existsSync(file)) return { protocol: 1 };
-  try {
-    const v = JSON.parse(readFileSync(file, "utf8")) as PlanFile;
-    return v && typeof v === "object" ? { protocol: 1, plan: validPlan(v.plan), ended: v.ended && validPlan(v.ended.plan) ? v.ended : undefined } : { protocol: 1 };
-  } catch { return { protocol: 1 }; }
+  return readPlan(file).plan;
+}
+
+/**
+ * The plan file, and why it cannot be read when it is there but does not parse, is not an object, or holds a plan that
+ * is not one (queue LCK, F13): the plan is then "none", and the caller warns and sets the file aside (the rule of
+ * docs/design/state.md, "Missing and unreadable files"). A missing file is "none" without a word.
+ */
+function readPlan(file: string): { plan: PlanFile; unreadable?: string } {
+  if (!existsSync(file)) return { plan: { protocol: 1 } };
+  let v: PlanFile;
+  try { v = JSON.parse(readFileSync(file, "utf8")) as PlanFile; }
+  catch (e) { return { plan: { protocol: 1 }, unreadable: errorText(e) }; }
+  if (!v || typeof v !== "object") return { plan: { protocol: 1 }, unreadable: "it is not an object" };
+  const plan = validPlan(v.plan);
+  if (v.plan !== undefined && !plan) return { plan: { protocol: 1 }, unreadable: "its plan has no id, or neither a target nor a valid time" };
+  return { plan: { protocol: 1, plan, ended: v.ended && validPlan(v.ended.plan) ? v.ended : undefined } };
 }
 
 function validPlan(p: unknown): DeployPlan | undefined {
@@ -224,7 +236,16 @@ export class DeployPlanner {
    * deploy: it waits again, and starts its update once it is due. Its timers are armed again.
    */
   recover(): void {
-    this.f = readPlanFile(this.file);
+    const read = readPlan(this.file);
+    this.f = read.plan;
+    if (read.unreadable !== undefined) {
+      // Not a silent "no plan" that the next write replaces (queue LCK, F13): the log names the file, and it is kept
+      // aside for a look. This server owns the files now, so it may move it.
+      let where = "";
+      try { where = `; set aside as ${basename(setAsideCorrupt(this.file))}`; }
+      catch (e) { where = `; it could not be set aside (${errorText(e)}), and the next plan written replaces it`; }
+      console.warn(`nexus: ${normPath(this.file)} cannot be read (${read.unreadable}): a deploy it planned is lost${where}`);
+    }
     const p = this.f.plan;
     if (p?.started && !(this.o.lifecycle.busy && this.o.lifecycle.status.id === p.started.update)) {
       this.f = { ...this.f, plan: { ...p, started: undefined } };

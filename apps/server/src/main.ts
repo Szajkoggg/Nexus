@@ -10,7 +10,7 @@ import { serve, type HttpBindings } from "@hono/node-server";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { Server } from "node:http";
 import {
-  ActionError, Effort, ProjectStore, addNote, closingToSkip, closingToSkipAtApproval, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
+  ActionError, Effort, ProjectStore, queueView, refuseUnreadable, addNote, closingToSkip, closingToSkipAtApproval, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
   ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readRegistry, readCapacity, readUsage, readTurns, readServerSpeed, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, reviewStats, type ReviewStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
@@ -596,7 +596,9 @@ function act(handler: (store: ProjectStore, body: Body, p: (name: string) => str
       const result = await handler(e.store, body, (n) => c.req.param(n) ?? "", e);
       changed(e.id);
       return c.json({ ok: true, result: result ?? null });
-    } catch (err) {
+    } catch (thrown) {
+      // A file an action found unreadable is a refusal naming it (409), wherever the action read it (queue LCK, F12).
+      const err = refuseUnreadable(thrown);
       if (err instanceof ActionError) return c.json({ error: err.message }, err.status as 400);
       console.error(err);
       return c.json({ error: errorText(err) }, 500);
@@ -725,9 +727,7 @@ app.post("/api/projects/:id/queues/:queue/continue", act(async (st, b, p, e) => 
   if (b.skip_closing !== undefined && typeof b.skip_closing !== "boolean") throw new ActionError("skip_closing is true or false");
   const skipClosing = b.skip_closing === true;
   if (skipClosing) {
-    const q = loadProjectState(st).queues.find((x) => x.id === p("queue"));
-    if (!q) throw new ActionError(`unknown queue ${p("queue")}`, 404);
-    closingToSkip(q);
+    closingToSkip(queueView(loadProjectState(st), p("queue")));
   }
   const d = decideStoppedWork(st, p("queue"), b.work, "user_continue", left);
   if (!d.proceed) return { message: d.message };
