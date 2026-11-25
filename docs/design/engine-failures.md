@@ -49,7 +49,9 @@ else and Nexus did not end it: a second refusal exits as any process does (the e
 nothing retries without end. Why the stream's sign and not the transcript
 file: the file's place (`~/.claude/projects/<folder from the path>/<id>.jsonl`) is Claude Code's internal layout,
 the stream is its interface. The fake runtime keeps what it saved across its processes and refuses in both directions
-as Claude Code does (`test/fake-claude.ts`; FAKE_START_MS holds its first read).
+as Claude Code does (`test/fake-claude.ts`; FAKE_START_MS holds its first read). A test that needs an exact moment holds
+the fake at a named point instead of timing it (`FakeGates` in `apps/server/test/fake-behaviour.ts`, queue LCR): its
+first read, the save, its first output, a refusal, its stderr and its exit, each until the test releases it.
 
 **Codex is affected the same way** (step RN2, probed 2026-11-15 with Codex 0.167.2 and gpt-6-luna: four runs, no
 token figures reported; the one turn was ended as it started). `thread/start` saves nothing: three seconds after it,

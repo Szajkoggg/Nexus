@@ -3,14 +3,19 @@
 // run as a script, for the tests of real processes) or inside the test's own process (in-process-runtime.ts).
 import { existsSync, readFileSync } from "node:fs";
 import {
-  BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, contextWindow, endFake, fakeSaved, interrupt, later, onBackgroundEnd, record, recordArgs, respond, runAsScript, saveFakeConversation,
-  type Background, type Fake, type FakeFailure, type FakeIo,
+  BACKGROUND_NOTICE, PARTIAL, actOnRead, contextTokens, contextWindow, endFake, fakeGatesOf, fakeSaved, interrupt, later, onBackgroundEnd, record, recordArgs, respond, runAsScript, saveFakeConversation,
+  type Background, type Fake, type FakeFailure, type FakeIo, type FakePoint,
 } from "./fake-behaviour.ts";
 
 /** Runs Claude's fake on `io` until it exits (FakeIo.exit); returns what ends it from outside (a kill). */
 export function runFakeClaude(io: FakeIo): () => void {
   const fake: Fake = { io, history: [] };
   const env = io.env;
+  // FAKE_GATES: a test holds the process at the points it armed (FakeGates in fake-behaviour.ts); unarmed, each point
+  // goes on at once, in the same call, so a fake without gates runs as it always did.
+  const gates = fakeGatesOf(env);
+  const processNo = gates?.join(fake) ?? 0;
+  const pass = (point: FakePoint, go: () => void, detail?: string) => { if (gates) gates.pass(fake, point, processNo, go, detail); else go(); };
   // The briefing as the CLI reads it at its start (--append-system-prompt-file): the file is rewritten at the next start.
   const argv = io.argv;
   /** The value after a flag on the command line, if the flag is there. */
@@ -18,7 +23,34 @@ export function runFakeClaude(io: FakeIo): () => void {
   const briefingFile = flag("--append-system-prompt-file");
   recordArgs(fake, { argv, briefing: briefingFile && existsSync(briefingFile) ? readFileSync(briefingFile, "utf8") : null });
 
-  const out = (m: unknown) => { if (!fake.ended) io.stdout.write(JSON.stringify(m) + "\n"); };
+  /** Lines held with the first one at the first-output gate, and what waits for them to be written (an exit). */
+  let heldOut: string[] | undefined;
+  let afterHeld: (() => void)[] = [];
+  let wrote = false;
+  const out = (m: unknown) => {
+    if (fake.ended) return;
+    const line = JSON.stringify(m) + "\n";
+    if (heldOut) { heldOut.push(line); return; }
+    if (!wrote) {
+      wrote = true;
+      heldOut = [line];
+      pass("first-output", () => {
+        for (const l of heldOut!) io.stdout.write(l);
+        heldOut = undefined;
+        const after = afterHeld;
+        afterHeld = [];
+        for (const f of after) f();
+      }, (m as { type?: string }).type);
+      return;
+    }
+    io.stdout.write(line);
+  };
+  /** Runs `f` once what was written to stdout so far is out (after the first-output gate, when it holds it). */
+  const afterOutput = (f: () => void) => { if (heldOut) afterHeld.push(f); else f(); };
+  /** Writes to stderr through its gate; `then` once written. */
+  const writeErr = (text: string, then?: () => void) => pass("stderr", () => { io.stderr.write(text, () => then?.()); }, text);
+  /** The process's end through the exit gate, after its output: an exit code, or a signal. */
+  const end = (how: number | "signal") => afterOutput(() => pass("exit", () => (how === "signal" ? io.signal() : io.exit(how)), String(how)));
 
   // The session's conversation, as Claude Code 2.1.323 keeps it (probed 2026-11-15): `--resume` of an id it never saved
   // writes an error result and "No conversation found with session ID: <id>" and exits 1; `--session-id` of a saved one
@@ -31,8 +63,10 @@ export function runFakeClaude(io: FakeIo): () => void {
   const refusal = resumeId && (always || !fakeSaved(resumeId, "claude", env)) ? `No conversation found with session ID: ${resumeId}`
     : newId && (always || fakeSaved(newId, "claude", env)) ? `Error: Session ID ${newId} is already in use.` : undefined;
   if (refusal) {
-    if (resumeId) out({ type: "result", subtype: "error_during_execution", is_error: true, num_turns: 0, total_cost_usd: 0, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, modelUsage: {}, permission_denials: [] });
-    io.stderr.write(`${refusal}\n`, () => io.exit(1));
+    pass("refusal", () => {
+      if (resumeId) out({ type: "result", subtype: "error_during_execution", is_error: true, num_turns: 0, total_cost_usd: 0, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, modelUsage: {}, permission_denials: [] });
+      afterOutput(() => writeErr(`${refusal}\n`, () => end(1)));
+    }, refusal);
   }
   let saved = !newId;
   const save = () => { if (!saved) { saved = true; saveFakeConversation(newId!, "claude", env); } };
@@ -49,6 +83,15 @@ export function runFakeClaude(io: FakeIo): () => void {
   let lateTurns = 0;
 
   async function turn(text: string): Promise<void> {
+    // FAKE-EXIT: <code | signal> [<stderr text>]: the process ends that way as it takes the message in, before it writes
+    // anything of the turn (a start-up failure); after a turn's output when sent as a later message.
+    const scripted = /^FAKE-EXIT: (signal|\d+)(?: ([^\n]*))?/m.exec(text);
+    if (scripted) {
+      fake.history!.push(text);
+      const how = scripted[1] === "signal" ? "signal" : Number(scripted[1]);
+      if (scripted[2]) writeErr(`${scripted[2]}\n`, () => end(how)); else end(how);
+      return new Promise(() => {}); // the process ends: no turn after it
+    }
     out({ type: "system", subtype: "init", model: "fake-model", session_id: "fake" });
     if (text === "/compact") return compact();
     fake.history!.push(text);
@@ -172,10 +215,10 @@ export function runFakeClaude(io: FakeIo): () => void {
   }
 
   /** Ends the process as a signal would, before the turn's result: the CLI killed, or closing by itself. */
-  function exitOnSignal(): void { io.signal(); }
+  function exitOnSignal(): void { end("signal"); }
 
   function fail(kind: FakeFailure): void {
-    if (kind === "crash") return io.exit(3);
+    if (kind === "crash") return end(3);
     // cloudflare: the shape queue N7 met on 2026-11-13 (the assistant's error and the result's text as Claude Code wrote them).
     const error = { overloaded: "overloaded", network: "unknown", auth: "authentication_failed", limit: "rate_limit", cloudflare: "authentication_failed" }[kind];
     const status = { overloaded: 529, network: null, auth: 401, limit: 429, cloudflare: 403 }[kind];
@@ -194,10 +237,16 @@ export function runFakeClaude(io: FakeIo): () => void {
   }
 
   let buffer = "";
+  /** Held at the save gate: what comes in meanwhile waits in `buffer`. */
+  let holding = false;
   function read(d: string): void {
     buffer += d;
+    take();
+  }
+
+  function take(): void {
     let i: number;
-    while ((i = buffer.indexOf("\n")) >= 0) {
+    while (!holding && (i = buffer.indexOf("\n")) >= 0) {
       const line = buffer.slice(0, i); buffer = buffer.slice(i + 1);
       if (!line.trim()) continue;
       const msg = JSON.parse(line) as { type?: string; request_id?: string; request?: { subtype?: string }; message: { content: string }; priority?: string };
@@ -209,26 +258,38 @@ export function runFakeClaude(io: FakeIo): () => void {
         continue;
       }
       // The conversation is saved as its first message is read, before the turn starts.
+      const first = !saved;
       save();
-      record(fake, msg.message.content, msg.priority ?? null, busy);
-      // A "next" message during a turn is read inside it (as Claude Code does); anything else is a turn of its own.
-      if (msg.priority === "next" && busy) { unread.push(msg.message.content); continue; }
-      queue.push(msg.message.content);
-      void pump();
+      if (first) {
+        holding = true;
+        pass("save", () => { holding = false; message(msg); take(); }, newId);
+        if (holding) return;
+        continue;
+      }
+      message(msg);
     }
+  }
+
+  function message(msg: { message: { content: string }; priority?: string }): void {
+    record(fake, msg.message.content, msg.priority ?? null, busy);
+    // A "next" message during a turn is read inside it (as Claude Code does); anything else is a turn of its own.
+    if (msg.priority === "next" && busy) { unread.push(msg.message.content); return; }
+    queue.push(msg.message.content);
+    void pump();
   }
 
   function listen(): void {
     io.stdin.setEncoding("utf8");
     io.stdin.on("data", read);
     // FAKE_EXIT_DELAY_MS: the process lingers that long after its input closed (a CLI flushing its transcript).
-    io.stdin.on("end", () => { const wait = () => (busy || lateTurns ? later(fake, wait, 50) : later(fake, () => io.exit(0), Number(env.FAKE_EXIT_DELAY_MS ?? 0))); wait(); });
+    io.stdin.on("end", () => { const wait = () => (busy || lateTurns ? later(fake, wait, 50) : later(fake, () => end(0), Number(env.FAKE_EXIT_DELAY_MS ?? 0))); wait(); });
   }
 
   // FAKE_START_MS: the input is read only after that long, as Claude Code reads it once it has started.
   if (!refusal) {
-    if (env.FAKE_START_MS) later(fake, listen, Number(env.FAKE_START_MS));
-    else listen();
+    const start = () => pass("first-read", listen);
+    if (env.FAKE_START_MS) later(fake, start, Number(env.FAKE_START_MS));
+    else start();
   }
   return () => endFake(fake);
 }

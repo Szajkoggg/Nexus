@@ -83,6 +83,10 @@
 // FAKE_LATE_NEXT: its first turn's result waits for a message sent after its reply, which then runs as a turn of its own
 // (once the file FAKE_LATE_GATE names exists, when set; the process runs it before it exits, its input closed or not);
 // FAKE_LATE_NEXT=inside: that message is read inside the turn, and no turn of its own follows.
+// FAKE_GATES (Claude's fake, in the test's own process): holds it at the points a FakeGates set arms (first-read, save,
+// first-output, refusal, stderr, exit) until the test releases each arrival; the set's env() goes into the adapter's
+// options, never into process.env. "FAKE-EXIT: <code | signal> [<stderr text>]" as a message (Claude's fake): the process
+// ends that way as it takes the message in, writing the text to stderr first; before any output if it is the first.
 import { errorText } from "@nexus/protocol/errors";
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -133,6 +137,106 @@ export function later(fake: Fake, fn: () => void, ms: number): void {
   const timers = (fake.timers ??= new Set());
   const t = setTimeout(() => { timers.delete(t); if (!fake.ended) fn(); }, ms);
   timers.add(t);
+}
+
+/**
+ * The points where a test can hold a fake (FakeGates, queue LCR): Claude's fake at its start-up and its end.
+ * - first-read  before the process reads its input at all (Claude Code starting up)
+ * - save        a fresh session's conversation was just saved, as its first message is read; nothing of the turn yet
+ *               (a resumed session saves nothing, so never arrives here)
+ * - first-output  before the process's first line on stdout (held with every line after it until released)
+ * - refusal     a start the CLI refuses, before it writes anything of the refusal (detail: the refusal's text)
+ * - stderr      before the process writes to stderr (detail: the text)
+ * - exit        before the process exits (detail: the exit code, or "signal"); after what it wrote to stdout
+ */
+export type FakePoint = "first-read" | "save" | "first-output" | "refusal" | "stderr" | "exit";
+
+/** A fake held at a point: what the test waited for (FakeGates.reached). */
+export interface FakeHeld {
+  readonly point: FakePoint;
+  readonly detail?: string;
+  /** Which of the gates' fakes it is: 1 for the first process started with them, 2 for the next (a retried start). */
+  readonly process: number;
+  /** Lets the fake go on from the point; a fake ended meanwhile (killed) stays ended. */
+  release(): void;
+}
+
+/** The gate sets of this process by id: FAKE_GATES in a fake's environment names one. */
+const gateSets = new Map<string, FakeGates>();
+let gateSetCount = 0;
+
+/** How many gate sets are registered (not disposed): a test checks it returns to what it was. */
+export const fakeGateSets = (): number => gateSets.size;
+
+/**
+ * Holds the fakes started with its environment (env(), in the adapter's options, never process.env) at the points it
+ * arms, each arrival until the test releases it: the test waits for an arrival (reached), looks at what Nexus did, and
+ * lets the fake go on. No timer and no file: it works for the fakes in the test's own process only (in-process-runtime.ts);
+ * a fake whose FAKE_GATES names no registered set (a fake as a process of its own, or after dispose) fails at its start.
+ */
+export class FakeGates {
+  readonly id: string;
+  private readonly armed: ReadonlySet<FakePoint>;
+  private readonly arrivals: FakeHeld[] = [];
+  private readonly waiters: { point: FakePoint; resolve: (h: FakeHeld) => void }[] = [];
+  private readonly fakes: Fake[] = [];
+  private readonly unreleased = new Set<FakeHeld>();
+
+  constructor(points: readonly FakePoint[]) {
+    this.id = `gates-${process.pid}-${++gateSetCount}`;
+    this.armed = new Set(points);
+    gateSets.set(this.id, this);
+  }
+
+  /** The environment that puts a fake under these gates: for the adapter's options (ClaudeOptions.env). */
+  env(): Record<string, string> { return { FAKE_GATES: this.id }; }
+
+  /** The next arrival at `point` not waited for yet, once a fake is there. */
+  reached(point: FakePoint): Promise<FakeHeld> {
+    const i = this.arrivals.findIndex((a) => a.point === point);
+    if (i >= 0) return Promise.resolve(this.arrivals.splice(i, 1)[0]!);
+    return new Promise((resolve) => this.waiters.push({ point, resolve }));
+  }
+
+  /** A fake started with these gates (its process number). */
+  join(fake: Fake): number { this.fakes.push(fake); return this.fakes.length; }
+
+  /** Holds the fake at `point` if it is armed: `go` runs once the test releases it (at once if not armed). */
+  pass(fake: Fake, point: FakePoint, process: number, go: () => void, detail?: string): void {
+    if (!this.armed.has(point)) { go(); return; }
+    let done = false;
+    const held: FakeHeld = {
+      point, detail, process,
+      release: () => { if (done) return; done = true; this.unreleased.delete(held); if (!fake.ended) go(); },
+    };
+    this.unreleased.add(held);
+    const w = this.waiters.findIndex((x) => x.point === point);
+    if (w >= 0) this.waiters.splice(w, 1)[0]!.resolve(held); else this.arrivals.push(held);
+  }
+
+  /**
+   * What the gates leave behind: arrivals neither released nor of an ended fake, fakes still running, ended fakes with a
+   * timer left. A test that ended its sessions expects all empty.
+   */
+  leftovers(): { held: string[]; running: number; timers: number } {
+    return {
+      held: [...this.unreleased].filter((h) => !this.fakes[h.process - 1]?.ended).map((h) => `${h.point}#${h.process}`),
+      running: this.fakes.filter((f) => !f.ended).length,
+      timers: this.fakes.reduce((n, f) => n + (f.timers?.size ?? 0), 0),
+    };
+  }
+
+  /** Unregisters the set: a fake started with it after this fails at its start. */
+  dispose(): void { gateSets.delete(this.id); }
+}
+
+/** The gates a fake's environment names (FAKE_GATES), if any; a name not registered in this process is an error. */
+export function fakeGatesOf(env: NodeJS.ProcessEnv): FakeGates | undefined {
+  const id = env.FAKE_GATES;
+  if (!id) return undefined;
+  const set = gateSets.get(id);
+  if (!set) throw new Error(`FAKE_GATES names ${id}, which is not registered in this process: gates hold only the fakes run in the test's own process, until the set is disposed`);
+  return set;
 }
 
 /** Waits `ms`; never resolves for a fake ended meanwhile. */
