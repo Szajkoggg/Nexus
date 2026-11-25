@@ -12,14 +12,17 @@ import { Orchestrator } from "../src/orchestrator.ts";
 import { QUICK_ENGINE, WAIT_MS, until as waitUntil, LONGER } from "./wait.ts";
 import { cliOut } from "../../../packages/cli/test/run-cli.ts";
 import { inProcessRuntime } from "./in-process-runtime.ts";
+import { gatedCleanup } from "./gated-cleanup.ts";
+import type { EngineOptions } from "../src/engine.ts";
 
-function setup() {
+/** `spawn`: the engine's workers' processes (by default the fakes in-process; a gated cleanup for the barrier's tests). */
+function setup(o: { spawn?: EngineOptions["spawn"] } = {}) {
   const root = mkdtempSync(join(tmpdir(), "nexus-review-"));
   process.env.NEXUS_HOME = join(root, "home");
   process.env.FAKE_LOG = join(root, "fake.log");
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   let orchestrator: Orchestrator;
-  const engine: Engine = new Engine(store, () => tick(), { spawn: inProcessRuntime(), ...QUICK_ENGINE });
+  const engine: Engine = new Engine(store, () => tick(), { spawn: o.spawn ?? inProcessRuntime(), ...QUICK_ENGINE });
   orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn: inProcessRuntime() });
   function tick() { routeAnswers(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);
@@ -45,6 +48,8 @@ function setup() {
   const stop = () => { clearInterval(timer); engine.shutdown(); orchestrator.shutdown(); };
   return { store, engine, orchestrator, state, step, until, facts, delivered, run, tick, stop };
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const reviewFact = (q: string, s: string) => (t: string) => t.startsWith(`Step ${s} of queue ${q} is done and waits for your review`);
 
@@ -234,6 +239,28 @@ test("a worker can use neither the review commands nor their events", async () =
 
 const roundTurn = (s: string, round: number) => (t: string) => new RegExp(`^\\[Nexus\\] The (orchestrator reviewed|user sent) step ${s} .*\\(round ${round}\\)`).test(t);
 const chatSays = (x: ReturnType<typeof setup>, re: RegExp) => x.orchestrator.view().chat.some((c) => re.test(c.text));
+
+test("a send-back is delivered to the worker only after its process's cleanup at the step's end has ended (survey LC3, F17)", async () => {
+  // The in-process fakes pass the cleanup barrier at once; here it lasts until the test opens the gate, as the job
+  // host's cleanup takes time on Windows.
+  const gate = gatedCleanup({ make: inProcessRuntime() });
+  gate.hold();
+  const x = setup({ spawn: gate.spawn });
+  try {
+    await x.run("B", 1);
+    await x.until("the review, with the step's cleanup held", () => x.step("B", "B1").review_with === "orchestrator" && gate.held() === 1, LONGER.step);
+    x.orchestrator.say(`FAKE-NEXUS: ["review","send-back","B","B1","Measure the build time too."]`);
+    await x.until("the send-back recorded", () => chatSays(x, /sent back to its worker as round 2/), LONGER.step);
+    x.tick();
+    await sleep(50);
+    assert.ok(!x.delivered().some(roundTurn("B1", 2)), "round 2 waits for the cleanup");
+    assert.equal(gate.held(), 1, "the cleanup is still held");
+    gate.release();
+    await x.until("round 2 at the worker", () => x.delivered().some(roundTurn("B1", 2)), LONGER.step);
+    await x.until("round 2 in review", () => x.step("B", "B1").status === "review" && x.step("B", "B1").summary === "fake finished B1 round 2", LONGER.step);
+    assert.deepEqual([gate.calls[0]?.turned, gate.calls[0]?.outcome], [true, "done"], "the step's cleanup, after its turn, ended before round 2");
+  } finally { gate.release(); x.stop(); }
+});
 
 test("a send-back reaches the worker as round 2, and the round comes back to the orchestrator", async () => {
   const x = setup();

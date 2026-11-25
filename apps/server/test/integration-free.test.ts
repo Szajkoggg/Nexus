@@ -68,7 +68,7 @@ setTimeout(() => {
  */
 const slowHosts = () => gatedCleanup({ make: inProcessRuntime(), failBeforeTurn: "worker cleanup timed out" }).spawn;
 
-function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean; jobs?: boolean; slowHosts?: boolean } = {}) {
+function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean; jobs?: boolean; slowHosts?: boolean; checkLimitMs?: number } = {}) {
   const base = mkdtempSync(join(TMP, "nexus-free-"));
   const temp = join(base, "temp");
   mkdirSync(temp);
@@ -96,7 +96,7 @@ function setup(steps: StepDef[], o: { resolve?: boolean; checks?: boolean; jobs?
   // Objects where a test ends a check mid-run (else its child keeps running).
   const server = () => {
     const cap = new Capacity({ testLock: join(mkdtempSync(join(TMP, "nexus-free-lock-")), "full-test.lock"), pollMs: 20, jobs: !!o.jobs });
-    const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store, free()); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, spawn: o.slowHosts ? slowHosts() : inProcessRuntime(), checkDrainWaitMs: 300, capacity: cap });
+    const engine: Engine = new Engine(store, () => { routeAnswers(store); acceptReviews(store, free()); engine.onChange(loadProjectState(store)); }, { retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE, spawn: o.slowHosts ? slowHosts() : inProcessRuntime(), checkDrainWaitMs: 300, capacity: cap, ...(o.checkLimitMs ? { checkLimitMs: o.checkLimitMs } : {}) });
     return { engine, cap };
   };
   let now = server();
@@ -259,7 +259,31 @@ test("the worktree setup before the checks failing twice halts the run with its 
     assert.match(reason, /^step Q\.integrate: the checks cannot run, for a cause outside the checkout the worker cannot fix: the worktree setup \(.*check\.cjs" setup\) failed twice: exit code 1; its output ends: .*setup breaks/);
     const set = x.store.readChecks("Q")?.steps["Q.integrate"]?.sets[0];
     assert.deepEqual([set?.state, set?.setup?.ok, set?.setup?.runs.length, set?.checks.every((c) => !c.runs.length)], ["interrupted", false, 2, true], "tried once more; the checks did not run");
+    assert.match(set!.unrunnable!, /^the worktree setup \(.*\) failed twice: exit code 1/, "the set says why it cannot run (survey LC3, F7)");
     assert.deepEqual(x.runs(), ["setup", "unit", "setup", "setup"]);
+    assert.equal(x.received().filter((r) => r.text.startsWith("[Nexus] The checks Nexus ran")).length, 0, "no check-fix round");
+  } finally { hold.done(); x.stop(); }
+});
+
+/** A time limit the stand-in setup's quick runs stay inside on a loaded machine, and a planned wait runs past (as engine-checks). */
+const SETUP_LIMIT_MS = 25_000;
+
+test("the worktree setup before the checks running into its time limit twice halts the run, saying so (survey LC3, F7)", async () => {
+  const hold = holdWork();
+  // With Job Objects: a setup ended at its limit leaves no child running.
+  const x = setup([step("Q1", "slow")], { jobs: true, checkLimitMs: SETUP_LIMIT_MS });
+  x.plan("setup", [0, "60000ms:0", "60000ms:0"]);
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q1 at work", () => x.queue().steps[0]!.status === "running");
+    x.onMain("package-lock.json", "{ \"lockfileVersion\": 3 }\n");
+    hold.release();
+    await x.until("the run to halt", () => x.queue().run?.state === "halted", LONGER.run + 2 * SETUP_LIMIT_MS);
+    assert.match(x.queue().run!.reason!, /^step Q\.integrate: the checks cannot run, for a cause outside the checkout the worker cannot fix: the worktree setup \(.*check\.cjs" setup\) failed twice: it ran into its time limit/);
+    const set = x.store.readChecks("Q")?.steps["Q.integrate"]?.sets[0];
+    assert.deepEqual(set?.setup?.runs.map((r) => r.timed_out), [true, true], "both tries ended at the limit");
+    assert.match(set!.unrunnable!, /failed twice: it ran into its time limit/);
+    assert.equal(set?.state, "interrupted");
     assert.equal(x.received().filter((r) => r.text.startsWith("[Nexus] The checks Nexus ran")).length, 0, "no check-fix round");
   } finally { hold.done(); x.stop(); }
 });

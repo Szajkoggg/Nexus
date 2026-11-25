@@ -1,11 +1,13 @@
 // A queue's earlier sessions keep no process (queue PRC): a fresh start of the queue ends the process a stopped run's
 // session still has, and so does the queue's closing (done or cancelled), before its worktree is cleaned up. A Resume
-// goes on in the same session and its process. Against the fake runtimes, in-process.
+// goes on in the same session and its process. Against the fake runtimes, in-process. Survey LC3, F1 (queue LCK): a
+// start that continues the earlier session keeps its process, and a process at work in a turn is closed (it ends after
+// its turn), not killed.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadProjectState, orchestratorStatusChange } from "@nexus/protocol";
 import { activityOf, setup } from "./engine-setup.ts";
-import { LONGER } from "./wait.ts";
+import { LONGER, holdWork } from "./wait.ts";
 
 for (const runtime of ["claude", "codex"] as const) {
   /** A queue whose first step fails: its run halts, its session's process stays (idle). */
@@ -61,5 +63,49 @@ for (const runtime of ["claude", "codex"] as const) {
       assert.notEqual(store.readRuntime(session)?.state, "exited", "the process was not ended");
       assert.deepEqual(exits(store, session), [], "no process of the session exited");
     } finally { engine.shutdown(); }
+  });
+
+  test(`${runtime}: a start that continues the halted run's session keeps its process (survey LC3, F1 a)`, async () => {
+    const { store, engine, queue, until, received, session: old } = await halted(["fail", "done"]);
+    try {
+      const before = received().length;
+      let exited = false;
+      const watch = setInterval(() => { if (store.readRuntime(old)?.state === "exited") exited = true; }, 5);
+      try {
+        engine.start("Q", { runtime, session: old });
+        assert.equal(queue().run!.session, old, "the run goes on in the continued session");
+        await until("the continued session's turn", () => received().length > before, LONGER.step);
+        // The start goes on at the first pending step (the failed one stays failed): Q2 runs in the continued process.
+        await until("Q2 done in the continued session", () => queue().steps[1]!.status === "done", LONGER.run);
+      } finally { clearInterval(watch); }
+      assert.equal(exited, false, "its runtime record was never exited while the run worked in it");
+      assert.deepEqual(exits(store, old).filter((a) => /ended by Nexus/.test(a.text ?? "")), [], "the start did not end its process");
+    } finally { engine.shutdown(); }
+  });
+
+  test(`${runtime}: a fresh start beside a stopped run's process at work closes it: it ends after its turn, no failure or retry (survey LC3, F1 b)`, async () => {
+    const hold = holdWork();
+    const x = setup(["slow", "done"]);
+    try {
+      x.engine.start("Q", { runtime });
+      await x.until("Q1 at work", () => x.queue().steps[0]!.status === "running" && x.store.readRuntime(x.queue().run!.session)?.state === "working", LONGER.step);
+      const old = x.queue().run!.session;
+      x.engine.stopNow("Q");
+      assert.equal(x.queue().run?.state, "paused", "stopped by the user: paused, its turn still at work");
+      x.engine.start("Q", { runtime });
+      const fresh = x.queue().run!.session;
+      assert.notEqual(fresh, old);
+      await x.until("the fresh session's process", () => x.store.readRuntime(fresh) !== undefined, LONGER.step);
+      assert.equal(x.store.readRuntime(old)?.state, "working", "the old process works on: closed, not killed");
+      assert.deepEqual(exits(x.store, old), [], "not ended in its turn");
+      hold.release();
+      await x.until("the old process to exit after its turn", () => x.store.readRuntime(old)?.state === "exited", LONGER.step);
+      assert.match(exits(x.store, old).map((a) => a.text).join("\n"), /ended by Nexus/);
+      await x.until("the fresh run to end", () => x.queue().run?.state === "finished", LONGER.run);
+      const run = x.queue().run!;
+      assert.equal(run.session, fresh);
+      assert.equal(run.retries, undefined, "no retry recorded");
+      assert.equal(run.failure, undefined, "no failure recorded");
+    } finally { hold.done(); x.engine.shutdown(); }
   });
 }

@@ -67,7 +67,8 @@ function setup(opts: { orchestrator?: boolean; git?: boolean } = {}) {
   let orchestrator: Orchestrator | undefined;
   const reviews = { accept: true };
   const tick = () => { routeAnswers(store); if (reviews.accept) acceptReviews(store); const s = loadProjectState(store); orchestrator?.onChange(s); engine.onChange(s); };
-  const engine = new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, startupMs: 20 });
+  const make = () => new Engine(store, tick, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, startupMs: 20 });
+  let engine = make();
   if (opts.orchestrator) orchestrator = new Orchestrator(store, engine, tick, {}, { spawn: inProcessRuntime() });
   const timer = setInterval(tick, 150);
   const state = () => loadProjectState(store);
@@ -85,7 +86,9 @@ function setup(opts: { orchestrator?: boolean; git?: boolean } = {}) {
     emit(user.id, { type: "review.accepted", queue: id, step: `${id}1` });
   };
   const stop = () => { clearInterval(timer); orchestrator?.shutdown(); engine.shutdown(); delete process.env.NEXUS_SHIPPED_TEMPLATES; };
-  return { root, store, engine, reviews, get orchestrator() { return orchestrator!; }, state, runs, until, doneQueue, stop };
+  /** The next server on the same files (without an orchestrator): the old engine shut down, a new one made. */
+  const restart = () => { engine.shutdown(); engine = make(); };
+  return { root, store, get engine() { return engine; }, restart, reviews, get orchestrator() { return orchestrator!; }, state, runs, until, doneQueue, stop };
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -200,6 +203,58 @@ test("one never paused nor skipped keeps counting from its run through a set and
     assert.equal(x.state().recurring.find((r) => r.id === "K")?.counted, 2, "Q3 and Q4, done since its run");
     x.doneQueue("Q5");
     await x.until("K's second run done", () => x.runs("K").length === 2 && x.runs("K")[1]!.status === "done");
+  } finally { x.stop(); }
+});
+
+test("a restart in the middle of an after-N count keeps it: the queues counted before it still count (survey LC3, F8)", async () => {
+  const x = setup();
+  try {
+    const counted = () => x.state().recurring.find((r) => r.id === "R")?.counted;
+    x.engine.setRecurring({ id: "R", template: "tiny", params: {}, after_queues: 2, by: "orchestrator" });
+    x.engine.approveRecurring("R");
+    x.engine.pauseRecurring("R", true);
+    x.engine.pauseRecurring("R", false);
+    x.doneQueue("Q1");
+    assert.equal(counted(), 1);
+    x.restart();
+    assert.equal(counted(), 1, "the count's start is in the recurring's file: the new server counts on from it");
+    assert.deepEqual(x.runs("R"), [], "not run at the restart");
+    x.doneQueue("Q2");
+    await x.until("R's run done", () => x.runs("R").length === 1 && x.runs("R")[0]!.status === "done");
+    assert.equal(counted(), 0, "a new count after the run");
+  } finally { x.stop(); }
+});
+
+test("after a skip that is not for the approval (a run that failed to be made), a set counts from the set, and an approval after it from the last run (survey LC3, F8: the rule as it is)", async () => {
+  const x = setup();
+  try {
+    const counted = () => x.state().recurring.find((r) => r.id === "R")?.counted;
+    x.engine.setRecurring({ id: "R", template: "tiny", params: {}, after_queues: 3, by: "orchestrator" });
+    x.engine.approveRecurring("R");
+    x.doneQueue("Q1"); x.doneQueue("Q2"); x.doneQueue("Q3");
+    await x.until("R's first run done", () => x.runs("R").length === 1 && x.runs("R")[0]!.status === "done");
+    // The file as Recurrer.decide's catch leaves it when a later run could not be made (`failed`).
+    const r = x.store.readRecurring("R")!;
+    x.store.writeRecurring({ ...r, skipped: { due: now(), at: now(), kind: "failed", reason: "the run could not be made (test)" } });
+    x.doneQueue("Q4");
+    assert.equal(counted(), 1, "Q4, since the run");
+    // A set of a skipped one counts from the set (queue CK), and writes no skip: the skip is gone with it.
+    x.engine.setRecurring({ id: "R", template: "tiny", params: {}, after_queues: 3, by: "orchestrator" });
+    assert.equal(counted(), 0, "counted from the set");
+    assert.equal(x.store.readRecurring("R")!.skipped, undefined, "the set dropped the failed skip");
+    x.doneQueue("Q5");
+    // The approval after it: no skip left, so the count goes on from the last run (Q4 and Q5), as for one never skipped.
+    x.engine.approveRecurring("R");
+    assert.equal(counted(), 2, "Q4 and Q5, done since the last run");
+    // A second set and approval: the same, the count stays from the last run.
+    x.engine.setRecurring({ id: "R", template: "tiny", params: {}, after_queues: 3, by: "orchestrator" });
+    assert.equal(counted(), 2, "a set of one not skipped counts on from its run");
+    x.engine.approveRecurring("R");
+    assert.equal(counted(), 2);
+    x.engine.onChange(x.state()); // the look a change makes (Recurrer.check runs in it): below N, it starts nothing
+    assert.equal(x.runs("R").length, 1, "below N: no run");
+    x.doneQueue("Q6");
+    await x.until("R's second run done", () => x.runs("R").length === 2 && x.runs("R")[1]!.status === "done");
   } finally { x.stop(); }
 });
 

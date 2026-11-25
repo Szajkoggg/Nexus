@@ -143,7 +143,9 @@ git dozens of times. In the full suite every core is busy, so each file takes ab
   machine's slow job host does. `delayMs` makes each cleanup take time before the process's own, `timeoutMs` fails
   each after that long with the job host's `CleanupTimedOut`, or only the first `timeouts` of them, to reach the
   engine's one retry (queue LCK, survey LC3 F5/F17: the in-process child has no cleanup of its own, so without them the
-  barrier passes in a microtask; cleanup-barrier.test.ts).
+  barrier passes in a microtask; cleanup-barrier.test.ts). An ordinary engine test holds the gate to show what waits
+  for the barrier: review.test.ts's send-back is delivered only once the step's cleanup ended. The chat agents
+  (orchestrator, thinking partners) run no cleanup, so a stop of theirs has no barrier to wait for.
 - **A process that does not end when told** (queue LCK): `inProcessRuntime({ ends })` with a `ProcessEnds` makes the
   processes' `kill()` ignored (`"ignore"`; `"unforced"` ignores only a kill without force, so the engine's forced kill
   ends it) or late (`{ delayMs }`) and their `close()` ignored; the modes are read at each call, so

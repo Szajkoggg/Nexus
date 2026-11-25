@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ProjectStore, applyDraft, approveQueue, loadProjectState, onWrite, readCapacity, routeAnswers, updateSettings, type ChecksFile } from "@nexus/protocol";
@@ -16,8 +16,9 @@ import { failedTests } from "../src/check-runs.ts";
 import { Engine, type EngineOptions } from "../src/engine.ts";
 import { FAST, restart, setup } from "./engine-setup.ts";
 import { acceptReviews } from "./fake-reviewer.ts";
-import { LONGER, until as waitUntil } from "./wait.ts";
+import { LONGER, holdWork, until as waitUntil } from "./wait.ts";
 import { inProcessRuntime } from "./in-process-runtime.ts";
+import { cliOut } from "../../../packages/cli/test/run-cli.ts";
 
 process.env.NEXUS_HOME ??= mkdtempSync(join(tmpdir(), "nexus-checks-home-"));
 const lockFile = () => join(mkdtempSync(join(tmpdir(), "nexus-checks-lock-")), "full-test.lock");
@@ -72,7 +73,8 @@ function withChecks(behaviours: string[], names: string[], options: EngineOption
   const q = x.store.readQueue("Q");
   if (names.length || o.worktree) {
     x.store.writeQueue({ ...q, checks: names.map((n) => (n.includes(" ") ? n : s.cmd(n))), ...(o.worktree ? { worktree: o.worktree } : {}) });
-    approveQueue(x.store, "Q");
+    // The worktree is no part of the revision's hash: only new checks make a revision to approve.
+    if (names.length) approveQueue(x.store, "Q");
   }
   const file = () => x.store.readChecks("Q") as ChecksFile;
   const sets = (step = "Q1") => file()?.steps[step]?.sets ?? [];
@@ -197,6 +199,57 @@ test("a check that runs into its time limit while Windows made a shadow copy run
   } finally { x.engine.shutdown(); x.cap.shutdown(); }
 });
 
+test("a check that runs into its time limit while Windows made a shadow copy and fails its rerun: a check-fix round saying so (survey LC3, F7)", async () => {
+  const snapshot = { at: "2026-11-23T09:12:00.000Z", seconds: 41.2, by: "taskhostw.exe" };
+  const x = withChecks(["done"], ["unit"], { checkLimitMs: LIMIT_MS, capacity: capacity(true), snapshots: async () => [snapshot] });
+  x.plan("unit", ["60000ms:0", 1, 0]);
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LIMITED_RUN_MS);
+    const [first, second] = x.sets();
+    const c = first!.checks[0]!;
+    assert.deepEqual([first!.state, c.ok, c.snapshot_rerun, c.flaky], ["failed", false, undefined, undefined]);
+    assert.deepEqual(c.runs.map((r) => [r.timed_out, r.exit_code]), [[true, null], [undefined, 1]], "ended at the limit, then ran once more and failed");
+    const [m] = fixMessages(x);
+    assert.match(m!.text, /Check ".*unit" ended at its time limit while Windows made a volume shadow copy, ran once more and failed again \(exit code 1\)\./);
+    assert.equal(second!.state, "passed", "the fix round's done runs it again");
+  } finally { x.engine.shutdown(); x.cap.shutdown(); }
+});
+
+/** A queue Q in a folder of its own whose step holds until released, and that folder; `change` runs while Q1 works. */
+async function changedWhileWorking(names: string[], change: (x: ReturnType<typeof withChecks>, dir: string) => void) {
+  const hold = holdWork();
+  const dir = mkdtempSync(join(tmpdir(), "nexus-checks-wt-"));
+  const x = withChecks(["slow"], names, {}, { worktree: dir });
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q1 at work", () => x.queue().steps[0]!.status === "running", LONGER.step);
+    change(x, dir);
+    hold.release();
+  } catch (e) { x.engine.shutdown(); x.cap.shutdown(); throw e; } finally { hold.done(); }
+  return { ...x, dir };
+}
+
+test("no checkout and no checks: the empty set passes, nothing halts (survey LC3, F7)", async () => {
+  const x = await changedWhileWorking([], (_x, dir) => rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }));
+  try {
+    await x.until("Q1 done", () => x.queue().steps[0]!.status === "done", LONGER.run);
+    assert.deepEqual(x.sets().map((s) => [s.state, s.checks.length, s.unrunnable]), [["passed", 0, undefined]]);
+    assert.notEqual(x.queue().run?.state, "halted");
+  } finally { x.engine.shutdown(); x.cap.shutdown(); }
+});
+
+test("a queue whose checkout is not known (its worktree not made): the run halts with \"no checkout of the queue is known\" (survey LC3, F7)", async () => {
+  // A queue.yaml whose worktree is still "auto" when the checks come (the worktree is no part of the revision's hash,
+  // so the approval stays).
+  const x = await changedWhileWorking(["unit"], (y) => y.store.writeQueue({ ...y.store.readQueue("Q"), worktree: "auto" }));
+  try {
+    await x.until("the run to halt", () => x.queue().run?.state === "halted", LONGER.run);
+    haltedUnrunnable(x, /no checkout of the queue is known/);
+    assert.deepEqual(x.runs(), [], "nothing ran");
+  } finally { x.engine.shutdown(); x.cap.shutdown(); }
+});
+
 /** The run halted for a cause the worker cannot fix (queue CK): its reason, the set interrupted with it, no fix round. */
 function haltedUnrunnable(x: ReturnType<typeof withChecks>, reason: RegExp) {
   const run = x.queue().run!;
@@ -220,7 +273,7 @@ test("an empty check list passes without running anything (queue CK)", async () 
   } finally { x.engine.shutdown(); x.cap.shutdown(); }
 });
 
-test("a checkout gone before the checks run: the run halts with \"no checkout\", no check-fix round (queue CK)", async () => {
+test("a checkout gone before the checks run: the run halts with \"no checkout\", no check-fix round (queue CK); nexus status says why, and once the folder is back a Resume passes the set (survey LC3, F6)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "nexus-checks-wt-"));
   const x = withChecks(["done"], ["unit"], { capacity: capacity(true) }, { worktree: dir });
   x.plan("unit", ["60000ms:0", 0]);
@@ -236,8 +289,30 @@ test("a checkout gone before the checks run: the run halts with \"no checkout\",
     await x.until("the run to halt", () => x.queue().run?.state === "halted", LONGER.run);
     haltedUnrunnable(x, /no checkout: the queue's checkout .*nexus-checks-wt-.* does not exist/);
     assert.equal(x.runs().length, 1, "nothing ran without the checkout (the one run was the old server's, in the folder then)");
+    // nexus status says why the checks wait (survey LC3, F6).
+    assert.match(await status(x), /checks by Nexus: cannot run \(the run halted\): no checkout/);
+    // The cause fixed (the folder back), a Resume runs the set again; it passes, its unrunnable gone.
+    mkdirSync(dir, { recursive: true });
+    x.plan("unit", [0], true); // the stand-in reads the plan of a folder other than the project's root as <name>.base
+    next.resume("Q");
+    // Q1 is what this is about: the queue's integration step after it needs a git checkout, which this folder is not.
+    await x.until("Q1 done", () => x.queue().steps[0]!.status === "done", LONGER.run);
+    const last = x.sets().at(-1)!;
+    assert.equal(last.state, "passed");
+    assert.equal(last.unrunnable, undefined, "the set keeps no old unrunnable");
+    assert.equal(x.sets().length, 1, "still one set: the interrupted one ran again");
+    assert.equal(x.runs().length, 2, "two check runs in all: the old server's and the one after the Resume");
+    assert.equal(fixMessages(x).length, 0, "no check-fix round");
+    assert.doesNotMatch(await status(x), /cannot run/);
   } finally { x.engine.shutdown(); next?.shutdown(); }
 });
+
+/** nexus status of the test's project, run as the CLI does without a session. */
+async function status(x: { store: ProjectStore }): Promise<string> {
+  const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: x.store.dir };
+  delete env.NEXUS_SESSION;
+  return await cliOut(["status"], { env });
+}
 
 test("a check whose program is not on the server's PATH: failed, the run halts with the reason, no check-fix round (queue CK)", async () => {
   const x = withChecks(["done"], ["nexus-no-such-program-ck --all", "unit"]);
@@ -253,7 +328,7 @@ test("a check whose program is not on the server's PATH: failed, the run halts w
   } finally { x.engine.shutdown(); x.cap.shutdown(); }
 });
 
-test("a check whose npm script is missing: failed after one run, the run halts with the reason, no check-fix round (queue CK)", async () => {
+test("a check whose npm script is missing: failed after one run, the run halts with the reason, no check-fix round (queue CK); with the script added a Resume finishes (survey LC3, F6)", async () => {
   const x = withChecks(["done"], ["unit", "npm run nexus-no-such-script"]);
   writeFileSync(join(x.store.readProject().root, "package.json"), JSON.stringify({ name: "ck", private: true, scripts: {} }));
   try {
@@ -263,6 +338,15 @@ test("a check whose npm script is missing: failed after one run, the run halts w
     const c = x.sets()[0]!.checks[1]!;
     assert.deepEqual([c.missing_script, c.ok, c.runs.length], [true, false, 1], "not run again");
     assert.equal(x.queue().steps[0]!.checks.find((v) => v.name === c.name)?.summary, "missing script");
+    assert.match(await status(x), /checks by Nexus: cannot run \(the run halted\): check "npm run nexus-no-such-script": missing script/);
+    // The script added, a Resume runs the set again and the run finishes (survey LC3, F6).
+    writeFileSync(join(x.store.readProject().root, "package.json"), JSON.stringify({ name: "ck", private: true, scripts: { "nexus-no-such-script": "node -e \"\"" } }));
+    x.engine.resume("Q");
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+    const last = x.sets().at(-1)!;
+    assert.deepEqual([last.state, last.unrunnable], ["passed", undefined]);
+    assert.ok(last.checks.every((k) => k.ok && !k.missing_script), JSON.stringify(last.checks.map((k) => [k.name, k.ok, k.missing_script])));
+    assert.equal(fixMessages(x).length, 0, "no check-fix round");
   } finally { x.engine.shutdown(); x.cap.shutdown(); }
 });
 
