@@ -417,3 +417,15 @@ matching `C <id>` resolves a cleanup, once; F and the host's close reject every 
 and no timer left. A fake pipe frees no OS resource, so the file's native case runs the real host. Its job member
 writes a ready file once it runs: a child's current directory is held only from its start, not from `spawn`'s return,
 and asserting the lock before that failed 2 of 20 runs under load.
+
+The cleanup held inside the native phase (queue WHR, WHR4): `nativeGate()` in `apps/server/test/gated-cleanup.ts`
+starts the workers' processes in a real job host compiled with `apps/server/test/worker-gate.cs`
+(`apps/server/test/worker-gate.ps1`), which wraps the host's End seam. It holds End at AwaitExit's 2000 ms wait on the
+handle End opened and checked for the helper the test names (or before the kill's first open, after a DACL denial),
+acknowledges with the PID and handle, and goes on with the real wait when the test opens it; the helper's
+TerminateProcess can be answered false/5 instead of being made. `worker-cleanup-gate.test.ts` meets the held wait with
+Stop now, Stop at once, the pipe's end, the host's kill, resumes, an inbox entry and a review's acceptance, for both
+fake runtimes. Two Windows facts shaped it: a console helper started with `windowsHide` has a conhost of its own in the
+job, and ending that conhost ends the helper whatever its DACL; Node puts its children in a kill-on-close job of its
+own, so ending a runtime ends its helpers. The tests' helpers therefore share the host's console
+(`ownedholdshared`, `owneddenyshared` in `apps/server/test/fake-behaviour.ts`).

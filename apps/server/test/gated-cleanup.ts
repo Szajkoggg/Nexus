@@ -1,10 +1,16 @@
 // A shared stand-in for the workers' cleanup barrier (AgentProcess.cleanup, queue LH): the runtimes' fakes as usual,
 // with every cleanup counted and passed through a gate a test holds, releases or makes fail. It replaces the one-off
 // wrappers (integration-free's slowHosts, worker-processes' held and failing cleanups).
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentProcess } from "../src/agent.ts";
 import type { Launch } from "../src/agent-host.ts";
-import { ClaudeSession } from "../src/claude.ts";
-import { CodexSession } from "../src/codex.ts";
+import { ClaudeSession, type ClaudeOptions } from "../src/claude.ts";
+import { CodexSession, type CodexOptions } from "../src/codex.ts";
+import { WorkerProcess, type SpawnRuntimeChild, type StartJobHost } from "../src/worker-process.ts";
+import { tempDir } from "./temp-dirs.ts";
 
 /** One cleanup asked of a process: whether that process had been sent a turn before, and how it ended (once it has). */
 export interface CleanupCall { turned: boolean; outcome?: "done" | "failed" }
@@ -65,5 +71,63 @@ export function gatedCleanup(o: { make?: (launch: Launch) => AgentProcess; failB
     hold() { gate = { open: false }; },
     release() { gate = { open: true }; wake(); },
     fail(message = "injected cleanup failure") { gate = { open: false, error: message }; wake(); },
+  };
+}
+
+/**
+ * A gate inside the native cleanup (queue WHR, WHR4): the workers' processes run in a real job host compiled with
+ * worker-gate.cs (worker-gate.ps1), which holds End at AwaitExit's 2000 ms wait on the handle it opened and checked for
+ * the process the test names (`target`). Give `make` to gatedCleanup to count the cleanups as well. Windows only.
+ */
+export interface NativeGate {
+  /** Makes Claude's or Codex's session whose process runs in a gate host. */
+  make: (launch: Launch) => AgentProcess;
+  /** The gate's folder. */
+  dir: string;
+  /** The gate hosts started so far (to end a host's pipe or kill it, as a server's loss would). */
+  hosts: ChildProcessWithoutNullStreams[];
+  /** Names the process to hold at the wait. */
+  target(pid: number): void;
+  /** The target's first TerminateProcess returns false with error 5 instead of being made (the WH2 trace). */
+  refuse(): void;
+  /** End holds before its `n`th OpenProcess of any member instead (after a DACL denial: before the kill ends anything). */
+  holdOpen(n: number): void;
+  /** The gate's acknowledgement once End waits at it: the PID and the handle End checked, else undefined. */
+  arrived(): { pid: number; handle: number } | undefined;
+  /** Lets the held wait go on: the real 2000 ms wait on the same handle. */
+  open(): void;
+  /** The native calls End made for the target, in order. */
+  calls(): string[];
+}
+
+export function nativeGate(): NativeGate {
+  const dir = tempDir("nexus-gate-");
+  const hosts: ChildProcessWithoutNullStreams[] = [];
+  const script = fileURLToPath(new URL("./worker-gate.ps1", import.meta.url));
+  const start: StartJobHost = (cwd, env) => {
+    const host = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script], {
+      cwd, env: { ...env, NEXUS_TEST_GATE_DIR: dir }, stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
+    });
+    hosts.push(host);
+    return host;
+  };
+  const spawnChild: SpawnRuntimeChild = (bin, args, options) => new WorkerProcess(bin, args, options, start);
+  const make = (launch: Launch): AgentProcess => {
+    const options = { ...launch.options, spawnChild };
+    return launch.runtime === "claude" ? new ClaudeSession(options as ClaudeOptions) : new CodexSession(options as CodexOptions);
+  };
+  return {
+    make, dir, hosts,
+    target: (pid) => writeFileSync(join(dir, "target"), String(pid)),
+    refuse: () => writeFileSync(join(dir, "refuse"), ""),
+    holdOpen: (n) => writeFileSync(join(dir, "holdopen"), String(n)),
+    arrived: () => {
+      const file = join(dir, "arrived");
+      if (!existsSync(file)) return undefined;
+      const [pid, handle] = readFileSync(file, "utf8").trim().split(" ");
+      return { pid: Number(pid), handle: Number(handle) };
+    },
+    open: () => writeFileSync(join(dir, "open"), ""),
+    calls: () => (existsSync(join(dir, "calls.log")) ? readFileSync(join(dir, "calls.log"), "utf8").trim().split("\n").filter(Boolean) : []),
   };
 }

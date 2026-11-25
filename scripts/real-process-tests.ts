@@ -10,6 +10,7 @@ export const REAL_PROCESS_TESTS: Readonly<Record<string, string>> = {
   "apps/server/test/worker-exit.test.ts": "the job host ends a worker's process tree at a step's boundary",
   "apps/server/test/worker-processes.test.ts": "a worker's descendants and what the job host does with them",
   "apps/server/test/worker-job.test.ts": "the worker's Windows job host itself",
+  "apps/server/test/worker-cleanup-gate.test.ts": "stops, resumes and a host's loss meet a cleanup held inside the real job host's native wait",
   "apps/server/test/agent-guard.test.ts": "the write guard tells an agent's process (in its job) from the user's",
   "apps/server/test/stop-at-once.test.ts": "Stop at once ends the runtime's OS process (process.kill(pid, 0) fails after)",
   "apps/server/test/clock-steps.test.ts": "runs stop-at-once and stopwork with the server's clock stepped, its children on the system clock",

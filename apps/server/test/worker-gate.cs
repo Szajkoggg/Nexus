@@ -1,0 +1,124 @@
+// Test-only, compiled with apps/server/src/worker-job.cs into the gate host (worker-gate.ps1), never by the real host.
+// It wraps the host's own native seam (NexusWorkerJob.calls, WHR1) so that a real job host, with its real job and its
+// real processes, holds its cleanup inside End: at AwaitExit's 2000 ms wait, on the handle End opened and checked for
+// one target process the test names. Every other call, and the held wait itself once opened, is the real one.
+//
+// The gate's folder (a test's temporary directory) is its whole interface:
+//   target    the PID to hold (written by the test once its helper is up); read at each OpenProcess
+//   refuse    when present, the target's first TerminateProcess is not made: it returns false with error 5, as the
+//             Codex trace did (WH2); the target lives on until the test lets it end by itself
+//   arrived   written by the gate when End waits at it: "<pid> <handle> member" (the handle End checked)
+//   holdopen  N: End holds before its Nth OpenProcess of any member instead ("arrived" then reads "<pid> 0 open")
+//   open      written by the test: the held wait (or open) goes on, as the real call
+//   calls.log every native call End made for the target, one line each
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using System.Threading;
+
+public sealed class GatedEndCalls : NexusWorkerJob.EndCalls {
+    readonly NexusWorkerJob.EndCalls real;
+    readonly string dir;
+    readonly Dictionary<long, uint> opened = new Dictionary<long, uint>();
+    readonly object guard = new object();
+    bool refused, held;
+    int opens;
+    int injectedError;
+    [ThreadStatic] static bool injected;
+
+    internal GatedEndCalls(NexusWorkerJob.EndCalls real, string dir) { this.real = real; this.dir = dir; }
+
+    uint Target() {
+        string file = Path.Combine(dir, "target");
+        uint pid;
+        return File.Exists(file) && uint.TryParse(File.ReadAllText(file).Trim(), out pid) ? pid : 0;
+    }
+    bool IsTarget(IntPtr handle) { lock (guard) return opened.ContainsKey(handle.ToInt64()); }
+    // Written whole, then renamed: the test never reads a file the gate is still writing.
+    void Arrive(string text) {
+        string temp = Path.Combine(dir, "arrived.tmp");
+        File.WriteAllText(temp, text);
+        File.Move(temp, Path.Combine(dir, "arrived"));
+    }
+    void Log(string line) { lock (guard) File.AppendAllText(Path.Combine(dir, "calls.log"), line + "\n"); }
+
+    // Holds before the Nth OpenProcess End makes for any member (the file "holdopen" names N), before the open itself:
+    // for a target End cannot open (a DACL denial), whose cleanup fails at the open and never reaches the wait, this
+    // holds the next cleanup (the kill's) before it ends anything.
+    void HoldOpen(uint pid) {
+        string file = Path.Combine(dir, "holdopen");
+        int n, count;
+        lock (guard) count = ++opens;
+        if (!File.Exists(file) || !int.TryParse(File.ReadAllText(file).Trim(), out n) || n != count) return;
+        Log("held open " + pid);
+        Arrive(pid + " 0 open");
+        string open = Path.Combine(dir, "open");
+        while (!File.Exists(open)) Thread.Sleep(10);
+    }
+
+    public IntPtr OpenProcess(uint access, bool inherit, uint pid) {
+        if (pid != 0) HoldOpen(pid);
+        IntPtr handle = real.OpenProcess(access, inherit, pid);
+        if (pid != 0 && pid == Target()) {
+            lock (guard) if (handle != IntPtr.Zero) opened[handle.ToInt64()] = pid;
+            Log("OpenProcess " + pid + " " + handle.ToInt64());
+        }
+        return handle;
+    }
+    public bool IsProcessInJob(IntPtr process, IntPtr job, out bool member) {
+        bool ok = real.IsProcessInJob(process, job, out member);
+        if (IsTarget(process)) Log("IsProcessInJob " + process.ToInt64() + " " + ok + " " + member);
+        return ok;
+    }
+    public uint WaitForSingleObject(IntPtr handle, uint ms) {
+        if (IsTarget(handle) && ms == 2000) {
+            bool first;
+            lock (guard) { first = !held; held = true; }
+            if (first) {
+                Log("held " + handle.ToInt64());
+                Arrive(Target() + " " + handle.ToInt64() + " member");
+                string open = Path.Combine(dir, "open");
+                while (!File.Exists(open)) Thread.Sleep(10);
+            }
+        }
+        uint result = real.WaitForSingleObject(handle, ms);
+        if (IsTarget(handle)) Log("WaitForSingleObject " + handle.ToInt64() + " " + ms + " " + result);
+        return result;
+    }
+    public bool TerminateProcess(IntPtr process, uint code) {
+        if (IsTarget(process)) {
+            bool refuse;
+            lock (guard) { refuse = !refused && File.Exists(Path.Combine(dir, "refuse")); if (refuse) refused = true; }
+            if (refuse) {
+                Log("TerminateProcess " + process.ToInt64() + " injected false 5");
+                injected = true; injectedError = 5;
+                return false;
+            }
+            bool ok = real.TerminateProcess(process, code);
+            Log("TerminateProcess " + process.ToInt64() + " " + ok);
+            injected = false;
+            return ok;
+        }
+        injected = false;
+        return real.TerminateProcess(process, code);
+    }
+    public bool CloseHandle(IntPtr handle) {
+        bool target;
+        lock (guard) { target = opened.Remove(handle.ToInt64()); }
+        if (target) Log("CloseHandle " + handle.ToInt64());
+        return real.CloseHandle(handle);
+    }
+    public int LastError() {
+        // End reads the error right after the call it belongs to: the injected one after an injected refusal.
+        if (injected) { injected = false; return injectedError; }
+        return real.LastError();
+    }
+}
+
+public static class GateHost {
+    public static void Install(string dir) {
+        FieldInfo calls = typeof(NexusWorkerJob).GetField("calls", BindingFlags.NonPublic | BindingFlags.Static);
+        calls.SetValue(null, new GatedEndCalls((NexusWorkerJob.EndCalls)calls.GetValue(null), dir));
+    }
+}
