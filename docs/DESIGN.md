@@ -30,8 +30,8 @@ The design is split by topic, one file each in `docs/design/`. New text goes int
   Sections: Context management; Usage limits; Estimating a turn's use; Sub-agent tokens; Measuring token use; Compacting a conversation (queue CC3)
 - [Worktrees and merging](design/git.md): worktrees, merging back, the integration step without a model, one queue per checkout, resuming worktree cleanup.
   Sections: Worktrees; Merging back; The integration step without a model (queue MI); Never two queues in one checkout; Resuming worktree cleanup (queue CW1)
-- [Runtimes and findings from building](design/runtimes.md): runtimes and authentication, findings from building phase 3, the web for thinking partners, the user's Codex tools, the window between a Codex exit and its handling.
-  Sections: Runtimes and authentication; Findings from building phase 3; The web for thinking partners (queue WB); The user's Codex tools for workers (queue FX)
+- [Runtimes and findings from building](design/runtimes.md): runtimes and authentication, findings from building phase 3, the web for thinking partners, the user's Codex tools, the window between a Codex exit and its handling, what the fake runtimes prove.
+  Sections: Runtimes and authentication; Findings from building phase 3; The web for thinking partners (queue WB); The user's Codex tools for workers (queue FX); What the fake runtimes prove (queue LCR)
 - [Security on this machine](design/security.md): what keeps the agents Nexus runs from doing the user's actions: the local HTTP gap reproduced, who it matters for, the options, the user's choice and how it was built (queue HG).
   Sections: The local HTTP gap (queue HG)
 - [Updating Nexus](design/updates.md): updating Nexus: hand-over, rolling back, pushing, planned deploys.
@@ -42,8 +42,8 @@ The design is split by topic, one file each in `docs/design/`. New text goes int
   Sections: The case; Options; The mark (B); Where it shows; Effect on the protocol (for the user's decision)
 - [The chat](design/chat.md): the chat: layout, the right rail, refs, the morning digest, drafts, quoting, search, pictures, speech.
   Sections: Chat-first on a desktop; The right rail; Refs in the chat; The morning digest; Drafts stay in the browser; Each chat keeps its place; Quoting in a chat; Long replies and message actions; Search in a chat, and pinned messages; Stopping a chat agent's turn; Pictures in a chat message; Speaking into a chat; Model and effort of a conversation
-- [Tests](design/tests.md): the tests' waits, speed, the full-test lock, flaky and hung tests, the tests reading through the model.
-  Sections: The tests' waits (queue TS1); Tests while working, and the slowest files (queue TS2); One full test run on the machine (queue FX); The engine's own waits in tests, and what sets the slowest files (queue FX); Findings from the flaky tests (queue FU4); Findings from the tests that failed or hung in full runs (queue FL); The compile cache, quick engine waits everywhere, and the tests' temporary folders (queue TI2); The machine's state beside every full run (queue TI4)
+- [Tests](design/tests.md): the tests' waits, speed, the full-test lock, flaky and hung tests, the tests reading through the model, the startup and recovery tests.
+  Sections: The tests' waits (queue TS1); Tests while working, and the slowest files (queue TS2); One full test run on the machine (queue FX); The engine's own waits in tests, and what sets the slowest files (queue FX); Findings from the flaky tests (queue FU4); Findings from the tests that failed or hung in full runs (queue FL); The compile cache, quick engine waits everywhere, and the tests' temporary folders (queue TI2); The machine's state beside every full run (queue TI4); Startup and recovery tests, and their helpers (queue LCR)
 - [The nexus CLI and the fake runtimes inside the tests' processes](design/cli-in-process.md): the CLI as a function (`run()`), one environment per call, the tests and fake runtimes calling it in their own process; the fake runtimes in the test's process (`inProcessRuntime()`), and the tests that stay real processes.
   Sections: The CLI as a function, and its calls in the tests (queue IPR1)
 - [State, order and reads](design/state.md): clock steps, the dashboard's reads, the status rules, the cost of rebuilding state, missing and unreadable files.

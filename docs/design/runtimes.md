@@ -317,3 +317,22 @@ is still what the last line left, `idle` after a drained turn's end. Every calle
   `FAKE_CODEX_EXIT_GATE` that descendant writes the turn's end after the exit, once the test opens the gate, so the
   turn ends inside the window whatever the load. The descendant is detached: on Windows Node (libuv) puts its children
   in a job that ends them with their parent, so an attached one died with the fake and its stdout with it (probed).
+
+## What the fake runtimes prove (queue LCR)
+
+The fakes (`apps/server/test/fake-claude.ts`, `fake-codex.ts`, steered by `fake-behaviour.ts`) are a model of the
+*interface* the two runtimes give Nexus: the stream lines, the refusals, the JSON-RPC answers, and what each runtime
+saves and when (docs/design/engine-failures.md, "When Claude Code saves a conversation"). A test against them proves
+Nexus's identity and delivery decisions: which of `--resume` and `--session-id` it starts, which id it keeps, which
+thread it asks for, how often a message or a step's turn reaches the agent, what a restart pauses and what it goes on
+with. It does not prove what a provider does inside: how Claude Code stores a transcript, what Codex's rollout holds,
+whether a model remembers. The fakes therefore keep only what Nexus sent them: a saved conversation's taken-in messages
+in a file beside the saved list, and a receipt for each effect a turn completes ("FAKE-EFFECT: <key>",
+`fake-behaviour.ts`). A sentinel found again after a resume shows that Nexus resumed the right conversation, once, with
+nothing invented before it; it says nothing of a model's context. A real runtime is probed, with a small model, only
+where a fake cannot answer (AGENTS.md); the probes of 2026-11-15 stay the basis of the save rules the fakes copy.
+
+The fakes' controllable points (gates, scripted failures, RPC answers, history and receipts) are listed in
+[tests.md](tests.md), "Startup and recovery tests, and their helpers (queue LCR)", with the findings the tests pinned.
+Nothing an agent reads or writes changed in the queue (no briefing, no CLI command, no file format), so no `Agents:`
+line is needed.

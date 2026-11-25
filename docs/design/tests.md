@@ -447,3 +447,60 @@ full run now does (`scripts/machine-probe.ts`, called by `scripts/test-lock.ts`)
 
 Tests run the fake runtimes in their own process (`inProcessRuntime()`) and the CLI as a function; only the files
 `scripts/real-process-tests.ts` lists, each with why, start processes ([cli-in-process.md](cli-in-process.md)).
+
+## Startup and recovery tests, and their helpers (queue LCR)
+
+Queue LCR closed the nine coverage gaps of the LC survey (LC-F1 to LC-F9, the survey of RN's start-up and recovery
+work) with tests against the fakes and no product change. What they prove is Nexus's own choices: which start (resume
+or fresh), which id, in which order, how many times a message or an effect reaches an agent, what a restart pauses or
+goes on with. They do not prove how Claude Code or Codex keep a conversation (see
+[runtimes.md](runtimes.md), "What the fake runtimes prove (queue LCR)"). The tracker that named every gap, its tests
+and the latest run was the queue's review material; the table below is what stays.
+
+| Gap | Test file (`apps/server/test/`) | What is held |
+|---|---|---|
+| F1 kill, close and stop during a startup replacement | `startup-replacement.test.ts`, `startup-replacement-worker.test.ts` | no corrective start after a kill or shutdown, one exit, the held message once; at the worker role Stop at once and a pause stay in force |
+| F2 input replay, settings, accounting | the same two files | every message sent while the refused start is held reaches the corrected start once, in order and priority; arguments equal but for the session flag; usage from its own baseline; an answer given meanwhile reaches the turn once, with its qid |
+| F3 a server that died without a word | `crash-recovery.test.ts` | a plain restart pauses the run; after Resume each start-up checkpoint and the twice-interrupted correction end as an uncrashed control does; the chat's cut-off message lost in a plain crash is not replayed |
+| F4 a partner's cut-off first turn | `partner-recovery.test.ts` | once after cutOff, shutdown and resumeCutOff on a new server, for both runtimes, a saved conversation with a wrong mark, and a hand-over |
+| F5 save signals and broken records | `claude-startup.test.ts`, `partner-recovery.test.ts` | the first whole init, assistant or result line tells saved once; a missing, truncated or wrong-typed runtime.json reads as none with a warning and is set aside at the next write; the id is kept |
+| F6 Claude's negative start-up gates | `claude-startup.test.ts` | exactly one corrective start, only for a pre-output refusal naming the conversation; the 1000 ms stderr wait on mock timers |
+| F7, F8 Codex's recovery and late refusals | `codex-recovery.test.ts`, `codex-exit.test.ts` | only the missing-rollout text starts a new thread, whatever the code; the new id is kept between the thread's answer and the turn; a refused turn/start ends one turn, once |
+| F9 what a resumed conversation holds | `partner-recovery.test.ts` | a sentinel and a completed effect survive a normal resume, a legacy record and a false mark corrected to a resume, and the effect is not done again |
+
+The helpers, all in `apps/server/test/` and all driven through the existing fakes (no second fake system):
+
+- **`FakeGates`** (`fake-behaviour.ts`): holds Claude's fake at `first-read`, `save`, `first-output`, `refusal`,
+  `stderr` and `exit`, Codex's at `answer:<method>`, each until the test releases it; the gates' environment goes into
+  the adapter's options, never `process.env`. Only for fakes in the test's own process. `leftovers()` and `dispose()`
+  are the cleanup (`fake-gates.test.ts`).
+- **`FAKE-EXIT: <code | signal> [stderr]`** (Claude's fake) and **`FAKE_CODEX_RPC`** (Codex's): a start-up failure and a
+  JSON-RPC answer chosen by the test (any error code and text, another result, none, an exit). `scripted-child.ts`
+  is a runtime process the test writes itself, for the orders the fake does not give (stderr after the exit, stderr that
+  never ends, a spawn error).
+- **`crash-server.ts`** (`crashAt`, `endCrashServers`): a Node process of the test's own runs the engine or the
+  orchestrator's resumeCutOff with the fakes in it, held at a gate, and the test ends it by its handle (no drain, no
+  cut-off, no shutdown). The next server is a new store and engine on the same files and sees only what is on disk. Its
+  environment keeps only a temporary `NEXUS_HOME` and the fakes' paths: a worker's own `NEXUS_DIR` and `NEXUS_SESSION`
+  would point at the real project. The fakes have no process id, so a record left by it holds none and the next
+  server ends nothing. `crash-recovery.test.ts` is listed in `scripts/real-process-tests.ts` for it.
+- **The fakes' kept history and effect receipts** (`openConversation`, `takenIn`, `fakeHistory`, `fakeEffects`): a saved
+  conversation keeps the messages Nexus sent it, and a resumed process starts with them; "FAKE-EFFECT: <key>" in a
+  message makes a turn that completes write a receipt with an id of its own. A test counts receipts, so "once" means one
+  receipt, not one id seen. A stopped or failed turn writes none.
+- **`holds()`** (`wait.ts`): checks a state keeps for a window (every 25 ms), for what must not change after a late
+  event.
+
+Findings from building them, pinned as today's behaviour and not changed (the user decides whether any should be):
+
+- A server killed after taking up a chat's cut-off mark (the notice sent, the mark cleared) before its process read the
+  message leaves nothing to go on with: the next server does not replay it and nothing tells the user; the message
+  stays in the chat and the next one is answered in the same session.
+- The correction's "retry" activity (a refused start tried again, or a Codex thread started anew) begins the step's turn
+  in AgentHost, so a crash in it leaves `turn_open` and the next server records one `interrupted` turn (queue CK).
+- A legacy runtime record behind a saved conversation is resumed and keeps no mark afterwards.
+- Refusal-like stderr after real output still tells `saved=false`; the next start's refusal corrects it with one more
+  start. A Codex thread answered without an id gets a `turn/start` with none, a lasting `turnStartRejected`.
+
+Stability of the new files was measured with `node scripts/load-tests.mjs` (12 busy loops, four copies, five rounds, 20
+runs each, all green); none of the new test code sleeps longer than the 25 ms poll, except on the mock clock.
