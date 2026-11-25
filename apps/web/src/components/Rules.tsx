@@ -1,6 +1,7 @@
 // The project's rules files on its page: a warning when a runtime would not see the project's rules (AGENTS.md,
 // pulled into CLAUDE.md with @AGENTS.md, is Nexus's convention), and the fix, which shows the change to the files
 // before the user makes it. The server writes the files and commits nothing (apps/server/src/rulesfix.ts).
+import { errorText } from "@nexus/protocol/errors";
 import { useState } from "react";
 import type { RulesCheck, RulesFileChange } from "@nexus/protocol/rules";
 import { actResult, projectUrl, useQuery, type ProjectState } from "../api.ts";
@@ -43,7 +44,7 @@ export function RulesWarning({ project }: { project: ProjectState }) {
       const r = await actResult<{ message: string }>(id, "POST", "/rules/fix", { version: rules.version });
       setMsg({ ok: true, text: r?.message ?? "" });
       setOpen(false);
-    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); setTick((x) => x + 1); }
+    } catch (e) { setMsg({ ok: false, text: errorText(e) }); setTick((x) => x + 1); }
     finally { setBusy(false); }
   };
   return (

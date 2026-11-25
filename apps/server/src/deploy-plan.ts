@@ -20,6 +20,7 @@
 //   its queue gets a failed or stopped step, is cancelled or goes away. A failed update drops it too.
 // - The plan stays across a plain restart of the server. The hand-over of the update it started ends it, so the
 //   successor never deploys again.
+import { errorText } from "@nexus/protocol/errors";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -392,7 +393,7 @@ export class DeployPlanner {
     this.f = { ...this.f, plan: { ...p, started: { at: now(), update: "" } } };
     let status: UpdateStatus;
     try { status = l.start({ ref: p.ref, by: p.by }); }
-    catch (err) { this.f = { ...this.f, plan: p }; this.drop(`the update did not start: ${(err as Error).message}`); return; }
+    catch (err) { this.f = { ...this.f, plan: p }; this.drop(`the update did not start: ${errorText(err)}`); return; }
     this.f = { ...this.f, plan: { ...p, started: { at: this.f.plan!.started!.at, update: status.id ?? "" } } };
     this.write();
   }

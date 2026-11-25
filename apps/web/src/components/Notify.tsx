@@ -1,6 +1,7 @@
 // Notifications when something newly waits for the user: push from the server where a service worker can run (an
 // installed app on a phone, any browser on https or localhost), else from the open tab (desktop only); and the bell
 // that turns them on and off, with what it says when it did.
+import { errorText } from "@nexus/protocol/errors";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { attentionKey } from "@nexus/protocol/attention";
@@ -136,7 +137,7 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
     const device = /iPhone|iPad/.test(navigator.userAgent) ? "iPhone / iPad" : /Android/.test(navigator.userAgent) ? "Android" : t("notify.desktopBrowser");
     await request("/api/push/subscribe", { method: "POST", body: { subscription: sub.toJSON(), label: device, timezone: deviceZone() } }).catch((e: unknown) => {
       // The server's reason when it gave one, else its status.
-      throw new Error(e instanceof HttpError ? e.reason ?? t("common.serverAnswered", { status: String(e.status) }) : (e as Error).message);
+      throw new Error(e instanceof HttpError ? e.reason ?? t("common.serverAnswered", { status: String(e.status) }) : errorText(e));
     });
     // What was chosen in this browser before push was on goes with the subscription (a new one gets the defaults).
     await saveDeviceNotify(readLocalNotify(), sub.endpoint).catch(() => undefined);
@@ -173,7 +174,7 @@ export function useNotifications(projects: ProjectSummary[] | undefined) {
       setToast({ kind: "ok", text: next ? t("notify.onInTab") : t("notify.off") });
       try { localStorage.setItem(STORAGE, next ? "on" : "off"); } catch { /* private mode */ }
     } catch (e) {
-      setToast({ kind: "error", text: (e as Error).message || String(e) });
+      setToast({ kind: "error", text: errorText(e) || String(e) });
     } finally { setBusy(false); }
   };
   return { supported, on, toggle, push: usePush, toast, busy, dismiss: () => setToast(undefined) };

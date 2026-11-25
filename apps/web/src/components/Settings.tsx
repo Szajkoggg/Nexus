@@ -1,5 +1,6 @@
 // Settings: the global ones every project follows, and a project's own (how its agents run, its defaults), each
 // setting with a global value switched between following it and the project's own value (docs/protocol/settings.md, "Global settings").
+import { errorText } from "@nexus/protocol/errors";
 import { useState, type ReactNode } from "react";
 import type { GlobalSettings, ProjectFile, TagsFile } from "@nexus/protocol";
 import type { ModelInfo } from "@nexus/protocol/api";
@@ -610,7 +611,7 @@ function ProjectSettingsPage({ project, info }: { project: ProjectFile; info: Pr
       // saved: built again from reads that land one by one, it would show values from before the save for a moment.
       await reloaded(projectUrl(project.id, "/state"), projectUrl(project.id, "/settings"));
       setMsg({ ok: true, text: t("settings.savedProject") });
-    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
+    } catch (e) { setMsg({ ok: false, text: errorText(e) }); }
     finally { setBusy(false); }
   };
   const p = { values: local, set: (k: string, x: string) => setLocal((y) => ({ ...y, [k]: x })), root: project.root };
@@ -647,7 +648,7 @@ function GlobalForm({ global, server }: { global: GlobalSettings; server?: Serve
       // Saving until the state after the save shows (page.ts, reloaded).
       await reloaded();
       setMsg({ ok: true, text: t("settings.savedGlobal") });
-    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
+    } catch (e) { setMsg({ ok: false, text: errorText(e) }); }
     finally { setBusy(false); }
   };
   return (

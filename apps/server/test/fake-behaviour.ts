@@ -83,6 +83,7 @@
 // FAKE_LATE_NEXT: its first turn's result waits for a message sent after its reply, which then runs as a turn of its own
 // (once the file FAKE_LATE_GATE names exists, when set; the process runs it before it exits, its input closed or not);
 // FAKE_LATE_NEXT=inside: that message is read inside the turn, and no turn of its own follows.
+import { errorText } from "@nexus/protocol/errors";
 import { execFileSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -647,7 +648,7 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
   const script = /FAKE-SCRIPT: (.+)/.exec(text);
   if (script) {
     try { return execFileSync(process.execPath, [script[1]!.trim()], { env, cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(); }
-    catch (e) { return `script failed: ${(e as { stderr?: string }).stderr ?? (e as Error).message}`; }
+    catch (e) { return `script failed: ${(e as { stderr?: string }).stderr ?? errorText(e)}`; }
   }
   const asked = ASKED.exec(text);
   if (asked) return await nexusOut(["answer", asked[1]!, "fake answer", "--continue"]);

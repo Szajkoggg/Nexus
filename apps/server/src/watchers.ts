@@ -1,6 +1,7 @@
 // The server's file watchers (moved out of main.ts, queue LH): each project's two watchers of its .nexus folder, and
 // the watcher of NEXUS_HOME's files. The watchers themselves come from a factory, so a test can give stand-ins and
 // make them report, fail or stay silent without a server.
+import { errorText } from "@nexus/protocol/errors";
 import { mkdirSync, watch as watchFiles, type WatchEventType } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import chokidar from "chokidar";
@@ -113,7 +114,7 @@ export function watchProject(id: string, dir: string, hooks: ProjectWatchHooks, 
       });
       if (after) { console.error(`watch ${id}: watched again; its model is read again`); hooks.model()?.rebuild(); hooks.changed(); }
     } catch (err) {
-      console.error(`watch ${id}: ${(err as Error).message}; tried again in ${retryMs} ms`);
+      console.error(`watch ${id}: ${errorText(err)}; tried again in ${retryMs} ms`);
       again();
     }
   };

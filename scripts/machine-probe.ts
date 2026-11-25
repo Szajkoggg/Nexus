@@ -14,6 +14,7 @@
 // (NEXUS_TEST_MACHINE_LOG names another file; "off" turns the probe off, which the lock's own tests do) and prints it.
 // A probe that cannot start (no PowerShell outside Windows, no git) leaves its field null. It takes about a second;
 // each process is given at most 10 s.
+import { errorText } from "@nexus/protocol/errors";
 import { execFile, spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -107,6 +108,6 @@ export function describeMachine(line: MachineLine, file: string): string {
 /** Appends the run's line to `file`; a file that cannot be written is said, never fails the run. */
 export function recordMachine(file: string, line: MachineLine, say: (text: string) => void): void {
   try { appendFileSync(file, `${JSON.stringify(line)}\n`); }
-  catch (error) { say(`npm test: could not write the machine probe to ${file}: ${(error as Error).message}`); return; }
+  catch (error) { say(`npm test: could not write the machine probe to ${file}: ${errorText(error)}`); return; }
   say(describeMachine(line, file));
 }

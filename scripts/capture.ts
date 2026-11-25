@@ -14,6 +14,7 @@
 // It never blocks: a view it cannot take is reported (take it by hand under the same conditions), and so is a seed that
 // does not fit the base commit's code. Exit code 0 then too; 2 for a wrong command line or view list; 3 when the
 // temporary worktree could not be removed (remove it by hand: the path is printed).
+import { errorText } from "@nexus/protocol/errors";
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,7 +38,7 @@ const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd,
 const root = posix(git(process.cwd(), "rev-parse", "--show-toplevel"));
 
 let list;
-try { list = parseViews(readFileSync(positionals[0]!, "utf8")); } catch (e) { fail((e as Error).message); }
+try { list = parseViews(readFileSync(positionals[0]!, "utf8")); } catch (e) { fail(errorText(e)); }
 const { views, seed } = list!;
 if (seed && !existsSync(join(root, seed))) fail(`no seed script at ${seed} (a path from the repository root)`);
 // The views' scripts, read from this checkout for both sides.
@@ -94,7 +95,7 @@ async function side(which: "before" | "after", checkout: string): Promise<void> 
     try {
       run(checkout, process.execPath, [join(checkout, seed), data], instanceEnv(process.env, { home, port, fakes: { claude: "", codex: "" } }));
     } catch (e) {
-      throw new Error(`the seed does not fit the code ${which === "before" ? `at ${base!.slice(0, 7)}` : "of this checkout"}: ${(e as Error).message}`);
+      throw new Error(`the seed does not fit the code ${which === "before" ? `at ${base!.slice(0, 7)}` : "of this checkout"}: ${errorText(e)}`);
     }
   }
   const inst = await startInstance({ root: checkout, home, port });
@@ -116,7 +117,7 @@ try {
     log("building this checkout's dashboard");
     run(root, "npm", ["run", "build", "-w", "@nexus/web"], process.env);
     await side("after", root);
-  } catch (e) { sideFailed("after", (e as Error).message); }
+  } catch (e) { sideFailed("after", errorText(e)); }
 
   if (base) {
     try {
@@ -131,7 +132,7 @@ try {
         copyFileSync(join(root, seed), join(worktree, seed));
       }
       await side("before", worktree);
-    } catch (e) { sideFailed("before", (e as Error).message); }
+    } catch (e) { sideFailed("before", errorText(e)); }
   }
 } finally {
   for (const i of instances) await i.stop();
@@ -143,10 +144,10 @@ try {
     // list is pruned. The junctions in node_modules point inside the worktree, and rmSync does not follow them.
     let why = "";
     for (let i = 0; i < 3 && existsSync(worktree); i++) {
-      try { git(root, "worktree", "remove", "--force", worktree); } catch (e) { why ||= String((e as { stderr?: string }).stderr ?? (e as Error).message).trim(); await new Promise((r) => setTimeout(r, 1500)); }
+      try { git(root, "worktree", "remove", "--force", worktree); } catch (e) { why ||= String((e as { stderr?: string }).stderr ?? errorText(e)).trim(); await new Promise((r) => setTimeout(r, 1500)); }
     }
     if (existsSync(worktree)) {
-      try { rmSync(worktree, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch (e) { why += ` / ${(e as Error).message}`; }
+      try { rmSync(worktree, { recursive: true, force: true, maxRetries: 8, retryDelay: 500 }); } catch (e) { why += ` / ${errorText(e)}`; }
     }
     try { git(root, "worktree", "prune"); } catch { /* nothing to prune */ }
     const listed = git(root, "worktree", "list", "--porcelain").split("\n").some((l) => posix(l) === `worktree ${worktree}`);

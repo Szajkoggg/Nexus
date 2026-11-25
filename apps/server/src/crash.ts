@@ -3,6 +3,7 @@
 // the dashboard shows it until the user closes it, and every project's orchestrator is told once (its applied.jsonl
 // records `notify:crash:<at>`). One record, the latest: a later crash replaces it. Writers: the server that crashes
 // (the record) and the server that runs after it (the user's dismissal), never at once.
+import { errorText } from "@nexus/protocol/errors";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { nexusHome, writeJson } from "@nexus/protocol";
@@ -36,7 +37,7 @@ export function recordCrash(err: unknown, at = new Date()): void {
   try {
     write({ at: at.toISOString(), error: crashText(err), stack: err instanceof Error ? err.stack : undefined, pid: process.pid });
   } catch (e) {
-    try { process.stderr.write(`crash.json not written: ${(e as Error).message}\n`); } catch { /* nothing left to tell */ }
+    try { process.stderr.write(`crash.json not written: ${errorText(e)}\n`); } catch { /* nothing left to tell */ }
   }
 }
 

@@ -2,6 +2,7 @@
 // queues and launches runs through `nexus` (queue.drafted, session.request), answers or escalates workers'
 // questions, and is told when a worker asks or a run halts or finishes. It may read everything and write only queue
 // drafts under .nexus/drafts/: permission mode dontAsk with a read-only allow list plus the drafts rules.
+import { errorText } from "@nexus/protocol/errors";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -152,7 +153,7 @@ export class Orchestrator {
   /** A session's file, if there is one. */
   private sessionFile(id: string | null | undefined): SessionFile | undefined {
     if (!id || !this.store.hasSession(id)) return undefined;
-    try { return this.store.readSession(id); } catch (e) { console.warn(`nexus: ${(e as Error).message}; taken as no session`); return undefined; }
+    try { return this.store.readSession(id); } catch (e) { console.warn(`nexus: ${errorText(e)}; taken as no session`); return undefined; }
   }
 
   view() {
@@ -671,7 +672,7 @@ ${n.text}` });
     const out = [s];
     for (let x = s; x.continues && !out.some((y) => y.id === x.continues);) {
       if (!this.store.hasSession(x.continues)) break;
-      try { x = this.store.readSession(x.continues); } catch (e) { console.warn(`nexus: ${(e as Error).message}; the lineage ends before it`); break; }
+      try { x = this.store.readSession(x.continues); } catch (e) { console.warn(`nexus: ${errorText(e)}; the lineage ends before it`); break; }
       out.push(x);
     }
     return out;
@@ -791,7 +792,7 @@ ${n.text}` });
       for (const e of pending) {
         let ok = true; let message: string;
         try { message = this.apply(e); }
-        catch (err) { ok = false; message = (err as Error).message; }
+        catch (err) { ok = false; message = errorText(err); }
         this.store.appendApplied(s.id, { at: now(), event: e.id, ok, message });
       }
     } finally { this.applying = false; }

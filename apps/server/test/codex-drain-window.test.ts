@@ -6,6 +6,7 @@
 // a message to the orchestrator starts a fresh process, as after an exit (before: refused with that error).
 // Against the fake: it writes the turn's end through the descendant that holds its stdout, after the exit, once the
 // test opens a gate (fake-behaviour.ts, exitHeld), so the window is open when the turn ends whatever the machine's load.
+import { errorText } from "@nexus/protocol/errors";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
@@ -87,7 +88,7 @@ test("codex worker: its process exits after a turn without an outcome, stdout he
     // Past the engine's look after the turn (turnSettleMs), and the server's looks at file changes meanwhile.
     for (let i = 0; i < 8; i++) {
       await sleep(40);
-      try { engine.onChange(loadProjectState(store)); } catch (e) { thrownByChange.push((e as Error).message); }
+      try { engine.onChange(loadProjectState(store)); } catch (e) { thrownByChange.push(errorText(e)); }
     }
     assert.ok(first.exiting, "every look above was inside the window");
     assert.deepEqual(uncaught.thrown, [], "no uncaught exception");
@@ -121,7 +122,7 @@ test("codex orchestrator: a message in the drain window starts a fresh process t
   const orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn: codexMaker(made) });
   // Stands in for the server's file watcher.
   function tick() { routeAnswers(store); acceptReviews(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
-  const timer = setInterval(() => { try { tick(); } catch (e) { uncaught.thrown.push(`tick: ${(e as Error).message}`); } }, 50);
+  const timer = setInterval(() => { try { tick(); } catch (e) { uncaught.thrown.push(`tick: ${errorText(e)}`); } }, 50);
   const gate = holdStdout(root);
   const replies = () => orchestrator.view().chat.filter((c) => c.from === "orchestrator" && c.kind !== "tool");
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms, () => `; chat: ${JSON.stringify(orchestrator.view().chat.slice(-4))}`);
@@ -132,7 +133,7 @@ test("codex orchestrator: a message in the drain window starts a fresh process t
     await turnEndsInWindow(first, gate, LONGER.step);
     await until("its reply", () => replies().some((c) => c.text === "exit reply"));
     let refused: string | undefined;
-    try { orchestrator.say("After the exit"); } catch (e) { refused = (e as Error).message; }
+    try { orchestrator.say("After the exit"); } catch (e) { refused = errorText(e); }
     assert.ok(first.exiting, "the message came inside the window");
     assert.equal(refused, undefined, "the message is taken, not refused with the exited process's error");
     await until("the reply to the message", () => replies().length >= 2, LONGER.step);

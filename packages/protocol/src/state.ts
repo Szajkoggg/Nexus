@@ -1,5 +1,6 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
+import { errorText } from "./errors.ts";
 import { applyCheckSets, enterAcceptedReview, reviewRound, verdictBeforeReview } from "./checks.ts";
 import { CONVERSATION_ONLY, HELPER_VERDICTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, countRebuild, readAway, revisionHash } from "./store.ts";
@@ -313,9 +314,9 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
   const project = store.readProject();
   const away = readAway(store.env, (w) => warnings.push(w));
   let tags: TagsFile;
-  try { tags = store.readTags(); } catch (e) { warnings.push(`tags.yaml: ${(e as Error).message}`); tags = { protocol: 1, areas: [], activities: [], renames: [], proposals: [], decisions: [] }; }
+  try { tags = store.readTags(); } catch (e) { warnings.push(`tags.yaml: ${errorText(e)}`); tags = { protocol: 1, areas: [], activities: [], renames: [], proposals: [], decisions: [] }; }
   let metrics: MetricsFile;
-  try { metrics = store.readMetrics(); } catch (e) { warnings.push(`metrics.yaml: ${(e as Error).message}`); metrics = { protocol: 1, metrics: [] }; }
+  try { metrics = store.readMetrics(); } catch (e) { warnings.push(`metrics.yaml: ${errorText(e)}`); metrics = { protocol: 1, metrics: [] }; }
 
   const queues = new Map<string, QueueView>();
   const plans = new Map<string, PlanFile>();
@@ -325,21 +326,21 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
       const { notes, errors } = store.readNotes(id);
       warnings.push(...errors);
       const view = initQueue(q, notes, project, tags);
-      try { view.run = store.readRun(id); } catch (e) { warnings.push(`queue ${id} run: ${(e as Error).message}`); }
-      try { view.push = store.readPush(id); } catch (e) { warnings.push(`queue ${id} push: ${(e as Error).message}`); }
-      try { view.git = store.readGit(id); } catch (e) { warnings.push(`queue ${id} git: ${(e as Error).message}`); }
-      try { view.check_runs = store.readChecks(id); } catch (e) { view.check_runs_error = (e as Error).message; warnings.push(`queue ${id} checks: ${view.check_runs_error}`); }
+      try { view.run = store.readRun(id); } catch (e) { warnings.push(`queue ${id} run: ${errorText(e)}`); }
+      try { view.push = store.readPush(id); } catch (e) { warnings.push(`queue ${id} push: ${errorText(e)}`); }
+      try { view.git = store.readGit(id); } catch (e) { warnings.push(`queue ${id} git: ${errorText(e)}`); }
+      try { view.check_runs = store.readChecks(id); } catch (e) { view.check_runs_error = errorText(e); warnings.push(`queue ${id} checks: ${view.check_runs_error}`); }
       try {
         const plan = store.readStart(id);
         if (plan) view.start = { ...plan, waiting: "", blocked: false };
-      } catch (e) { warnings.push(`queue ${id} start: ${(e as Error).message}`); }
+      } catch (e) { warnings.push(`queue ${id} start: ${errorText(e)}`); }
       try {
         const plan = store.readPlan(id) ?? chainPlan(view.start);
         if (plan) plans.set(id, plan);
         if (view.start?.after) view.start.after = undefined;
-      } catch (e) { warnings.push(`queue ${id} plan: ${(e as Error).message}`); }
+      } catch (e) { warnings.push(`queue ${id} plan: ${errorText(e)}`); }
       queues.set(id, view);
-    } catch (e) { warnings.push(`queue ${id}: ${(e as Error).message}`); }
+    } catch (e) { warnings.push(`queue ${id}: ${errorText(e)}`); }
   }
 
   const sessions = new Map<string, SessionView>();
@@ -384,7 +385,7 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
         }
         own.push(e);
       }
-    } catch (e) { warnings.push(`session ${id}: ${(e as Error).message}`); }
+    } catch (e) { warnings.push(`session ${id}: ${errorText(e)}`); }
   }
   // By time, then id, but each log keeps the order it was written in, whatever its times say after a clock step
   // (docs/design/state.md, "Clock steps").
@@ -567,7 +568,7 @@ export function releasedText(released: readonly string[] | undefined): string {
 function recurringOf(store: ProjectStore, project: ProjectFile, warnings: string[], queues: Map<string, QueueView>): RecurringView[] {
   const files: RecurringFile[] = [];
   for (const id of store.recurringIds()) {
-    try { const r = store.readRecurring(id); if (r) files.push(r); } catch (e) { warnings.push(`recurring ${id}: ${(e as Error).message}`); }
+    try { const r = store.readRecurring(id); if (r) files.push(r); } catch (e) { warnings.push(`recurring ${id}: ${errorText(e)}`); }
   }
   if (!files.length) return [];
   return recurringViews(files, readTemplates(project.root, templateDirs(store.env)), [...queues.values()], Date.now());

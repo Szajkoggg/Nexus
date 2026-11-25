@@ -10,6 +10,7 @@
 // waits up to HANDOVER_TIMEOUT_MS for ready.json. The successor (NEXUS_HANDOVER names the folder) stays read-only
 // until released.json appears or the predecessor's process is gone: no recovery, no resume, no agent, no write under
 // any project's .nexus/. Without ready.json the predecessor rolls back (src/lifecycle.ts) and never releases.
+import { errorText } from "@nexus/protocol/errors";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
@@ -164,14 +165,14 @@ export async function smokeCheck(base: string, dashboard: boolean): Promise<stri
       const r = await fetch(base + path, { signal: AbortSignal.timeout(10_000) });
       if (!r.ok) problems.push(`GET ${path} answered ${r.status}`);
       return r.ok ? r : undefined;
-    } catch (e) { problems.push(`GET ${path}: ${(e as Error).message}`); return undefined; }
+    } catch (e) { problems.push(`GET ${path}: ${errorText(e)}`); return undefined; }
   };
   const server = await get("/api/server");
   if (server && typeof ((await server.json().catch(() => ({}))) as { commit?: unknown }).commit !== "string") problems.push("GET /api/server gave no version");
   if (dashboard) await get("/");
   for (const p of readRegistry().projects) {
     try { loadProjectState(ProjectStore.forRoot(p.root)); }
-    catch (e) { problems.push(`project ${p.id} (${p.root}) does not load: ${(e as Error).message.split("\n")[0]}`); }
+    catch (e) { problems.push(`project ${p.id} (${p.root}) does not load: ${errorText(e).split("\n")[0]}`); }
   }
   return problems;
 }

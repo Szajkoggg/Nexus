@@ -13,6 +13,7 @@
 // the three review commands, which the CLI takes from a helper only for its step and round; Codex with its session folder
 // as the working directory and only writable root (for the CLI's events). A refused action is recorded in its
 // refusals.jsonl, and its briefing asks it to pass on with `doubt`: nothing is ever asked.
+import { errorText } from "@nexus/protocol/errors";
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -113,7 +114,7 @@ export class ReviewHelpers {
         if (e.type !== "review.sent_back" || done.has(e.id)) continue;
         let ok = true; let message: string;
         try { message = sendBack(this.store, { queue: e.queue, step: e.step, from: "helper", text: e.text, event: e.id }); }
-        catch (err) { ok = false; message = (err as Error).message; }
+        catch (err) { ok = false; message = errorText(err); }
         this.store.appendApplied(s.id, { at: now(), event: e.id, ok, message });
         wrote = true;
       }
@@ -157,7 +158,7 @@ export class ReviewHelpers {
     const issue = effortIssue(runtime, effort);
     if (issue) return this.passOn(q, st, round, ["unavailable"], `The review helper's settings cannot run: effort ${effort}: ${issue}.`);
     try { this.start(state, q, st, round, { runtime, model, effort }); }
-    catch (e) { return this.passOn(q, st, round, ["unavailable"], `The review helper could not start: ${(e as Error).message}`); }
+    catch (e) { return this.passOn(q, st, round, ["unavailable"], `The review helper could not start: ${errorText(e)}`); }
     return true;
   }
 
@@ -269,7 +270,7 @@ export class ReviewHelpers {
       return { stat: git(["diff", "--stat", from, to]), range: { from, to, round: { from: last, to } } };
     } catch (e) {
       writeFileSync(file, "", "utf8");
-      return { stat: `(git diff failed: ${(e as Error).message.split("\n")[0]})`, range: { from, to } };
+      return { stat: `(git diff failed: ${errorText(e).split("\n")[0]})`, range: { from, to } };
     }
   }
 }

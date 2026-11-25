@@ -11,6 +11,8 @@
 //
 // The derivation (packages/protocol/src/checks.ts) reads the file: a step whose latest step.done's checks have not
 // passed is `checking`, a fix round, or waiting for the orchestrator's decision. This module is the file's one writer.
+import { errorText } from "@nexus/protocol/errors";
+import { logError } from "./log-error.ts";
 import { execFile } from "node:child_process";
 import { createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -446,7 +448,7 @@ export class CheckRunner {
       this.update(queue, step, done, (s) => { s.dispute!.base = { state: "running", commit: base }; });
       this.host.ended(queue);
       try { await run("git", ["worktree", "add", "--detach", dir, base], { cwd, windowsHide: true }); added = true; }
-      catch (e) { return this.endBase(queue, step, done, state, "unrunnable", `git worktree add of ${base} failed: ${String((e as Error).message).split("\n")[0]}`); }
+      catch (e) { return this.endBase(queue, step, done, state, "unrunnable", `git worktree add of ${base} failed: ${String(errorText(e)).split("\n")[0]}`); }
       // Stopped while the worktree was added (queue LF, F1): the grant has ended, nothing more runs under it.
       if (a.stopped) return;
       const setup = state.project.defaults.worktree_setup?.trim();
@@ -466,11 +468,11 @@ export class CheckRunner {
       // nor halt a run the user stopped; with its record left `running`, the base run still runs again at Resume.
       if (a.stopped && !this.closed) {
         try { this.update(queue, step, done, (s) => { if (s.dispute?.base?.state === "running") s.dispute.base = { state: "queued" }; }); }
-        catch (e) { console.error(`queue ${queue} step ${step}: the stopped base run was not recorded as queued: ${(e as Error).message}`); }
+        catch (e) { console.error(`queue ${queue} step ${step}: the stopped base run was not recorded as queued: ${errorText(e)}`); }
       }
       if (added) await run("git", ["worktree", "remove", "--force", dir], { cwd, windowsHide: true }).catch(() => {});
       try { rmSync(dir, { recursive: true, force: true }); }
-      catch (e) { console.error(`queue ${queue} step ${step}: the base run's folder ${dir} was not removed: ${(e as Error).message}`); }
+      catch (e) { console.error(`queue ${queue} step ${step}: the base run's folder ${dir} was not removed: ${errorText(e)}`); }
       this.release(grant, queue);
     }
   }
@@ -516,7 +518,7 @@ export class CheckRunner {
     const set = this.setOf(queue, step, done);
     let fixQueue: CheckSet["fix_queue"];
     try { fixQueue = proposeFixQueue(this.store, state, queue, step, set); }
-    catch (e) { console.error(`queue ${queue} step ${step}: the fix queue for the accepted failure was not proposed: ${(e as Error).message}`); }
+    catch (e) { console.error(`queue ${queue} step ${step}: the fix queue for the accepted failure was not proposed: ${errorText(e)}`); }
     this.update(queue, step, done, (s) => { s.state = "accepted"; s.dispute!.outcome = "accepted"; if (fixQueue) s.fix_queue = fixQueue; });
     this.host.ended(queue);
   }
@@ -527,12 +529,12 @@ export class CheckRunner {
    * server (queue LF, F1). The grant was released by the chain's own `finally`; a Resume runs the checks again.
    */
   private failed(queue: string, step: string, e: unknown): void {
-    const message = e instanceof Error ? e.message : String(e);
-    console.error(`queue ${queue} step ${step}: the checks Nexus runs failed: ${e instanceof Error ? e.stack : message}`);
+    const message = errorText(e);
+    logError(`queue ${queue} step ${step}: the checks Nexus runs failed`, e);
     this.active.delete(queue);
     if (this.closed) return;
     try { this.host.halt(queue, `step ${step}: the checks Nexus runs failed: ${message.split("\n")[0]}`); }
-    catch (err) { console.error(`queue ${queue}: the run was not halted: ${(err as Error).message}`); }
+    catch (err) { console.error(`queue ${queue}: the run was not halted: ${errorText(err)}`); }
   }
 
   // ---------------------------------------------------------------- the machine
@@ -596,7 +598,7 @@ export class CheckRunner {
   private recover(): void {
     for (const queue of this.store.queueIds()) {
       let file: ChecksFile | undefined;
-      try { file = this.store.readChecks(queue); } catch (e) { console.warn(`nexus: ${(e as Error).message}; its checks are not recovered`); continue; }
+      try { file = this.store.readChecks(queue); } catch (e) { console.warn(`nexus: ${errorText(e)}; its checks are not recovered`); continue; }
       if (!file) continue;
       let changed = false;
       for (const entry of Object.values(file.steps)) for (const s of entry.sets) {

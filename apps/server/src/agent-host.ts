@@ -3,6 +3,7 @@
 // read from the runtime's stream (the record, the runtime's own session id, the account's usage windows), and ending a
 // process so that the session's next message starts a new one. What a role does with its agent's texts, turns and
 // exits stays with the role: it gives its handlers when it starts a process.
+import { errorText } from "@nexus/protocol/errors";
 import { join } from "node:path";
 import {
   appendTurn, now, readUsage, stepDefs, stepTags, writeUsage, type ProjectStore, type RuntimeFile, type SessionFile, type TokenCounts, type TurnRecord,
@@ -191,7 +192,7 @@ export class AgentHost<E extends object = object> {
     // calls stamp their records after everything the server had seen (docs/design/state.md, "Clock steps").
     const send = proc.send.bind(proc);
     proc.send = (text, priority) => {
-      try { this.store.writeClock(); } catch (e) { console.error(`clock.json: ${(e as Error).message}`); }
+      try { this.store.writeClock(); } catch (e) { console.error(`clock.json: ${errorText(e)}`); }
       send(text, priority);
     };
     const l = { ...extra, session: session.id, proc } as Hosted<E>;
@@ -421,7 +422,7 @@ export class AgentHost<E extends object = object> {
         cost_usd: end?.costUsd,
         windows_start: turn.windows, windows_end: this.windows(s.runtime),
       });
-    } catch (e) { console.error(`turns.jsonl: ${(e as Error).message}`); }
+    } catch (e) { console.error(`turns.jsonl: ${errorText(e)}`); }
   }
 
   /**

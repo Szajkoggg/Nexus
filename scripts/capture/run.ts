@@ -1,5 +1,6 @@
 // The capture tool's moving parts: the views run through a Browser (scripts/capture/edge.ts, or a fake in the tests),
 // and a development instance started with a cleared environment on a free port (never 4317).
+import { errorText } from "@nexus/protocol/errors";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import { join } from "node:path";
@@ -65,8 +66,8 @@ export async function captureViews(views: View[], browser: Browser, o: {
       shots.push({ key: v.key, side: o.side, file });
       o.log?.(`taken: ${v.key} ${o.side}`);
     } catch (e) {
-      shots.push({ key: v.key, side: o.side, error: (e as Error).message });
-      o.log?.(`not taken: ${v.key} ${o.side}: ${(e as Error).message}`);
+      shots.push({ key: v.key, side: o.side, error: errorText(e) });
+      o.log?.(`not taken: ${v.key} ${o.side}: ${errorText(e)}`);
     }
   }
   return shots;

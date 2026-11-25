@@ -17,6 +17,13 @@ const typed = [
 // Names that hold an id: `id`, `event` (an event's id), `queue`, `step`, `dir`, and anything ending in `Id`.
 const ID_NAMES = "/^(id|ids|event|queue|step|dir)$|Id$/";
 
+// A thrown value read as `(e as Error).message`: anything not an Error (a string, undefined) gives the text
+// `undefined`. errorText (packages/protocol/src/errors.ts) is the one way to say what was thrown.
+const ERROR_TEXT = {
+  selector: "MemberExpression[property.name='message'] > TSAsExpression.object[typeAnnotation.typeName.name='Error']",
+  message: "Use errorText(e) (@nexus/protocol/errors), not (e as Error).message: a thrown non-Error gives undefined.",
+};
+
 export default tseslint.config(
   { ignores: ["**/node_modules/**", "**/dist/**", "tmp/**", ".nexus/**"] },
   {
@@ -53,8 +60,15 @@ export default tseslint.config(
             .flatMap((side) => [`[${side}.property.name=${ID_NAMES}]`, `[${side}.name=${ID_NAMES}]`]).join(", ")})`,
           message: "Compare ids with compareIds (@nexus/protocol), not localeCompare: the locale reorders them.",
         },
+        ERROR_TEXT,
       ],
     },
+  },
+  {
+    // The scripts are not type-checked by the lint; the one rule here needs only the syntax.
+    files: ["scripts/**/*.ts"],
+    languageOptions: { parser: tseslint.parser },
+    rules: { "no-restricted-syntax": ["error", ERROR_TEXT] },
   },
   {
     files: ["apps/web/src/**/*.{ts,tsx}", "apps/web/test/**/*.{ts,tsx}"],

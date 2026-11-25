@@ -1,5 +1,6 @@
 // The `nexus` command. Agents report through it; the user (or Nexus itself) also uses it for setup.
 // Every agent-side command validates its input and appends one event to the session's own log.
+import { errorText } from "@nexus/protocol/errors";
 import { readFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import YAML from "yaml";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
@@ -184,7 +185,7 @@ The server (NEXUS_PORT, default 4317):
  */
 function commandLine<const T extends ParseArgsOptionsConfig>(argv: string[], options: T) {
   try { return parseArgs({ args: argv, allowPositionals: true, options }); } catch (e) {
-    throw new UsageError(parseErrorText((e as Error).message));
+    throw new UsageError(parseErrorText(errorText(e)));
   }
 }
 
@@ -271,7 +272,7 @@ function readArgFile(file: string): string {
 }
 /** A recommendation checked against the question's options (its text or number), as the option's text. */
 const recommendation = (options: readonly string[] | undefined, given: string): string => {
-  try { return recommendedOption(options, given); } catch (e) { throw new UsageError((e as Error).message); }
+  try { return recommendedOption(options, given); } catch (e) { throw new UsageError(errorText(e)); }
 };
 /** A value the protocol knows only some of: refused, naming them, when it is none of them. */
 const oneOf = <T extends string>(option: string, values: readonly T[], given: string): T => {
@@ -1088,7 +1089,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (name === undefined) { say(hs.length ? headingsText(hs) : `${normPath(file)} has no headings`); return; }
     if (!name.trim()) throw new UsageError(`no section named after the # (${sectionOptions(hs)})`);
     let picked;
-    try { picked = pickHeadings(hs, name); } catch (e) { throw new UsageError(`${path}: ${(e as Error).message}`); }
+    try { picked = pickHeadings(hs, name); } catch (e) { throw new UsageError(`${path}: ${errorText(e)}`); }
     if (!picked.length) throw new UsageError(`${path} has no section "${name}" (${sectionOptions(hs)})`);
     // A picked heading inside a section already printed (a dated entry under another of its date) is not printed twice.
     let until = 0;
@@ -1128,7 +1129,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     const src = need(args()[2], "<file.yaml|->");
     const text = src === "-" ? stdin() : readArgFile(pathArg(src));
     let definition: unknown;
-    try { definition = YAML.parse(text); } catch (e) { throw new UsageError(`not valid YAML: ${(e as Error).message}`); }
+    try { definition = YAML.parse(text); } catch (e) { throw new UsageError(`not valid YAML: ${errorText(e)}`); }
     const id = (definition as { id?: unknown } | null)?.id;
     if (typeof id !== "string") throw new UsageError("the queue needs an id");
     const e = emit(st, s, { type: "queue.drafted", queue: id, definition });
@@ -1161,7 +1162,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     const st = store(); const s = orchestrator(st);
     if ((o().every === undefined) === (o()["after-queues"] === undefined)) throw new UsageError("give --every \"daily HH:MM\" | \"<mon..sun> HH:MM\" | \"monthly <day> HH:MM\", or --after-queues <n>: one of them");
     const every = o().every;
-    if (every !== undefined) { try { parseEvery(every); } catch (e) { throw new UsageError((e as Error).message); } }
+    if (every !== undefined) { try { parseEvery(every); } catch (e) { throw new UsageError(errorText(e)); } }
     const afterQueues = o()["after-queues"] === undefined ? undefined : Number(o()["after-queues"]);
     if (afterQueues !== undefined && (!Number.isInteger(afterQueues) || afterQueues < 1 || afterQueues > 1000)) throw new UsageError(`--after-queues takes a whole number from 1 to 1000, not ${o()["after-queues"]}`);
     const e = emit(st, s, {
@@ -1289,7 +1290,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     const project = o().project;
     if (project && !stores.has(project)) throw new UsageError(`unknown project ${o().project} (nexus project list shows them)`);
     const states = [...stores].filter(([id]) => !o().project || id === o().project).flatMap(([id, st]) => {
-      try { return [loadProjectState(st)]; } catch (e) { warn(`nexus: project ${id} left out: ${(e as Error).message}`); return []; }
+      try { return [loadProjectState(st)]; } catch (e) { warn(`nexus: project ${id} left out: ${errorText(e)}`); return []; }
     });
     // --reviews: the reviews' quality on three levels (queue RH), instead of the steps by a dimension.
     if (o().reviews) return say(reviewStatsText(reviewStats(states, { project: o().project, since })));
@@ -1298,7 +1299,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       const sources = [...stores].filter(([id]) => !project || id === project).flatMap(([id, st]) =>
         st.queueIds().flatMap((queue) => {
           try { const checks = st.readChecks(queue); return checks ? [{ project: id, queue, checks }] : []; }
-          catch (e) { warn(`nexus: ${id}/${queue}/checks.yaml left out: ${(e as Error).message}`); return []; }
+          catch (e) { warn(`nexus: ${id}/${queue}/checks.yaml left out: ${errorText(e)}`); return []; }
         }));
       return say(flakyText(flakyReport(sources, since), sinceArg));
     }

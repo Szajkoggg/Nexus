@@ -14,6 +14,7 @@
 //
 // Everything lives in a new folder in the system's temporary folder (NEXUS_HOME, the project, the server's log);
 // it is removed at the end unless --keep. Run it beside `npm test` to measure under the full suite.
+import { errorText } from "@nexus/protocol/errors";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -276,7 +277,7 @@ async function main(): Promise<void> {
       const pid = (JSON.parse(readFileSync(f, "utf8")) as { pid?: number }).pid;
       if (pid) { try { process.kill(pid); console.log(`stopped a fake agent left running (pid ${pid})`); } catch { /* gone */ } }
     }
-    if (!o.keep) { await sleep(1000); try { rmSync(home, { recursive: true, force: true }); } catch (err) { console.log(`not removed: ${home} (${(err as Error).message})`); } }
+    if (!o.keep) { await sleep(1000); try { rmSync(home, { recursive: true, force: true }); } catch (err) { console.log(`not removed: ${home} (${errorText(err)})`); } }
     else console.log(`kept: ${home}`);
   }
 }

@@ -17,6 +17,7 @@
 // smoke check or sends no ready signal in time), this server stops it and whatever it started, puts the live worktree
 // back on the commit it came from (reinstalling and rebuilding), takes the port again and starts over on the files,
 // which resumes the held queues. A development checkout is never moved: its server simply goes on.
+import { errorText } from "@nexus/protocol/errors";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -131,7 +132,7 @@ async function npmIn(root: string, ...args: string[]): Promise<void> {
   else await run("npm", args, { cwd: root, windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
 }
 const hashOf = (file: string) => (existsSync(file) ? createHash("sha256").update(readFileSync(file)).digest("hex") : "");
-const firstLine = (e: unknown) => (e as Error).message.split("\n")[0]!;
+const firstLine = (e: unknown) => errorText(e).split("\n")[0]!;
 
 /** Ends a process and everything it started (on Windows its tree; elsewhere its process group: it was detached). */
 async function stopTree(pid: number): Promise<void> {
@@ -303,7 +304,7 @@ export class Lifecycle {
       // Nothing was handed over: this server still runs and owns the files. Only the worktree may have moved.
       const back = await this.restoreWorktree();
       for (const p of this.parts()) p.cancel(); // first: the notices held while draining may go out once it settles
-      this.fail(`${firstLine(err)}${back}`, `${(err as Error).message.slice(0, 2000)}${back}`);
+      this.fail(`${firstLine(err)}${back}`, `${errorText(err).slice(0, 2000)}${back}`);
       return;
     }
     await this.restart();

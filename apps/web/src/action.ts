@@ -1,5 +1,6 @@
 // A user's action and its state, free of React so that it can be tested: whether it is under way and why it failed
 // last. useAction (api.ts) is the React side; it replaces the busy and error state that each button kept by hand.
+import { errorText } from "@nexus/protocol/errors";
 
 export interface ActionState { busy: boolean; error: string | undefined }
 
@@ -23,7 +24,7 @@ export class Action {
     this.set({ busy: true, error: undefined });
     let ok = false, value: T | undefined, error: string | undefined;
     try { value = await work(); ok = true; }
-    catch (e) { error = e instanceof Error ? e.message : String(e); }
+    catch (e) { error = errorText(e); }
     this.running--;
     this.set({ busy: this.running > 0, error });
     if (ok) done?.(value as T);

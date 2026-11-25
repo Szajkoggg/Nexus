@@ -11,6 +11,7 @@
 // the dashboard: "section[aria-label='The plan'] svg path"). --shot also takes the window's picture (fixed viewport, as
 // `nexus help review` asks). A width under 492 px is shown in a frame of that size (scripts/capture/edge.ts).
 // Exit code 0 without faults, 1 with faults, 2 for a wrong command line or a page that did not open.
+import { errorText } from "@nexus/protocol/errors";
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -72,7 +73,7 @@ try {
   if (o.shot) { await browser.shot(o.shot); console.log(`  picture: ${o.shot}`); }
   code = faults.through.length + faults.overlaps.length + faults.cut.length ? 1 : 0;
 } catch (e) {
-  console.error(`layout-faults: ${(e as Error).message}`); code = 2;
+  console.error(`layout-faults: ${errorText(e)}`); code = 2;
 } finally {
   await browser?.close();
   server?.close();

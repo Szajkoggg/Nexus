@@ -2,6 +2,7 @@
 // session, signed in with the user's own ChatGPT login. The app-server is marked experimental: the methods used here
 // (initialize, thread/start, thread/resume, turn/start, turn/steer, turn/interrupt) were checked against Codex CLI
 // 0.167.2 with `codex app-server generate-ts`.
+import { errorText } from "@nexus/protocol/errors";
 import { execFileSync } from "node:child_process";
 import { spawnRuntimeChild, type RuntimeChild } from "./worker-process.ts";
 import { EventEmitter } from "node:events";
@@ -263,7 +264,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
   private startCompact(): void {
     void this.request("thread/compact/start", { threadId: this.threadId }).catch((err) => {
       if (this.exited) return; // its exit is the end, as turn/start's
-      const text = (err as Error).message;
+      const text = errorText(err);
       this.emit("activity", { kind: "error", text: `thread/compact/start: ${text}` });
       this.state = "idle";
       this.emit("turnEnd", { ok: false, text, failure: { kind: "lasting", code: "compactRejected", text: clip(text, 300) } });
@@ -340,7 +341,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       const first = this.queue.shift();
       if (first !== undefined) this.startTurn(first); else this.state = "idle";
     } catch (err) {
-      this.emit("activity", { kind: "error", text: `codex: ${(err as Error).message}` });
+      this.emit("activity", { kind: "error", text: `codex: ${errorText(err)}` });
       this.kill();
     }
   }
@@ -356,8 +357,8 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
     try {
       return await this.request("thread/resume", { threadId, ...common, excludeTurns: true });
     } catch (err) {
-      if (!NO_ROLLOUT.test((err as Error).message)) throw err;
-      this.emit("activity", { kind: "retry", text: `Codex has no saved thread ${threadId} (${clip((err as Error).message, 200)}); started a new thread` });
+      if (!NO_ROLLOUT.test(errorText(err))) throw err;
+      this.emit("activity", { kind: "retry", text: `Codex has no saved thread ${threadId} (${clip(errorText(err), 200)}); started a new thread` });
       return await this.request("thread/start", common);
     }
   }
@@ -383,9 +384,9 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
         // The process exited before it answered: its exit is the end (no turn ends after it, which would mark the
         // record idle again).
         if (this.state === "exited") return;
-        this.emit("activity", { kind: "error", text: `turn/start: ${(err as Error).message}` });
+        this.emit("activity", { kind: "error", text: `turn/start: ${errorText(err)}` });
         this.state = "idle";
-        this.emit("turnEnd", { ok: false, text: (err as Error).message, failure: { kind: "lasting", code: "turnStartRejected", text: clip((err as Error).message, 300) } });
+        this.emit("turnEnd", { ok: false, text: errorText(err), failure: { kind: "lasting", code: "turnStartRejected", text: clip(errorText(err), 300) } });
       });
   }
 

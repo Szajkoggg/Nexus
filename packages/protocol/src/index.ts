@@ -6,6 +6,7 @@ export * from "./actions.ts";
 export * from "./times.ts";
 export * from "./status-rules.ts";
 export * from "./ids.ts";
+export * from "./errors.ts";
 export { resetClock } from "./clock.ts";
 export type * from "./api.ts";
 export * from "./attention.ts";

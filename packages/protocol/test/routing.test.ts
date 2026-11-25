@@ -2,6 +2,7 @@
 // queue, the start's explicit values, the kind's project and global defaults, the project's defaults), a start with
 // --model X and a mechanical step, a kind on another runtime than an explicit start's, the fallback chain from the
 // strongest level, and bad fallback entries refused.
+import { errorText } from "../src/errors.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
@@ -94,7 +95,7 @@ test("the fallback chain comes from the strongest level that names one; the ship
 test("a bad fallback entry is refused: in a draft, and in the settings", () => {
   const store = setup();
   const draft = (extra: Record<string, unknown>, step: Record<string, unknown> = {}) => ({ id: "Q", title: "Q", ...extra, steps: [{ id: "Q1", title: "One", ...step }] });
-  const refused = (def: unknown) => { try { applyDraft(store, def); } catch (e) { return (e as Error).message; } return "accepted"; };
+  const refused = (def: unknown) => { try { applyDraft(store, def); } catch (e) { return errorText(e); } return "accepted"; };
   assert.match(refused(draft({}, { fallback: [{ runtime: "claude", effort: "ultra" }] })), /step Q1: fallback entry 1 \(claude at effort ultra\): Claude Code takes effort/);
   assert.match(refused(draft({ fallback: ["wait", { runtime: "codex" }] })), /queue Q: fallback entry 2 comes after wait/);
   assert.match(refused(draft({}, { fallback: [{ runtime: "gemini" }] })), /fallback/);

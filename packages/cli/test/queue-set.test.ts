@@ -1,5 +1,6 @@
 // `nexus queue set … skipped --continued-in`: the orchestrator's skip that says where the step's work went on goes to
 // the server as `status.set` with `continued_in`, and `nexus status` shows the mark.
+import { errorText } from "@nexus/protocol/errors";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
@@ -35,7 +36,7 @@ function setup() {
         try {
           const message = orchestratorStatusChange(store, { queue: e.queue, step: e.step, to: e.to, reason: e.reason, continued_in: e.continued_in });
           store.appendApplied("o", { at: now(), event: e.id, ok: true, message });
-        } catch (err) { store.appendApplied("o", { at: now(), event: e.id, ok: false, message: (err as Error).message }); }
+        } catch (err) { store.appendApplied("o", { at: now(), event: e.id, ok: false, message: errorText(err) }); }
       }
       await new Promise((r) => setTimeout(r, 50));
     }

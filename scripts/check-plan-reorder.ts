@@ -7,6 +7,7 @@
 //
 // Port 4318 and up, NEXUS_HOME in a new temporary folder (never the live instance or a real project); headless Edge or
 // Chrome (NEXUS_CAPTURE_BROWSER). Exit code 0 when every check holds, 1 when one fails.
+import { errorText } from "@nexus/protocol/errors";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -73,8 +74,8 @@ try {
   await expect("MP first (none before it)", () => after("MP"), "");
   await expect("CL waits for MP's old predecessors", () => after("CL"), "RN:user,RV:user");
 } catch (e) {
-  failures.push((e as Error).message);
-  say(`FAILED: ${(e as Error).message}`);
+  failures.push(errorText(e));
+  say(`FAILED: ${errorText(e)}`);
 } finally {
   await browser?.close();
   await instance.stop();

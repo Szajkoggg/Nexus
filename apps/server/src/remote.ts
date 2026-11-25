@@ -4,6 +4,7 @@
 // Serve: https://<pc>.<tailnet>.ts.net, tailnet members only). A request is local when it comes from a loopback
 // address and carries no proxy headers; anything else must present the access token (once, at /login), which sets a
 // long-lived cookie. The token lives in <NEXUS_HOME>/auth.json; rotating it signs every device out.
+import { errorText } from "@nexus/protocol/errors";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -34,7 +35,7 @@ export function auth(): Auth {
       throw new Error("it holds no token");
     } catch (e) {
       renameRetrying(f, `${f}.corrupt`);
-      console.warn(`nexus: ${normPath(f)} cannot be read (${(e as Error).message}); set aside as auth.json.corrupt, and a new access token made: every device signs in again`);
+      console.warn(`nexus: ${normPath(f)} cannot be read (${errorText(e)}); set aside as auth.json.corrupt, and a new access token made: every device signs in again`);
     }
   }
   return rotateToken();
@@ -226,7 +227,7 @@ export async function push(payload: PushPayload, o: { kind: NotificationKind; en
     catch (err) {
       const code = (err as { statusCode?: number }).statusCode;
       if (code === 404 || code === 410) gone.push(s.endpoint);
-      else console.error(`push to ${new URL(s.endpoint).host}: ${(err as Error).message}`);
+      else console.error(`push to ${new URL(s.endpoint).host}: ${errorText(err)}`);
     }
   }));
   if (gone.length) { const q = pushStore(); q.subscriptions = q.subscriptions.filter((x) => !gone.includes(x.endpoint)); savePush(q); }

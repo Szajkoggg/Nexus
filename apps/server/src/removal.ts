@@ -5,6 +5,7 @@
 //
 // What is deleted is guarded in code: only realpath(<the project's root>)/.nexus, only a folder of its own (never a
 // link or junction), only one holding a project.yaml, and only of a project registered in this server's NEXUS_HOME.
+import { errorText } from "@nexus/protocol/errors";
 import { existsSync, lstatSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -87,7 +88,7 @@ export function removalBlockers(state: ProjectState | undefined, live: LiveParts
 export function nexusDirOf(root: string): { dir: string; refused?: string } {
   let real: string;
   try { real = realpathSync.native(root); }
-  catch (e) { return { dir: normPath(join(root, ".nexus")), refused: `the project's folder cannot be read (${(e as Error).message})` }; }
+  catch (e) { return { dir: normPath(join(root, ".nexus")), refused: `the project's folder cannot be read (${errorText(e)})` }; }
   const dir = join(real, ".nexus");
   const shown = normPath(dir);
   let st;
@@ -95,7 +96,7 @@ export function nexusDirOf(root: string): { dir: string; refused?: string } {
   if (st.isSymbolicLink()) return { dir: shown, refused: ".nexus is a link or junction to another folder: Nexus deletes only a folder of its own" };
   if (!st.isDirectory()) return { dir: shown, refused: ".nexus is not a folder" };
   let realDir: string;
-  try { realDir = realpathSync.native(dir); } catch (e) { return { dir: shown, refused: `.nexus cannot be read (${(e as Error).message})` }; }
+  try { realDir = realpathSync.native(dir); } catch (e) { return { dir: shown, refused: `.nexus cannot be read (${errorText(e)})` }; }
   if (!samePath(realDir, dir)) return { dir: shown, refused: ".nexus leads to another folder: Nexus deletes only a folder of its own" };
   if (!existsSync(join(dir, "project.yaml"))) return { dir: shown, refused: ".nexus holds no project.yaml: it is not Nexus's data" };
   return { dir: shown };

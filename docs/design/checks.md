@@ -210,6 +210,12 @@ rules, and every rule an error (a warning nobody has to fix is noise):
   DZS) are letters of their own, so `"…ZS"` sorts after `"…ZT"`; two monotonic ULIDs of one millisecond came out
   reversed, and a step whose `step.started` sorted after its `step.done` stayed `running` (about 3 % of the step-chat
   seed test's runs). Timestamps (`at`) may keep `localeCompare`: ISO times hold no letter pairs.
+- `no-restricted-syntax` against `(e as Error).message`, also in `scripts/` (there without type information, the only
+  rule run on them): the text of a thrown value is `errorText(e)` (`packages/protocol/src/errors.ts`), an Error's
+  message and anything else as `String(e)`. Found in the code-health survey of 2026-11-24: a thrown string or
+  `undefined` gave the text `undefined`, and the cast and `e instanceof Error ? e.message : String(e)` were two ways
+  of saying the same in 80 places. Where a failure halts a run, the server also logs its stack first with `logError`
+  (`apps/server/src/log-error.ts`), so the one-line reason the user sees can be traced to the line that threw.
 - Unused `eslint-disable` comments are errors, so a suppression cannot outlive its reason.
 
 No `--cache`: ESLint's cache is per file, and with type information a change in one file (a function becoming async)

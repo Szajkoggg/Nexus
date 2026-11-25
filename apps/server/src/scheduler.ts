@@ -2,6 +2,7 @@
 // the rules) and schedules (queues/<id>/start.yaml: start at a time, or when a runtime's usage window resets). The
 // engine owns the runs; the scheduler decides when a planned start comes due and asks the engine to start the queue. Also the long timers both use (ClockTimers): a retry or usage wait
 // of a run, and a schedule's time, armed on a clock tests can move.
+import { errorText } from "@nexus/protocol/errors";
 import {
   ActionError, runGoing, changesOfUser, checkPredecessors, doneForPlan, effortIssue, formatClock, loadProjectState, newId, newPlan, now, openPlan,
   openPlanFile, readUsage, reorderedFollowers,
@@ -479,7 +480,7 @@ export class Scheduler {
       const why = after.length ? areDone(after) : file.at ? "its scheduled time came" : "it was planned to start as soon as it may";
       this.store.appendActivity(run.session, { at: now(), kind: "turn_start", text: `Nexus started queue ${q.id}: ${why}${held ? ` (it waited since ${formatClock(held.since, new Date(t))}: ${held.reason})` : ""}`, queue: q.id });
       return true;
-    } catch (e) { fail((e as Error).message); return false; }
+    } catch (e) { fail(errorText(e)); return false; }
   }
 }
 

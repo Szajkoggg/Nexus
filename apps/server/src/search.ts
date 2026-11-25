@@ -4,6 +4,7 @@
 // logs the model keeps only once opened, are read from their files line by line in chunks (memory stays small however
 // long a log is), a line parsed only when every word occurs in it raw, a file not changed since `since` not read. Only
 // the newest `limit` hits are kept.
+import { errorText } from "@nexus/protocol/errors";
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -50,7 +51,7 @@ export function searchProject(store: ProjectStore, q: SearchQuery): SearchResult
 
   for (const id of store.queueIds()) {
     if (wants("queue")) {
-      try { for (const item of queueItems(store.readQueue(id))) hits.add(item); } catch (e) { console.warn(`nexus: search: ${(e as Error).message}; the queue offers nothing`); }
+      try { for (const item of queueItems(store.readQueue(id))) hits.add(item); } catch (e) { console.warn(`nexus: search: ${errorText(e)}; the queue offers nothing`); }
     }
     const report = join(store.queueDir(id), "report.md");
     if (wants("report") && existsSync(report) && changedSince(report, q.since)) {
@@ -75,7 +76,7 @@ export function searchProject(store: ProjectStore, q: SearchQuery): SearchResult
       const file = join(dir, "chat.jsonl");
       if (!changedSince(file, q.since)) continue;
       let s: SessionFile;
-      try { s = store.readSession(id); } catch (e) { console.warn(`nexus: search: ${(e as Error).message}; its chat is left out`); continue; }
+      try { s = store.readSession(id); } catch (e) { console.warn(`nexus: search: ${errorText(e)}; its chat is left out`); continue; }
       if (s.role !== "orchestrator" && s.role !== "conversation") continue;
       eachLine(file, (line, index) => {
         if (!lineMayMatch(line, q)) return;

@@ -2,6 +2,7 @@
 // summary of the pair the next reply runs on (and, while a reply runs on another pair, that one beside it), opening
 // into an editor with the shared model and effort selectors. One save writes both; the server applies them from the
 // next reply, never cutting the running one (apps/server/src/conversations.ts, update).
+import { errorText } from "@nexus/protocol/errors";
 import { useEffect, useState } from "react";
 import type { ConversationSettings as Settings, ModelInfo } from "@nexus/protocol";
 import { act, enc, useQuery } from "../api.ts";
@@ -46,7 +47,7 @@ export function ModelAndEffort({ project, id, runtime, own, settings, working, o
       onSaved();
     } catch (e) {
       // The saved pair, this draft and the composer's text all stay: the error is shown here, Save can be tried again.
-      setError((e as Error).message);
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }

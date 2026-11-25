@@ -1,4 +1,5 @@
 // Shared user-decision forms. A draft pins its revision and preserves its request ID across an uncertain save.
+import { errorText } from "@nexus/protocol/errors";
 import { useRef, useState, type ReactNode } from "react";
 import type { IdeasResponse } from "@nexus/protocol/ideas";
 import { projectUrl, request } from "../api.ts";
@@ -47,7 +48,7 @@ export function useIdeaSave(project: string, kind: "links" | "statuses", current
       setAcknowledged(true);
       await reloaded(projectUrl(project, "/ideas"));
       onSaved();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(errorText(e)); }
     finally { running.current = false; setBusy(false); }
   };
   return {
@@ -66,7 +67,7 @@ export function useIdeaSave(project: string, kind: "links" | "statuses", current
       try {
         const data = await request<IdeasResponse>(projectUrl(project, "/ideas"));
         setRevision(data[kind].revision); setPending(undefined); setError(undefined); setAcknowledged(false); attempt.current = undefined; reload();
-      } catch (e) { setError(`${t("ideas.refreshFailed")} ${e instanceof Error ? e.message : String(e)}`); }
+      } catch (e) { setError(`${t("ideas.refreshFailed")} ${errorText(e)}`); }
       finally { running.current = false; setBusy(false); }
     },
   };

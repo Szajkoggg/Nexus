@@ -15,6 +15,7 @@
 //
 // Cleanup records durable evidence of a clean, merged tree before removing entries individually, then prunes
 // the registration and runs `git branch -d` (never -D). A retry accepts only an unchanged subset of that tree.
+import { errorText } from "@nexus/protocol/errors";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
@@ -271,7 +272,7 @@ export function mergeBack(store: ProjectStore, queueId: string, serverRoot = ROO
         case "hold": throw new ActionError(`a step is at work in ${d.path} (queue ${d.busy.join(", ")}): merge back once it has ended`, 409);
         case "reintegrate": {
           const text = reintegrate(store, qq, d, "user");
-          try { start?.(queueId); } catch (e) { return `${text}; it starts when it can (${(e as Error).message})`; }
+          try { start?.(queueId); } catch (e) { return `${text}; it starts when it can (${errorText(e)})`; }
           return text;
         }
         case "ff": return fastForward(store, qq, d, "user");
@@ -295,7 +296,7 @@ export function mergeBack(store: ProjectStore, queueId: string, serverRoot = ROO
     if (git(target.path, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]) !== undefined) run(target.path, ["merge", "--abort"]);
     const after = git(target.path, ["rev-parse", "HEAD"]);
     const clean = after === before && !git(target.path, ["status", "--porcelain", "--untracked-files=no"]);
-    throw new ActionError(`the merge of ${branch} into ${base.ref} ${conflicts ? `conflicts in ${conflicts.split(/\r?\n/).join(", ")}` : `failed: ${(e as Error).message.split("\n")[0]}`}; ${clean ? "it was aborted, nothing changed" : "it was aborted, but the worktree is not as it was: look at it"}`, 409);
+    throw new ActionError(`the merge of ${branch} into ${base.ref} ${conflicts ? `conflicts in ${conflicts.split(/\r?\n/).join(", ")}` : `failed: ${errorText(e).split("\n")[0]}`}; ${clean ? "it was aborted, nothing changed" : "it was aborted, but the worktree is not as it was: look at it"}`, 409);
   }
   const sha = run(target.path, ["rev-parse", "HEAD"]);
   const ff = sha === tip;

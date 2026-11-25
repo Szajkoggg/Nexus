@@ -1,6 +1,7 @@
 // Queue templates (docs/protocol/planning.md, "Queue templates"): a queue's YAML with a `template:` header and `params:`, its texts
 // carrying {{name}} placeholders. Three layers, strongest last: shipped with Nexus, the user's global ones, the
 // project's. Parsing, merging the layers and filling are pure; reading the three folders is the last section.
+import { errorText } from "./errors.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -71,7 +72,7 @@ function placeholders(x: unknown, out = new Set<string>()): Set<string> {
  */
 export function parseTemplate(text: string, layer: TemplateLayer, path: string): Template {
   let doc: unknown;
-  try { doc = YAML.parse(text); } catch (e) { throw new TemplateError(`not valid YAML: ${(e as Error).message}`); }
+  try { doc = YAML.parse(text); } catch (e) { throw new TemplateError(`not valid YAML: ${errorText(e)}`); }
   if (!doc || typeof doc !== "object" || Array.isArray(doc)) throw new TemplateError("a template is a YAML mapping");
   const { template, params, id: _id, maintenance, ...queue } = doc as Record<string, unknown>;
   const header = TemplateHeader.safeParse(template);
@@ -219,7 +220,7 @@ export function readTemplateDir(dir: string, layer: TemplateLayer): (Template | 
   return readdirSync(dir).filter((f) => /\.ya?ml$/i.test(f)).sort().map((f) => {
     const path = join(dir, f);
     try { return parseTemplate(readFileSync(path, "utf8"), layer, path); } catch (e) {
-      return { layer, path, problem: (e as Error).message };
+      return { layer, path, problem: errorText(e) };
     }
   });
 }

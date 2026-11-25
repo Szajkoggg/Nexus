@@ -1,5 +1,6 @@
 // What the user does from the dashboard, as writes to a project's files. Run by the Nexus server, which is the
 // writer of queue definitions, notes and inboxes (docs/protocol/files.md, "Rules").
+import { errorText } from "./errors.ts";
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { NEXUS_SESSION, ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type Effort, type StatusChange, type InboxEntry, ReviewLevel, type RunFile, type SessionFile } from "./schemas.ts";
@@ -449,7 +450,7 @@ export function applyDraft(store: ProjectStore, definition: unknown): string {
   // draft is refused rather than written over it, which would lose its approvals and history.
   let old: QueueFile | undefined;
   if (store.hasQueue(draft.id)) {
-    try { old = store.readQueue(draft.id); } catch (e) { throw new ActionError(`${(e as Error).message}; the draft is not written over it: repair the file, or move it away, and draft again`, 409); }
+    try { old = store.readQueue(draft.id); } catch (e) { throw new ActionError(`${errorText(e)}; the draft is not written over it: repair the file, or move it away, and draft again`, 409); }
   }
   const tagged = draftTagIssues(store, draft, old);
   if (tagged.length) throw new ActionError(tagged.join("; "));
@@ -891,7 +892,7 @@ export function updateGlobalSettings(patch: unknown): GlobalSettings {
   try { next = changedGlobal(readGlobalSettings(), patch); }
   catch (e) {
     const issues = (e as { issues?: { path: (string | number)[]; message: string }[] }).issues;
-    throw new ActionError(issues ? issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") : (e as Error).message);
+    throw new ActionError(issues ? issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") : errorText(e));
   }
   const kinds = [...kindIssues(next.kinds), ...helperIssues(next.review_helper)];
   if (kinds.length) throw new ActionError(kinds.join("; "));

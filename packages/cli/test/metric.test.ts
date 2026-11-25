@@ -3,6 +3,7 @@
 // records a value for its step at work, with the HEAD commit; bad input is refused before anything is written; a
 // worker cannot define and an orchestrator cannot record. The server's part is played here by a stand-in that applies
 // the orchestrator's events as the server does (defineMetric, then applied.jsonl).
+import { errorText } from "@nexus/protocol/errors";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -41,7 +42,7 @@ function setup() {
       for (const e of store.readEvents("o").entries) {
         if (e.type !== "metric.defined" || applied.has(e.id)) continue;
         let ok = true; let message: string;
-        try { message = defineMetric(store, e, e.session); } catch (err) { ok = false; message = (err as Error).message; }
+        try { message = defineMetric(store, e, e.session); } catch (err) { ok = false; message = errorText(err); }
         store.appendApplied("o", { at: now(), event: e.id, ok, message });
       }
       await new Promise((r) => setTimeout(r, 50));

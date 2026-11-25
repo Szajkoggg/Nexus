@@ -1,6 +1,7 @@
 // Actions the agents wanted but were refused (sessions/<id>/refusals.jsonl): per step, and per project grouped by
 // kind. From a Claude Code refusal the user can add an allow rule to the project's Nexus settings; Codex refusals are
 // shown only (Nexus does not write Codex's own configuration).
+import { errorText } from "@nexus/protocol/errors";
 import { useMemo, useState } from "react";
 import type { Refusal } from "@nexus/protocol";
 import { groupRefusals, refusalKind, suggestAllowRule } from "@nexus/protocol/refusals";
@@ -111,7 +112,7 @@ function AllowRule({ project, refusal, open, onOpen }: { project: ProjectState; 
       await act(project.project.id, "POST", "/settings/allow-rule", { rule });
       setMsg({ ok: true, text: t("refusals.added", { rule: rule.trim() }) });
       onOpen(false);
-    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
+    } catch (e) { setMsg({ ok: false, text: errorText(e) }); }
     finally { setBusy(false); }
   };
   return (

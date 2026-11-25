@@ -2,6 +2,7 @@
 // approval holds (its hash is the one approved), Nexus makes the queue from the template and starts it through the
 // plan, as an approved queue (its approval marked `standing`). The only writer of .nexus/recurring/<id>.yaml: the
 // orchestrator's `nexus recurring set` arrives here through the server, and so do the user's actions.
+import { errorText } from "@nexus/protocol/errors";
 import {
   ActionError, RECURRING_ID, applyDraft, countStart, countable, countedQueues, everyText, fillTemplate, formatClock, loadProjectState, nextOccurrence, parseEvery, readTemplates,
   resolveRecurring, revisionHash, runQueueId, scheduleText, type MaintenanceMode, type ProjectState, type ProjectStore, type RecurringFile, type Resolved,
@@ -83,7 +84,7 @@ export class Recurrer {
     try {
       every = o.every === undefined ? undefined : everyText(parseEvery(o.every));
       schedule = scheduleText({ every, after_queues: o.after_queues });
-    } catch (e) { throw new ActionError((e as Error).message); }
+    } catch (e) { throw new ActionError(errorText(e)); }
     const resolved = this.resolve({ ...o, every });
     if ("problem" in resolved) throw new ActionError(resolved.problem);
     const old = this.store.readRecurring(o.id);
@@ -253,7 +254,7 @@ export class Recurrer {
       this.deps.plan(queue, { after: [], by: "user", reason: `recurring ${r.id}: ${when} (standing approval of ${r.approval.at})` });
     } catch (e) {
       const made = queue && this.store.queueIds().includes(queue);
-      this.store.writeRecurring({ ...base, ...(made ? { last: { queue: queue!, at, due: iso(due), baseline: base.baseline } } : {}), skipped: { due: iso(due), at, kind: "failed", reason: (e as Error).message } });
+      this.store.writeRecurring({ ...base, ...(made ? { last: { queue: queue!, at, due: iso(due), baseline: base.baseline } } : {}), skipped: { due: iso(due), at, kind: "failed", reason: errorText(e) } });
     }
   }
 }

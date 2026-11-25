@@ -1,5 +1,6 @@
 // The capture tool's pure parts (unit tested in scripts/test/capture.test.ts): the view list, the environment of the
 // development instance it starts, the base commit of a step, and what it reports.
+import { errorText } from "@nexus/protocol/errors";
 import YAML from "yaml";
 import { VIEW_KEY, splitKey } from "@nexus/protocol/pictures";
 
@@ -42,7 +43,7 @@ export interface ViewList {
 /** Parses and checks a view list (YAML or JSON); throws with every problem found, each with where it is. */
 export function parseViews(text: string): ViewList {
   let doc: unknown;
-  try { doc = YAML.parse(text); } catch (e) { throw new Error(`the view list is not valid YAML: ${(e as Error).message}`); }
+  try { doc = YAML.parse(text); } catch (e) { throw new Error(`the view list is not valid YAML: ${errorText(e)}`); }
   const problems: string[] = [];
   const root = (doc ?? {}) as { seed?: unknown; views?: unknown };
   if (typeof doc !== "object" || doc === null || Array.isArray(doc)) throw new Error("the view list is a mapping with `views:` (and optionally `seed:`)");

@@ -9,6 +9,7 @@
 // a step's checks (queue EC, EC3), one grant for the whole set (P2). A full test run outside Nexus (by hand, or an
 // agent against its briefing) holds the machine's full-test lock (scripts/test-lock.ts): while it does, nothing is
 // granted, and the file says what occupies the machine (P11).
+import { errorText } from "@nexus/protocol/errors";
 import { spawn } from "node:child_process";
 import { hostname } from "node:os";
 import { newId, writeCapacity, type CapacityFile, type CapacityRequest } from "@nexus/protocol";
@@ -207,7 +208,7 @@ export class Capacity {
     if (key === this.lastWritten) return;
     this.lastWritten = key;
     try { writeCapacity(v); }
-    catch (err) { console.error(`capacity.yaml not written: ${(err as Error).message}`); }
+    catch (err) { console.error(`capacity.yaml not written: ${errorText(err)}`); }
     this.onChange?.();
   }
 }

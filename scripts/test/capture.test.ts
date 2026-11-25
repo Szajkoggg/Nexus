@@ -1,6 +1,7 @@
 // The capture tool (scripts/capture.ts): the view list format, the cleared environment of its development instance
 // (with decoys for NEXUS_HANDOVER, NEXUS_DIR and NEXUS_SESSION), and a view that fails being reported while the others
 // are taken. No browser here: the views run through a fake one.
+import { errorText } from "@nexus/protocol/errors";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -58,7 +59,7 @@ views:
   - key: tab@492
     route: "#/x"
 `);
-  } catch (e) { message = (e as Error).message; }
+  } catch (e) { message = errorText(e); }
   for (const part of [
     "seed: a path", "views[0].key: a view key", "views[1] (tab@492).route: a dashboard route", "views[1] (tab@492).height: a whole number of pixels",
     "views[1] (tab@492).actions[0]: click:", "views[1] (tab@492).actions[1]: one of", "views[1] (tab@492).actions[2]: type:", "views[1] (tab@492).actions[3]: wait:",

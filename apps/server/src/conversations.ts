@@ -8,6 +8,7 @@
 // Writing only in the notes folder: Claude Code runs in `dontAsk` mode with `Edit(<notes>/**)` as the only write
 // rule (checked: writes elsewhere and shell writes are refused). Codex runs with the notes folder as its working
 // directory in a `workspace-write` sandbox, which reads everywhere and writes only there; it is never asked.
+import { errorText } from "@nexus/protocol/errors";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -96,7 +97,7 @@ export class Conversations {
 
   list() {
     return this.store.sessionIds()
-      .map((id) => { try { return this.store.readSession(id); } catch (e) { console.warn(`nexus: ${(e as Error).message}; left out of the conversations`); return undefined; } })
+      .map((id) => { try { return this.store.readSession(id); } catch (e) { console.warn(`nexus: ${errorText(e)}; left out of the conversations`); return undefined; } })
       .filter((s): s is SessionFile => s?.role === "conversation")
       .map((s) => this.itemOf(s))
       .sort(byConversationOrder);
@@ -106,7 +107,7 @@ export class Conversations {
   item(id: string) {
     if (!this.store.hasSession(id)) return undefined;
     let s: SessionFile;
-    try { s = this.store.readSession(id); } catch (e) { console.warn(`nexus: ${(e as Error).message}; no conversation item`); return undefined; }
+    try { s = this.store.readSession(id); } catch (e) { console.warn(`nexus: ${errorText(e)}; no conversation item`); return undefined; }
     return s.role === "conversation" ? this.itemOf(s) : undefined;
   }
 
@@ -278,7 +279,7 @@ export class Conversations {
   private ideaContextError(s: SessionFile): string | undefined {
     if (!s.about?.idea) return undefined;
     try { ideaContext(this.store, { file: s.about.idea.file, ...(s.about.idea.date ? { date: s.about.idea.date } : {}) }); }
-    catch (e) { return e instanceof Error ? e.message : String(e); }
+    catch (e) { return errorText(e); }
     return undefined;
   }
 
@@ -353,7 +354,7 @@ ${text}`;
       const s = this.session(id);
       for (const w of items) this.put(s, w);
     } catch (e) {
-      this.store.appendChat(id, { at: now(), from: "nexus", kind: "error", text: `Could not go on with the changed settings: ${(e as Error).message}` });
+      this.store.appendChat(id, { at: now(), from: "nexus", kind: "error", text: `Could not go on with the changed settings: ${errorText(e)}` });
     }
   }
 
@@ -399,7 +400,7 @@ ${text}`;
         this.put(s, { text: idea?.text ?? restartedNotice(cut.asked), quote: cut.asked, ...(cut.handoff ? { handoff: true } : {}) });
         if (idea) this.store.writeSession({ ...this.store.readSession(s.id), about: { idea: idea.scope } });
       } catch (e) {
-        this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `Could not go on after the restart: ${(e as Error).message}` });
+        this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `Could not go on after the restart: ${errorText(e)}` });
       }
       this.host.resumed(s.id);
     }
@@ -533,7 +534,7 @@ ${text}`;
               try {
                 this.orchestrator.say(`[From the conversation "${this.session(s.id).title}"]\n\n${summary}`);
                 this.store.appendChat(s.id, { at: now(), from: "nexus", text: "The summary went to the orchestrator's chat." });
-              } catch (e) { this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `Could not hand it over: ${(e as Error).message}` }); }
+              } catch (e) { this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `Could not hand it over: ${errorText(e)}` }); }
             }
           }
           // A hand-over asked during the turn that just ended: the next turn, its instruction, is the hand-over's.

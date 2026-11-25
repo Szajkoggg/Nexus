@@ -3,6 +3,7 @@
 // the query's error instead of being swallowed, a request in flight is shared by every query asking the same, and the
 // live notifications bump only the versions they concern (a change in one project refetches nothing of another's).
 // The live stream's views (docs/design/live.md) hold a reply and apply the changes the server sends after it.
+import { errorText } from "@nexus/protocol/errors";
 import { HttpError, request } from "./http.ts";
 import { SEQ_HEADER, readPosition, type LiveMessage } from "@nexus/protocol/live";
 
@@ -99,7 +100,7 @@ export class Query<T> {
     const seq = ++this.seq;
     this.requests.get(url, version).then(
       (data) => this.settle(url, seq, { data: data as T }),
-      (e: unknown) => this.settle(url, seq, { error: e instanceof Error ? e.message : String(e) }),
+      (e: unknown) => this.settle(url, seq, { error: errorText(e) }),
     );
   }
 
@@ -345,7 +346,7 @@ export class LiveView<T> implements Fed {
       this.changed();
     }, (e: unknown) => {
       if (n !== this.reads) return;
-      this.error = e instanceof Error ? e.message : String(e);
+      this.error = errorText(e);
       this.changed();
     });
   }

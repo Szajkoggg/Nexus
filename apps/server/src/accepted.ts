@@ -11,6 +11,7 @@
 // confirmed (in any queue of the project: a step whose recorded review commit is in it and that made commits of its
 // own): the push is recorded `held`, with what holds it, and is tried again once one of those is confirmed (or sent to
 // a fix: the user has seen it, and the fix is a step reviewed on its own).
+import { errorText } from "@nexus/protocol/errors";
 import { ActionError, loadProjectState, normPath, now, pendingProvisional, type ProjectState, type ProjectStore, type PushFile, type QueueView } from "@nexus/protocol";
 import { checkoutOf, revParse } from "./gitinfo.ts";
 import { PUSH_ENV, PUSH_TIMEOUT_MS, pushFailure, runGit, type GitRunner } from "./deploy.ts";
@@ -85,7 +86,7 @@ export class AcceptedPusher {
 
   private start(q: QueueView, step: string, acceptance: string): void {
     const p = this.pushStep(q, step, acceptance)
-      .catch((err) => this.record(q.id, step, acceptance, undefined, { result: "failed", text: (err as Error).message }))
+      .catch((err) => this.record(q.id, step, acceptance, undefined, { result: "failed", text: errorText(err) }))
       .finally(() => { this.busy.delete(q.id); this.changed(); });
     this.busy.set(q.id, p);
   }

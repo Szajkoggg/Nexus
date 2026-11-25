@@ -14,6 +14,7 @@
 // draws as a trend (docs/protocol/files.md; docs/design/performance.md, "The speed benchmark"); --no-record only prints
 // it. Each configuration lives in a new folder in the system's temporary folder (its own NEXUS_HOME, the tree, the
 // server's log), removed at its end unless --keep. Only the processes this script started are ended, by their own pids.
+import { errorText } from "@nexus/protocol/errors";
 import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
@@ -164,7 +165,7 @@ async function measure(scale: number, tests: boolean): Promise<ServerSpeedConfig
     ws?.close();
     load?.stop();
     await inst?.stop();
-    if (!o.keep) { await sleep(500); try { rmSync(home, { recursive: true, force: true }); } catch (err) { console.log(`  not removed: ${home} (${(err as Error).message})`); } }
+    if (!o.keep) { await sleep(500); try { rmSync(home, { recursive: true, force: true }); } catch (err) { console.log(`  not removed: ${home} (${errorText(err)})`); } }
   }
 }
 

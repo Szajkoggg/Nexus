@@ -1,5 +1,7 @@
 // The Nexus server: reads every registered project's .nexus/ directory, serves the dashboard and its API,
 // and tells connected dashboards when a project's files change. It writes nothing in phase 1.
+import { errorText } from "@nexus/protocol/errors";
+import { logError } from "./log-error.ts";
 import { appendFileSync, createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -85,7 +87,7 @@ process.on("uncaughtException", (err) => {
 // chain (a check, a timer's work) whose failure belongs to one run, not a reason to end every worker with the server.
 // The code handles its chains' failures where they belong (a halted run); this is the backstop that keeps them local.
 process.on("unhandledRejection", (reason) => {
-  console.error(`${new Date().toISOString()} unhandled rejection (the server goes on): ${reason instanceof Error ? reason.stack : String(reason)}`);
+  logError("unhandled rejection (the server goes on)", reason);
 });
 
 // A backstop: a hand-over folder that is not this NEXUS_HOME's is not ours. Refuse it before anything is written or
@@ -137,10 +139,10 @@ function refreshRegistry(): void {
     if (projects.has(p.id)) continue;
     const files = ProjectStore.forRoot(p.root);
     try { if (files.migrateProject()) console.log(`settings of project ${p.id}: migrated to follow the global settings where equal`); }
-    catch (err) { console.error(`settings of project ${p.id}: not migrated: ${(err as Error).message}`); }
+    catch (err) { console.error(`settings of project ${p.id}: not migrated: ${errorText(err)}`); }
     // Steps done before review levels keep the meaning they had (docs/protocol/review.md, "Before review levels").
     try { if (files.markReviewLevels()) console.log(`project ${p.id}: steps done from now on are reviewed by level`); }
-    catch (err) { console.error(`project ${p.id}: review levels not marked: ${(err as Error).message}`); }
+    catch (err) { console.error(`project ${p.id}: review levels not marked: ${errorText(err)}`); }
     // A deploy planned after a step or queue of this project holds the run at that step's end (src/deploy-plan.ts); so
     // does Nexus merging a worktree queue back into the run's checkout (src/merger.ts), until its fast-forward.
     let merger: Merger | undefined;
@@ -189,7 +191,7 @@ function dropProject(e: Entry): { parts: Parameters<typeof stopProject>[0]; clos
  */
 function stateOf(e: Entry): ProjectState | undefined {
   if (e.error) return undefined;
-  try { return e.model.stale() ? perf.measure(`state ${e.id}`, () => e.model.current()) : e.model.current(); } catch (err) { e.error = (err as Error).message; return undefined; }
+  try { return e.model.stale() ? perf.measure(`state ${e.id}`, () => e.model.current()) : e.model.current(); } catch (err) { e.error = errorText(err); return undefined; }
 }
 
 // ---------------------------------------------------------------- change notification
@@ -252,7 +254,7 @@ const live = new LiveStream({
     heads,
   },
 });
-const publish = (id: string) => { if (!projects.has(id)) return; try { live.publish(id); } catch (err) { console.error(`live ${id}: ${(err as Error).message}`); } };
+const publish = (id: string) => { if (!projects.has(id)) return; try { live.publish(id); } catch (err) { console.error(`live ${id}: ${errorText(err)}`); } };
 const pending = new Map<string, NodeJS.Timeout>();
 
 function changed(id: string): void {
@@ -283,7 +285,7 @@ function changed(id: string): void {
       for (const [what, decide] of decisions) {
         const s = stateOf(e);
         if (!s) break;
-        try { perf.measure(`${what} (${id})`, () => decide(s)); } catch (err) { console.error(`${what} in ${id}: ${(err as Error).message}`); }
+        try { perf.measure(`${what} (${id})`, () => decide(s)); } catch (err) { console.error(`${what} in ${id}: ${errorText(err)}`); }
       }
       const s = stateOf(e);
       if (s) watch.check({ id, name: s.project.name }, s.attention);
@@ -597,7 +599,7 @@ function act(handler: (store: ProjectStore, body: Body, p: (name: string) => str
     } catch (err) {
       if (err instanceof ActionError) return c.json({ error: err.message }, err.status as 400);
       console.error(err);
-      return c.json({ error: (err as Error).message }, 500);
+      return c.json({ error: errorText(err) }, 500);
     }
   };
 }
@@ -788,12 +790,12 @@ app.post("/api/projects/:id/remove", async (c) => {
     if (!deleteData) return c.json({ ok: true, result: { removed: e.id, nexus_dir: view.nexus_dir, worktrees: view.worktrees } });
     if (!stopped) return c.json({ error: `project ${e.id} is removed from Nexus, but its agents did not exit in time: its .nexus folder was not deleted` }, 500);
     try { return c.json({ ok: true, result: { removed: e.id, deleted: deleteNexusDir(e.root), worktrees: view.worktrees } }); }
-    catch (err) { return c.json({ error: `project ${e.id} is removed from Nexus, but its .nexus folder could not be deleted: ${(err as Error).message}` }, 500); }
+    catch (err) { return c.json({ error: `project ${e.id} is removed from Nexus, but its .nexus folder could not be deleted: ${errorText(err)}` }, 500); }
   } catch (err) {
     if (err instanceof RemovalBlocked) return c.json({ error: err.message, blockers: err.blockers }, 409);
     if (err instanceof ActionError) return c.json({ error: err.message }, err.status as 400);
     console.error(err);
-    return c.json({ error: (err as Error).message }, 500);
+    return c.json({ error: errorText(err) }, 500);
   }
 });
 
@@ -818,7 +820,7 @@ app.post("/api/projects/:id/uploads", async (c, next) => {
   } catch (err) {
     if (err instanceof UploadError) return c.json({ error: err.message }, err.status);
     console.error(err);
-    return c.json({ error: (err as Error).message }, 500);
+    return c.json({ error: errorText(err) }, 500);
   }
 });
 
@@ -827,11 +829,11 @@ app.get("/api/projects/:id/sessions/:session/chat", (c) => {
   const e = c.get("entry");
   const from = Number(c.req.query("from") ?? 0), to = Number(c.req.query("to") ?? Number.MAX_SAFE_INTEGER);
   if (!Number.isInteger(from) || !Number.isInteger(to)) return c.json({ error: "from and to: whole numbers (lines)" }, 400);
-  try { return c.json({ chat: chatRange(e.store, c.req.param("session"), from, to) }); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
+  try { return c.json({ chat: chatRange(e.store, c.req.param("session"), from, to) }); } catch (err) { return c.json({ error: errorText(err) }, 404); }
 });
 app.get("/api/projects/:id/sessions/:session/chat/search", (c) => {
   const e = c.get("entry");
-  try { return c.json({ lines: searchLines(e.store, c.req.param("session"), c.req.query("q") ?? "", c.req.query("tools") === "1") }); } catch (err) { return c.json({ error: (err as Error).message }, 404); }
+  try { return c.json({ lines: searchLines(e.store, c.req.param("session"), c.req.query("q") ?? "", c.req.query("tools") === "1") }); } catch (err) { return c.json({ error: errorText(err) }, 404); }
 });
 app.post("/api/projects/:id/sessions/:session/pins", act((st, b, p) => ({ pins: pin(st, p("session"), b.line, b.pinned) })));
 
@@ -843,7 +845,7 @@ app.get("/api/projects/:id/search", (c) => {
   } catch (err) {
     if (err instanceof SearchError) return c.json({ error: err.message }, 400);
     console.error(err);
-    return c.json({ error: (err as Error).message }, 500);
+    return c.json({ error: errorText(err) }, 500);
   }
 });
 
@@ -994,7 +996,7 @@ app.post("/api/server/away", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as { until?: unknown };
   if (!("until" in b)) return c.json({ error: "give until: a local time such as 8:00, an ISO 8601 time, or null to turn it off" }, 400);
   let until: string | null;
-  try { until = b.until === null ? null : awayUntil(b.until); } catch (err) { return c.json({ error: (err as Error).message }, 400); }
+  try { until = b.until === null ? null : awayUntil(b.until); } catch (err) { return c.json({ error: errorText(err) }, 400); }
   writeAway(turnAway(readAway(), until));
   armAway();
   awayChanged();
@@ -1042,7 +1044,7 @@ app.post("/api/server/update", async (c) => {
   // `by`: the orchestrator session that ran `nexus server update` (the CLI sends it); it is told the outcome. Only an
   // orchestrator session of a registered project counts; the dashboard sends none.
   try { return c.json(lifecycle.start({ now: b.now === true, ref: typeof b.ref === "string" ? b.ref : undefined, by: askerOf(b.by) })); }
-  catch (e) { return c.json({ error: (e as Error).message }, 409); }
+  catch (e) { return c.json({ error: errorText(e) }, 409); }
 });
 // A planned deploy (src/deploy-plan.ts): `after` { project, queue, step? }, or `at` and `deadline?` (HH:MM,
 // "YYYY-MM-DD HH:MM" in this machine's time, or ISO 8601); `ref?`, `by?` (as for update). One at a time; `nexus
@@ -1061,12 +1063,12 @@ app.post("/api/server/plan", async (c) => {
     const after = a ? { project: a.project as string, queue: a.queue as string, step: (a.step as string | undefined) || undefined } : undefined;
     const r = planner.set({ after, at, deadline, ref: typeof b.ref === "string" ? b.ref : undefined, by: askerOf(b.by) });
     return c.json({ text: r.text, plan: planner.view(), update: lifecycle.status });
-  } catch (e) { return c.json({ error: (e as Error).message }, e instanceof PlanError ? 409 : 500); }
+  } catch (e) { return c.json({ error: errorText(e) }, e instanceof PlanError ? 409 : 500); }
 });
 app.post("/api/server/cancel-plan", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as { by?: { project?: unknown; session?: unknown } };
   try { return c.json({ text: planner.cancel(askerOf(b.by)), update: lifecycle.status }); }
-  catch (e) { return c.json({ error: (e as Error).message }, e instanceof PlanError ? 409 : 500); }
+  catch (e) { return c.json({ error: errorText(e) }, e instanceof PlanError ? 409 : 500); }
 });
 // The user closed the notice of the server's last crash (src/crash.ts): it is not shown again, in any dashboard.
 app.post("/api/server/crash/dismiss", async (c) => {
@@ -1077,7 +1079,7 @@ app.post("/api/server/crash/dismiss", async (c) => {
   return c.json({ crash: crashNotice() });
 });
 app.post("/api/server/cancel", (c) => {
-  try { lifecycle.cancel(); return c.json(lifecycle.status); } catch (e) { return c.json({ error: (e as Error).message }, 409); }
+  try { lifecycle.cancel(); return c.json(lifecycle.status); } catch (e) { return c.json({ error: errorText(e) }, 409); }
 });
 
 // Remote access: shown and changed only from this machine.
@@ -1099,7 +1101,7 @@ app.post("/api/remote/rotate", (c) => {
 app.get("/api/push/key", (c) => c.json({ key: pushKey() }));
 app.post("/api/push/subscribe", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as { subscription?: unknown; label?: unknown; timezone?: unknown };
-  try { subscribe(b.subscription, b.label, b.timezone); return c.json({ ok: true }); } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+  try { subscribe(b.subscription, b.label, b.timezone); return c.json({ ok: true }); } catch (e) { return c.json({ error: errorText(e) }, 400); }
 });
 // A device's notification settings (@nexus/protocol notify.ts), by its subscription's endpoint: read, and replaced.
 app.get("/api/push/settings", (c) => {
@@ -1109,7 +1111,7 @@ app.get("/api/push/settings", (c) => {
 app.put("/api/push/settings", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as { endpoint?: unknown; settings?: unknown };
   try { return c.json({ settings: setDeviceNotify(b.endpoint, b.settings) }); }
-  catch (e) { return c.json({ error: (e as Error).message }, e instanceof NotSubscribed ? 404 : 400); }
+  catch (e) { return c.json({ error: errorText(e) }, e instanceof NotSubscribed ? 404 : 400); }
 });
 app.post("/api/push/unsubscribe", async (c) => {
   const b = (await c.req.json().catch(() => ({}))) as { endpoint?: unknown };
@@ -1147,7 +1149,7 @@ app.get("/api/projects/:id/conversations/:cid", (c) => {
     const view = e.conversations.view(c.req.param("cid"));
     live.opened(e.id, view.session.id, "chat");
     return c.json(view);
-  } catch (err) { return c.json({ error: (err as Error).message }, 404); }
+  } catch (err) { return c.json({ error: errorText(err) }, 404); }
 });
 app.post("/api/projects/:id/conversations", act((_st, b, _p, e) => e.conversations.create(b)));
 // The step's latest conversation that is not archived ("Chat about this" opens it, or starts one when there is none).

@@ -13,7 +13,7 @@ import {
   ActionError, INTEGRATION_CONDITION, NEXUS_SESSION, ProjectStore, USER_SESSION, acceptedByNexus, ensureNexusSession, fileList, ensureUserSession, lastDone, stepChecks, liftByContinue, loadProjectState, openPlanFile, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
   RETRY_LIMIT, START_KEYS, chooseRoute, contextBeyond, effortIssue, formatClock, kindDefaults, overThreshold, routeStep, runStart, type Effort, type Routed, type ProjectFile, type StartValues, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView, type PlanBy,
-  addNote,
+  addNote, errorText,
 } from "@nexus/protocol";
 import { reachable, type TurnFailure } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
@@ -32,6 +32,7 @@ import { StaticReminder } from "./static-reminder.ts";
 import { gitBranch, recordSetup, runSetup, setupPending, worktreeFor } from "./worktree.ts";
 import { closingContext } from "./closing.ts";
 import { perf } from "./perf.ts";
+import { logError } from "./log-error.ts";
 import { integrationContext, mergeBase, mergeConflicts, mergedText, pullBase, pullBefore, recoverPull, type IntegrationContext } from "./integration.ts";
 import { Coordinator, bringsBack, refusalText, waitingText, type Member } from "./coordinator.ts";
 import type { Capacity } from "./capacity.ts";
@@ -456,7 +457,7 @@ export class Engine implements Member {
       const before = JSON.stringify(run);
       void cleanup.then(() => {
         if (this.stopped || JSON.stringify(this.store.readRun(queueId)) !== before) return;
-        try { this.resume(queueId, why, explicit); } catch (error) { this.halt(queueId, String(error)); }
+        try { this.resume(queueId, why, explicit); } catch (error) { logError(`queue ${queueId}: resume`, error); this.halt(queueId, String(error)); }
       }, () => {});
       return;
     }
@@ -559,7 +560,7 @@ export class Engine implements Member {
   releaseHold(queueId: string, reason: string): void {
     const run = this.store.readRun(queueId);
     if (run?.state !== "paused" || !run.resume_after_restart || this.draining) return;
-    try { this.resumeByItself(queueId); } catch (e) { this.halt(queueId, `could not go on after ${reason}: ${(e as Error).message}`); }
+    try { this.resumeByItself(queueId); } catch (e) { logError(`queue ${queueId}: going on after ${reason}`, e); this.halt(queueId, `could not go on after ${reason}: ${errorText(e)}`); }
   }
 
   /** No agent of this project is in the middle of a turn, and none of its checks runs. */
@@ -583,7 +584,7 @@ export class Engine implements Member {
       if (run?.state === "approval_wait") { if (this.queue(loadProjectState(this.store), id).approved) this.continueApproved(id); continue; }
       if (!run?.resume_after_restart) continue;
       if (run.state === "pausing") this.writeRun(id, toUnheld(run));
-      else if (run.state === "paused") { try { this.resumeByItself(id); } catch (e) { this.halt(id, (e as Error).message); } }
+      else if (run.state === "paused") { try { this.resumeByItself(id); } catch (e) { logError(`queue ${id}: resuming a paused run`, e); this.halt(id, errorText(e)); } }
     }
     this.checkStarts();
   }
@@ -705,7 +706,7 @@ export class Engine implements Member {
   /** A run waiting for an approval that came goes on (not while an update drains: the restart or cancelDrain does it). */
   private continueApproved(queueId: string): void {
     if (this.stopped || this.draining) return;
-    try { this.resumeByItself(queueId); } catch (e) { this.halt(queueId, `could not go on after the approval: ${(e as Error).message}`); }
+    try { this.resumeByItself(queueId); } catch (e) { logError(`queue ${queueId}: going on after the approval`, e); this.halt(queueId, `could not go on after the approval: ${errorText(e)}`); }
   }
 
   // ---------------------------------------------------------------- the plan and schedules (src/scheduler.ts)
@@ -814,7 +815,7 @@ export class Engine implements Member {
     if (this.busy.has(queueId)) { setTimeout(() => this.advance(queueId), 50); return; }
     this.busy.add(queueId);
     try { this.advanceUnlocked(queueId, given); }
-    catch (err) { this.halt(queueId, `engine error: ${(err as Error).message}`); }
+    catch (err) { logError(`queue ${queueId}: engine advance`, err); this.halt(queueId, `engine error: ${errorText(err)}`); }
     finally { this.busy.delete(queueId); }
   }
 
@@ -1867,7 +1868,7 @@ export class Engine implements Member {
           this.clearRestartKill(session.id);
           if (!this.stopped) {
             try { this.ensureProcess(this.store.readSession(session.id)); }
-            catch (e) { for (const q of runsOf()) this.halt(q, `could not restart the session: ${(e as Error).message}`); }
+            catch (e) { logError(`session ${session.id}: restart`, e); for (const q of runsOf()) this.halt(q, `could not restart the session: ${errorText(e)}`); }
             for (const q of runsOf()) this.advance(q);
           }
           this.changed();
@@ -1940,7 +1941,7 @@ export class Engine implements Member {
       const run = this.store.readRun(queueId);
       if (this.stopped || this.draining || (run?.state !== "usage_wait" && run?.state !== "retry_wait")) return;
       const why = run.state === "retry_wait" ? `the last turn failed: ${run.reason ?? "a passing failure"}; this is the retry` : undefined;
-      try { this.resumeByItself(queueId, why); } catch (e) { this.halt(queueId, `could not go on: ${(e as Error).message}`); }
+      try { this.resumeByItself(queueId, why); } catch (e) { logError(`queue ${queueId}: going on`, e); this.halt(queueId, `could not go on: ${errorText(e)}`); }
       this.changed();
     });
   }
@@ -1978,7 +1979,7 @@ export class Engine implements Member {
           this.timers.delete(`recover:${q}`);
           const r = this.store.readRun(q);
           if (!r?.resume_after_restart) return;
-          try { this.resumeByItself(q); } catch (e) { this.halt(q, `could not resume after the update: ${(e as Error).message}`); }
+          try { this.resumeByItself(q); } catch (e) { logError(`queue ${q}: resuming after the update`, e); this.halt(q, `could not resume after the update: ${errorText(e)}`); }
           this.changed();
         }, this.startupMs));
       } else if (run && ["running", "pausing"].includes(run.state)) {

@@ -1,5 +1,6 @@
 // Reading and writing a project's .nexus/ directory and the Nexus registry.
 // Rules (docs/protocol/files.md, "Rules"): one writer per file, JSONL is append-only, YAML is replaced atomically.
+import { errorText } from "./errors.ts";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
@@ -193,7 +194,7 @@ class UnreadableFileError extends Error {
   /** Its content is at fault (not a refusal of the system, such as a file another process holds). */
   readonly content: boolean;
   constructor(file: string, cause: unknown) {
-    super(`${normPath(file)} cannot be read: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    super(`${normPath(file)} cannot be read: ${errorText(cause)}`, { cause });
     this.name = "UnreadableFileError";
     this.file = normPath(file);
     this.content = typeof (cause as { syscall?: unknown } | undefined)?.syscall !== "string";
@@ -301,7 +302,7 @@ export function parseJsonlLines<S extends z.ZodType>(file: string, complete: str
       if (r.success) { out.entries.push(r.data); out.lines.push(i); }
       else out.errors.push(`${file}:${i + 1}: ${r.error.issues.map((x) => `${x.path.join(".")} ${x.message}`).join("; ")}`);
     } catch (e) {
-      out.errors.push(`${file}:${i + 1}: ${(e as Error).message}`);
+      out.errors.push(`${file}:${i + 1}: ${errorText(e)}`);
     }
   });
   return lines.length;
@@ -489,7 +490,7 @@ export class ProjectStore {
         try {
           const { meta, body } = this.reader.parsed(file, parseFrontMatter);
           notes.push({ ...NoteMeta.parse(meta), queue: queueId, body });
-        } catch (e) { errors.push(`${file}: ${(e as Error).message}`); }
+        } catch (e) { errors.push(`${file}: ${errorText(e)}`); }
       }
     }
     return { notes: notes.sort((a, b) => a.at.localeCompare(b.at)), errors };

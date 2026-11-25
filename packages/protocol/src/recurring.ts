@@ -1,6 +1,7 @@
 // Recurring queues (docs/protocol/planning.md, "Recurring queues"): a template with its parameters and a schedule, run at each time
 // while the user's standing approval holds. Pure: the schedule's forms and its next time, the standing approval's hash,
 // a run's queue id, and what state a recurring is in. The server (apps/server/src/recurring.ts) acts on them.
+import { errorText } from "./errors.ts";
 import { createHash } from "node:crypto";
 import type { RecurringFile } from "./schemas.ts";
 import { fillTemplate, unusableTemplate, type MergedTemplates, type Template } from "./templates.ts";
@@ -104,7 +105,7 @@ export function resolveRecurring(r: Pick<RecurringFile, "id" | "template" | "par
     scheduleText(r);
     const queue = fillTemplate(t, r.params, r.id, { maintenance: r.maintenance });
     return { template: t, queue, hash: recurringHash(queue, r) };
-  } catch (e) { return { problem: (e as Error).message }; }
+  } catch (e) { return { problem: errorText(e) }; }
 }
 
 /**

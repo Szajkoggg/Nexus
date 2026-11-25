@@ -2,6 +2,7 @@
 // templates of the three layers, and a draft from one written into .nexus/drafts/, which the orchestrator then uploads
 // with `nexus queue draft <file>` as any other. The server's part of the upload is played here by a stand-in that
 // applies the orchestrator's queue.drafted events as the server does (applyDraft, then applied.jsonl).
+import { errorText } from "@nexus/protocol/errors";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -47,7 +48,7 @@ function setup() {
       for (const e of store.readEvents("o").entries) {
         if (e.type !== "queue.drafted" || applied.has(e.id)) continue;
         let ok = true; let message: string;
-        try { message = applyDraft(store, e.definition); } catch (err) { ok = false; message = (err as Error).message; }
+        try { message = applyDraft(store, e.definition); } catch (err) { ok = false; message = errorText(err); }
         store.appendApplied("o", { at: now(), event: e.id, ok, message });
       }
       await new Promise((r) => setTimeout(r, 50));

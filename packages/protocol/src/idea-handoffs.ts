@@ -1,4 +1,5 @@
 // One server writer. Save intent before delivery, and reuse its immutable payload/ID after failure or restart.
+import { errorText } from "./errors.ts";
 import { z } from "zod";
 import { ActionError } from "./actions.ts";
 import { previewIdeaHandoff } from "./idea-context.ts";
@@ -14,7 +15,7 @@ function attempt(store: ProjectStore, record: IdeaHandoff, deliver: Deliver): Id
   const at = now();
   let next: IdeaHandoff;
   try { next = { ...record, state: "delivered", delivery: deliver(record.id, record.payload), attempts: [...record.attempts, { at }] }; }
-  catch (e) { next = { ...record, state: "failed", attempts: [...record.attempts, { at, error: e instanceof Error ? e.message : String(e) }] }; }
+  catch (e) { next = { ...record, state: "failed", attempts: [...record.attempts, { at, error: errorText(e) }] }; }
   const file = store.readIdeaHandoffs();
   store.writeIdeaHandoffs({ ...file, records: file.records.map((r) => r.id === next.id ? next : r) });
   return next;

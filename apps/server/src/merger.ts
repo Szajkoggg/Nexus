@@ -33,6 +33,7 @@
 // waits, and the worktree is clean, untracked files included. One that is not clean stays, and the user is told what is
 // left (git.yaml `cleanup.waiting`, the waiting list's "cleanup" item); Nexus does not try again, the user's Clean up
 // does. Never with --force.
+import { errorText } from "@nexus/protocol/errors";
 import { existsSync } from "node:fs";
 import {
   hasOwnWorktree, mayIntegrate, mayMergeBack, normPath, now, pendingProvisional, stepClosed, runGoing, runOnTrack, trainBase, trainPlace, trainText, trainsOf,
@@ -278,7 +279,7 @@ export class Merger {
     }
     if (!this.processesEnded(q)) return;
     try { this.tryCleanUp(q.id); }
-    catch (e) { this.wait(q, `queue ${q.id} is merged back, but its cleanup waits: ${(e as Error).message}`); }
+    catch (e) { this.wait(q, `queue ${q.id} is merged back, but its cleanup waits: ${errorText(e)}`); }
   }
 
   /**
@@ -300,7 +301,7 @@ export class Merger {
       waiting = { reason: `survey run ${q.id} is done, but its worktree could not be cleaned up: ${firstLine(e)}`, since: now() };
       // Keep the useful status listing for an ordinary dirty tree, but never replace a proof refusal with status
       // from a partially removed tree (or with another unreadable-status error).
-      if (existsSync(path) && !this.store.readGit(q.id)?.cleanup_proof && (e as Error).message.includes("has uncommitted changes (")) {
+      if (existsSync(path) && !this.store.readGit(q.id)?.cleanup_proof && errorText(e).includes("has uncommitted changes (")) {
         try {
           const left = worktreeLeft(path);
           if (left.count) {
@@ -370,4 +371,4 @@ type CleanupWaiting = NonNullable<NonNullable<QueueView["git"]>["cleanup"]>["wai
  */
 const ownSurvey = (q: QueueView) => q.maintenance === "survey" && hasOwnWorktree(q);
 
-const firstLine = (e: unknown) => (e as Error).message.split("\n")[0]!;
+const firstLine = (e: unknown) => errorText(e).split("\n")[0]!;

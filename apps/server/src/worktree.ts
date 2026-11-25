@@ -1,6 +1,7 @@
 // A queue's working directory: the project's checkout, a path the queue names, or (`worktree: auto`) a git worktree
 // with a branch of its own that Nexus creates beside the checkout when the queue first starts, and the project's worktree
 // setup command, run once in each worktree Nexus makes.
+import { errorText } from "@nexus/protocol/errors";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -42,7 +43,7 @@ export function worktreeFor(store: ProjectStore, state: ProjectState, q: QueueVi
     // What a new branch is made from, for its ahead/behind on the dashboard (before the worktree moves anything).
     if (!exists) recordBase(store, q, root);
     try { perf.measure(gitLabel(args), () => execFileSync("git", args, { cwd: root, stdio: ["ignore", "pipe", "pipe"] })); }
-    catch (e) { throw new ActionError(`could not create the worktree: ${(e as { stderr?: Buffer }).stderr?.toString().trim() || (e as Error).message}`, 500); }
+    catch (e) { throw new ActionError(`could not create the worktree: ${(e as { stderr?: Buffer }).stderr?.toString().trim() || errorText(e)}`, 500); }
     // A new worktree gets the project's setup command once, before its first step (the engine runs it: setupPending).
     const command = state.project.defaults.worktree_setup?.trim();
     if (command) patchGit(store, q.id, { setup: { command, at: now() } });
@@ -138,7 +139,7 @@ export function runSetup(command: string, cwd: string, o: { limitMs?: number; st
     const keep = (b: Buffer) => { out = (out + b.toString()).slice(-OUTPUT_TAIL * 2); };
     let child: ChildProcess;
     try { child = spawn(command, { cwd, shell: true, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }); }
-    catch (e) { return resolve(`it could not start: ${(e as Error).message}`); }
+    catch (e) { return resolve(`it could not start: ${errorText(e)}`); }
     o.started?.(child);
     child.stdout?.on("data", keep);
     child.stderr?.on("data", keep);

@@ -1,4 +1,5 @@
 // Chats: the project's orchestrator, and conversations with a thinking partner.
+import { errorText } from "@nexus/protocol/errors";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ChatEntry, ConversationSettings, RuntimeFile, SessionFile, SessionView } from "@nexus/protocol";
 import type { NumberedEntry } from "@nexus/protocol/chat";
@@ -888,7 +889,7 @@ function NewConversation({ project, defaultRuntime, onBack, onCreated }: {
   const create = async () => {
     setError(undefined);
     try { onCreated(await newConversation(project, { title, runtime, model: model || undefined, effort: effort || undefined })); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { setError(errorText(e)); }
   };
   return (
     <div className="flex min-w-0 flex-1 flex-col">

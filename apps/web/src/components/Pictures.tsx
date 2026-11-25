@@ -2,6 +2,7 @@
 // chosen with the attach button is checked here (its first bytes and its size), uploaded at once, and shown as a
 // thumbnail above the box; sending puts each picture's path on its own line after the text. The attached paths are
 // kept beside the draft, so they survive a reload like the text.
+import { errorText } from "@nexus/protocol/errors";
 import { useEffect, useRef, useState } from "react";
 import { HttpError, fileUrl, uploadPicture } from "../api.ts";
 import { readDraft, writeDraft } from "../drafts.ts";
@@ -68,7 +69,7 @@ export function usePictures(project: string, draft: string): Pictures {
       update((all) => all.filter((i) => i.id !== id), forKey);
       URL.revokeObjectURL(url);
       const status = e instanceof HttpError ? e.status : 0;
-      setError(status === 413 || status === 415 ? t("chat.pictureRefused") : t("chat.pictureFailed", { reason: (e as Error).message }));
+      setError(status === 413 || status === 415 ? t("chat.pictureRefused") : t("chat.pictureFailed", { reason: errorText(e) }));
     }
   };
   return {

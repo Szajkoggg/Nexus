@@ -1,6 +1,7 @@
 // Step tags (tags.ts; docs/protocol/stats.md, "Tags"): inheritance from the queue, the check of a draft against Nexus's lists and
 // the project's, a project activity usable only once the user accepted it, one kind per step, renames read through,
 // the hash of an approved queue without tags unchanged, and the tags in a TurnRecord.
+import { errorText } from "../src/errors.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -21,7 +22,7 @@ function setup() {
 const step = (id: string, extra: Record<string, unknown> = {}) => ({ id, title: `Step ${id}`, goal: "Do it.", ...extra });
 const draft = (extra: Record<string, unknown>, steps: Record<string, unknown>[]) => ({ id: "Q", title: "Queue", ...extra, steps });
 const refusal = (store: ProjectStore, def: unknown): string => {
-  try { applyDraft(store, def); } catch (e) { return (e as Error).message; }
+  try { applyDraft(store, def); } catch (e) { return errorText(e); }
   assert.fail("the draft was accepted");
 };
 
