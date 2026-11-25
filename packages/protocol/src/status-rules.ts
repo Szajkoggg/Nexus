@@ -26,6 +26,9 @@ const CHECKOUT_RUN_STATES: readonly RunState[] = [...HOLDING_RUN_STATES, "paused
 /** Run states that count toward the limit on queues running at once (a queue waiting for a review or an answer does not). */
 const COUNTED_RUN_STATES: readonly RunState[] = ["running", "pausing"];
 
+/** Run states in which the engine drives the run's steps: running, or pausing after the step at work. */
+const ACTIVE_RUN_STATES: readonly RunState[] = ["running", "pausing"];
+
 /** The run's states that mean it is not going (it may be resumed later). */
 const ENDED_RUN_STATES: readonly RunState[] = ["finished", "halted", "paused"];
 
@@ -38,8 +41,21 @@ export const runHoldsCheckout = (run: RunLike): boolean => !!run && CHECKOUT_RUN
  * the limit (`held`), which waits for a place.
  */
 export const runCounted = (run: RunLike): boolean => !!run && COUNTED_RUN_STATES.includes(run.state as RunState) && !run.held;
+/**
+ * The run is at work: running, or pausing (ACTIVE_RUN_STATES), held at the limit or not. Unlike runGoing, not a run
+ * waiting for usage, a retry or an approval: the engine advances only an active run.
+ */
+export const runActive = (run: RunLike): boolean => !!run && ACTIVE_RUN_STATES.includes(run.state as RunState);
 /** The run is not going: finished, halted or paused (ENDED_RUN_STATES). */
 export const runEnded = (run: RunLike): boolean => !!run && ENDED_RUN_STATES.includes(run.state as RunState);
+
+/**
+ * Step statuses that mean the step reported its outcome and was taken up: in its review or its checks, done, skipped,
+ * or rejected. A step in one of them is not run again when its run resumes, and its worker's exit is no failure.
+ */
+export const REPORTED_STEP: ReadonlySet<StepStatus> = new Set<StepStatus>(["review", "checking", "done", "skipped", "rejected"]);
+/** The step reported its outcome and was taken up (REPORTED_STEP). */
+export const stepReported = (s: Pick<StepLike, "status">): boolean => REPORTED_STEP.has(s.status as StepStatus);
 
 /** A step (its status one of StepStatus), as each part holds it; the dashboard's helpers hold the status as plain text. */
 type StepLike = { status: StepStatus | (string & {}); review_with?: string };

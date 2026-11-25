@@ -175,6 +175,14 @@ since the dashboard's pure helpers hold it so. The server's replies the dashboar
 `@nexus/protocol/api` (types only); the first typecheck with it found the dashboard's copy of "what a stopped step left"
 missing the commits' `foreign` flag.
 
+Queue CHB added two more: `runActive` (running or pausing: the run the engine advances, spelled out before in the
+engine, the merger, the stop-work check, the digest, the train and an action) and `REPORTED_STEP` / `stepReported`
+(in its review or checks, done, skipped or rejected: a step not run again at a resume, whose worker's exit is no
+failure; the engine had it twice, in two orders). Finding a queue or a step in a derived state is `queueView` /
+`stepView` (`packages/protocol/src/actions.ts`): a 404 `ActionError` when it is not there (the derivation leaves out a
+queue whose files cannot be read, with the state's warning in the refusal), where `find(...)!` gave a `TypeError`;
+`findStep` is the lookup that may find nothing (a conversation about a removed step).
+
 ## The cost of rebuilding state (queue RX5)
 
 Measured on 2026-11-15 on a copy of Nexus's own `.nexus` (70 queues, 214 steps, 55 sessions, 2,457 events, 13,735

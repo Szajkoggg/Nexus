@@ -13,9 +13,9 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, Effort, ProjectStore, type ConversationSettings, type ConversationWeb, type SettingSource, effortIssue, ideaContext, ideaHash, languageName, loadProjectState, newId, normPath, now, type SessionFile,
+  ActionError, Effort, ProjectStore, findStep, type ConversationSettings, type ConversationWeb, type SettingSource, effortIssue, ideaContext, ideaHash, languageName, loadProjectState, newId, normPath, now, type SessionFile,
 } from "@nexus/protocol";
-import { findStep, sinceThen, stepSeed } from "./step-seed.ts";
+import { sinceThen, stepSeed } from "./step-seed.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import { COMPACTS } from "./agent.ts";
 import type { Orchestrator } from "./orchestrator.ts";

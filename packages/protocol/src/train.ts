@@ -8,6 +8,7 @@
 import type { ProjectFile } from "./schemas.ts";
 import { notMergedBack } from "./plan.ts";
 import { compareIds } from "./ids.ts";
+import { runActive } from "./status-rules.ts";
 import { pendingProvisional, stepClosed, type QueueView } from "./state.ts";
 
 type TrainQueue = Pick<QueueView, "id" | "status" | "steps" | "run" | "git" | "rejection">;
@@ -31,7 +32,7 @@ export const trainBase = (q: Pick<QueueView, "git">): string => q.git?.base?.ref
  * (paused with resume_after_restart: held for the merge train, or for a merge back).
  */
 export const runOnTrack = (r: QueueView["run"]): boolean =>
-  !!r && (r.state === "running" || r.state === "pausing" || (r.state === "paused" && !!r.resume_after_restart));
+  !!r && (runActive(r) || (r.state === "paused" && !!r.resume_after_restart));
 
 /** When a queue got to its integration step: the latest end of its other steps. */
 function readyAt(q: TrainQueue, integ: QueueView["steps"][number]): string {

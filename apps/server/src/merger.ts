@@ -34,6 +34,7 @@
 // left (git.yaml `cleanup.waiting`, the waiting list's "cleanup" item); Nexus does not try again, the user's Clean up
 // does. Never with --force.
 import { errorText } from "@nexus/protocol/errors";
+import { runActive } from "@nexus/protocol/status-rules";
 import { existsSync } from "node:fs";
 import {
   hasOwnWorktree, mayIntegrate, mayMergeBack, normPath, now, pendingProvisional, stepClosed, runGoing, runOnTrack, trainBase, trainPlace, trainText, trainsOf,
@@ -74,7 +75,7 @@ export interface MergerOptions {
 const POLL_MS = 30_000;
 
 /** A run that is at work now (not waiting for a slot, the usage window, a retry or an approval). */
-const going = (q: QueueView) => q.run?.state === "running" || q.run?.state === "pausing";
+const going = (q: QueueView) => runActive(q.run);
 
 export class Merger {
   /** Checkouts (normalised, lower case) Nexus holds for a merge back, with the queue it is for. */

@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { NEXUS_SESSION, ProjectFile, QueueFile, USER_SESSION, type GlobalSettings, effortIssue, type Effort, type StatusChange, type InboxEntry, ReviewLevel, type RunFile, type SessionFile } from "./schemas.ts";
 import { ProjectStore, wrote, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
 import { OVERRIDABLE, changedGlobal, settingKey } from "./settings.ts";
-import { reviewedByOrchestrator, runGoing } from "./status-rules.ts";
-import { commentTarget, isApproved, loadProjectState, pendingProvisional, type ProjectState, type QueueView } from "./state.ts";
+import { reviewedByOrchestrator, runActive, runGoing } from "./status-rules.ts";
+import { commentTarget, isApproved, loadProjectState, pendingProvisional, type ProjectState, type QueueView, type StepView } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { stepChecks } from "./steps.ts";
@@ -34,6 +34,31 @@ function stepOf(store: ProjectStore, queue: string, step: string): QueueFile {
   const q = queueOf(store, queue);
   if (!stepDefs(q).some((s) => s.id === step)) throw new ActionError(`queue ${queue} has no step ${step}`, 404);
   return q;
+}
+
+/** The queue's and the step's views in a derived state; undefined when either is not there. */
+export function findStep(state: ProjectState, queue: string, step: string): { q: QueueView; st: StepView } | undefined {
+  const q = state.queues.find((x) => x.id === queue);
+  const st = q?.steps.find((x) => x.id === step);
+  return q && st ? { q, st } : undefined;
+}
+
+/**
+ * The queue's view in a derived state: unknown (404) when it is not there. The derivation leaves out a queue whose files
+ * cannot be read: the refusal then gives the state's warning about it.
+ */
+export function queueView(state: ProjectState, queue: string): QueueView {
+  const q = state.queues.find((x) => x.id === queue);
+  if (q) return q;
+  const why = state.warnings.find((w) => w.startsWith(`queue ${queue}: `));
+  throw new ActionError(`unknown queue ${queue}${why ? ` (${why})` : ""}`, 404);
+}
+
+/** The step's view in a derived state: unknown (404) when its queue or the step is not there. */
+export function stepView(state: ProjectState, queue: string, step: string): StepView {
+  const st = queueView(state, queue).steps.find((x) => x.id === step);
+  if (!st) throw new ActionError(`queue ${queue} has no step ${step}`, 404);
+  return st;
 }
 
 const nonEmpty = (text: unknown, what: string): string => {
@@ -119,7 +144,7 @@ export function approveQueue(store: ProjectStore, queue: string, words?: unknown
   const approvals = [...q.approvals, { revision: q.revision, at, words: w, hash }];
   if (view?.status === "stopped") {
     const run = store.readRun(queue);
-    if (run && ["running", "pausing"].includes(run.state)) throw new ActionError("the queue's run is still going; stop it first", 409);
+    if (runActive(run)) throw new ActionError("the queue's run is still going; stop it first", 409);
     const lift = { at, kind: "lift" as const, by: "user_approval" as const, from: "stopped", to: "approved", reason: view.status_reason, revision: q.revision };
     // After the lift (the same time; changes apply in their order), as at Continue: the user's skip of the closing step.
     const skip: StatusChange[] = closing ? [{
@@ -265,8 +290,9 @@ export function routeAnswers(store: ProjectStore, state: ProjectState = loadProj
 /** The user's review picture of a step, by its path; refused when the step has no such picture. */
 function pictureOf(store: ProjectStore, queue: string, step: string, path: unknown) {
   stepOf(store, queue, step);
-  const q = loadProjectState(store).queues.find((x) => x.id === queue)!;
-  const st = q.steps.find((s) => s.id === step)!;
+  const state = loadProjectState(store);
+  const q = queueView(state, queue);
+  const st = stepView(state, queue, step);
   const item = typeof path === "string" ? st.review_items.find((r) => r.path === path) : undefined;
   if (!item) throw new ActionError(`step ${queue}/${step} has no review picture ${String(path)}`, 404);
   return { q, st, item, path: path as string };
@@ -334,7 +360,7 @@ export function sendBack(store: ProjectStore, req: { queue: string; step: string
   stepOf(store, req.queue, req.step);
   let id = req.event;
   if (req.from === "user") {
-    const st = loadProjectState(store).queues.find((q) => q.id === req.queue)!.steps.find((s) => s.id === req.step)!;
+    const st = stepView(loadProjectState(store), req.queue, req.step);
     // Fix it on a step the orchestrator accepted provisionally: it stays done; the orchestrator drafts the fix.
     if (pendingProvisional(st)) return askFix(store, req.queue, req.step, text);
     if (st.status !== "review" || st.review_with !== "user") throw new ActionError(`step ${req.queue}/${req.step} is not waiting for your review`, 409);
@@ -345,7 +371,7 @@ export function sendBack(store: ProjectStore, req: { queue: string; step: string
   if (!id) throw new ActionError("an orchestrator's (or a review helper's) send-back is its review.sent_back event");
   routeSendBacks(store);
   const state = loadProjectState(store);
-  const st = state.queues.find((q) => q.id === req.queue)!.steps.find((s) => s.id === req.step)!;
+  const st = stepView(state, req.queue, req.step);
   const b = st.sent_back.find((x) => x.id === id);
   if (!b) {
     const why = state.warnings.find((w) => w.startsWith(`event ${id}:`));
@@ -361,7 +387,7 @@ export function sendBack(store: ProjectStore, req: { queue: string; step: string
 /** A step of the queue with a provisional acceptance waiting for the user, or a refusal saying why not. */
 function provisionalStep(store: ProjectStore, queue: string, step: string) {
   stepOf(store, queue, step);
-  const st = loadProjectState(store).queues.find((q) => q.id === queue)!.steps.find((s) => s.id === step)!;
+  const st = stepView(loadProjectState(store), queue, step);
   if (!pendingProvisional(st)) {
     throw new ActionError(st.provisional?.confirmed ? `step ${queue}/${step} is confirmed already`
       : st.provisional?.fix ? `a fix of step ${queue}/${step} was asked already`
@@ -596,7 +622,7 @@ function draftTagIssues(store: ProjectStore, draft: QueueFile, old: QueueFile | 
  */
 export function liftByContinue(store: ProjectStore, queue: string, o: { skipClosing?: boolean } = {}): StatusChange {
   const q = queueOf(store, queue);
-  const view = loadProjectState(store).queues.find((x) => x.id === q.id)!;
+  const view = queueView(loadProjectState(store), q.id);
   if (view.status !== "stopped") throw new ActionError(`queue ${q.id} is not stopped (it is ${view.status})`, 409);
   if (!isApproved(q)) throw new ActionError(`revision ${q.revision} of queue ${q.id} is not approved: approve it instead, which lifts the stop`, 409);
   const run = store.readRun(q.id);
@@ -631,7 +657,7 @@ export function closingToSkip(q: Pick<QueueView, "id" | "steps">): QueueView["st
  */
 export function closingToSkipAtApproval(store: ProjectStore, queue: string): QueueView["steps"][number] {
   const q = queueOf(store, queue);
-  const view = loadProjectState(store).queues.find((x) => x.id === q.id)!;
+  const view = queueView(loadProjectState(store), q.id);
   if (view.status !== "stopped") throw new ActionError(`queue ${q.id} is not stopped: the closing refactoring is skipped only with the approval of a stopped queue's new revision, or at Continue`, 409);
   if (isApproved(q)) throw new ActionError(`revision ${q.revision} of queue ${q.id} is approved already: skip the closing refactoring at Continue`, 409);
   return closingToSkip(view);
@@ -703,7 +729,7 @@ export function orchestratorStatusChange(store: ProjectStore, input: { queue: st
   const to = input.to.trim().toLowerCase();
   const reason = nonEmpty(input.reason, "the reason");
   const q = queueOf(store, input.queue);
-  const view = loadProjectState(store).queues.find((x) => x.id === q.id)!;
+  const view = queueView(loadProjectState(store), q.id);
   const step = input.step ? view.steps.find((s) => s.id === input.step) : undefined;
   if (input.step && !step) throw new ActionError(`queue ${q.id} has no step ${input.step} (has ${view.steps.map((s) => s.id).join(", ")})`, 404);
   const where = step ? `step ${q.id}/${step.id}` : `queue ${q.id}`;
@@ -791,8 +817,9 @@ function continuedRefs(refs: readonly string[]): string[] {
  * (pending or proposed is fine: the work is planned there), and not the step itself.
  */
 function checkContinuedRefs(store: ProjectStore, queue: string, step: string, refs: readonly string[]): void {
-  const queues = loadProjectState(store).queues;
-  const own = queues.find((x) => x.id === queue)!;
+  const state = loadProjectState(store);
+  const queues = state.queues;
+  const own = queueView(state, queue);
   for (const r of refs) {
     const [a, b] = r.split("/") as [string, string | undefined];
     if (b === undefined ? (a === step) : (a === queue && b === step)) throw new ActionError(`--continued-in names the step itself (${r})`);

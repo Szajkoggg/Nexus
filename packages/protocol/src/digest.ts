@@ -3,7 +3,7 @@
 // actions and retries. The server serves it across projects (GET /api/digest?since=); this part is pure and unit tested.
 import type { Activity, Event, Refusal, TurnRecord } from "./schemas.ts";
 import type { ProjectState, QueueView } from "./state.ts";
-import { holdsRunStep } from "./status-rules.ts";
+import { holdsRunStep, runActive } from "./status-rules.ts";
 import { CLOCK_AHEAD_MS } from "./clock.ts";
 import type { ProjectStore } from "./store.ts";
 
@@ -124,7 +124,7 @@ export const newestFirst = (events: DigestEvent[]) => events.sort((a, b) => Date
  * an approval, paused, halted or finished. Decided 2026-11-14, queue FU: the digest's "running now" counts the same.
  */
 export function runsNow(q: Pick<QueueView, "status" | "approved" | "revision" | "run" | "steps" | "questions">): boolean {
-  if (!q.run || (q.run.state !== "running" && q.run.state !== "pausing")) return false;
+  if (!q.run || !runActive(q.run)) return false;
   if (q.status === "cancelled" || q.status === "stopped") return false;
   if (q.approved === false && q.status !== "done" && q.status !== "draft" && ((q.revision ?? 1) > 1 || q.status !== "proposed")) return false;
   if (q.steps.some((s) => s.status === "review")) return false;

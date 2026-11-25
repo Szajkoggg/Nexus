@@ -7,6 +7,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { deriveIdeas, ideaQueues, noteRef, parseNote, type HandOver, type IdeaMatchesResponse, type IdeaNote, type IdeasResponse, type MatchItem } from "./ideas.ts";
 import { deriveIdeaLinks } from "./idea-links.ts";
 import { ideaOutcome } from "./idea-outcomes.ts";
+import { queueView } from "./actions.ts";
 import type { ProjectStore } from "./store.ts";
 import type { ProjectState } from "./state.ts";
 import { deriveIdeaStatuses } from "./idea-status.ts";
@@ -104,7 +105,7 @@ export function projectIdeas(store: ProjectStore, state: ProjectState): IdeasRes
   const links = deriveIdeaLinks(store.readIdeaMatches(), state, notes);
   const queues = ideaQueues(state.queues).map((q) => ({ ...q,
     refs: [...new Set(links.items.filter((r) => r.queue === q.id && r.effective).map((r) => r.ref))],
-    outcome: ideaOutcome(store, state.queues.find((v) => v.id === q.id)!),
+    outcome: ideaOutcome(store, queueView(state, q.id)),
   }));
   const view = deriveIdeas({ notes, queues, handovers: readHandOvers(store) });
   const statuses = deriveIdeaStatuses(store.readIdeaStatuses(), state, notes, links,

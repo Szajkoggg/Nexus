@@ -4,7 +4,7 @@
 // of a run, and a schedule's time, armed on a clock tests can move.
 import { errorText } from "@nexus/protocol/errors";
 import {
-  ActionError, runGoing, changesOfUser, checkPredecessors, doneForPlan, effortIssue, formatClock, loadProjectState, newId, newPlan, now, openPlan,
+  ActionError, queueView, runGoing, changesOfUser, checkPredecessors, doneForPlan, effortIssue, formatClock, loadProjectState, newId, newPlan, now, openPlan,
   openPlanFile, readUsage, reorderedFollowers,
   type PlanBy, type PlanFile, type PlanUndo, type ProjectState, type ProjectStore, type QueueView, type RunFile, type StartFile, type StartView,
 } from "@nexus/protocol";
@@ -166,11 +166,11 @@ export class Scheduler {
    */
   plan(queueId: string, o: PlanOptions): string {
     const state = loadProjectState(this.store);
-    const q = queueOf(state, queueId);
+    const q = queueView(state, queueId);
     const after = checkPredecessors(state, q.id, o.after);
     const options = this.planOptions(state, q, o);
     const file: PlanFile = { ...newPlan(this.store.readPlan(q.id), q.id, after, { by: o.by, reason: o.reason, at: o.undo?.at }), undo: o.undo };
-    const done = after.filter((id) => doneForPlan(state.project, state.queues.find((x) => x.id === id)!));
+    const done = after.filter((id) => doneForPlan(state.project, queueView(state, id)));
     const ready = done.length === after.length;
     const busy = holdingSession(state, o.session, q.id);
     const free = ready && q.approved && !this.deps.draining() && !busy && !o.undo;
@@ -209,7 +209,7 @@ export class Scheduler {
    */
   move(queueId: string, after: string | null): PlanChange {
     const state = loadProjectState(this.store);
-    const q = queueOf(state, queueId);
+    const q = queueView(state, queueId);
     if (after) checkPredecessors(state, q.id, [after], { loop: false });
     this.planOptions(state, q, {});
     const plans = new Map(state.queues.flatMap((x) => {
@@ -315,7 +315,7 @@ export class Scheduler {
   /** A queue the user changes the plan of, which may be planned, and its plan file while it is open (none: not in the plan). */
   private plannedQueue(queueId: string): { state: ProjectState; q: QueueView; plan: PlanFile | undefined } {
     const state = loadProjectState(this.store);
-    const q = queueOf(state, queueId);
+    const q = queueView(state, queueId);
     this.planOptions(state, q, {});
     return { state, q, plan: openPlanFile(this.store.readPlan(q.id)) };
   }
@@ -341,7 +341,7 @@ export class Scheduler {
    */
   scheduleStart(queueId: string, o: ScheduleOptions): string {
     const state = loadProjectState(this.store);
-    const q = queueOf(state, queueId);
+    const q = queueView(state, queueId);
     const options = this.planOptions(state, q, o);
     let at: number;
     let usage: "claude" | "codex" | undefined;
@@ -482,12 +482,6 @@ export class Scheduler {
       return true;
     } catch (e) { fail(errorText(e)); return false; }
   }
-}
-
-function queueOf(state: ProjectState, id: string): QueueView {
-  const q = state.queues.find((x) => x.id === id);
-  if (!q) throw new ActionError(`unknown queue ${id}`, 404);
-  return q;
 }
 
 /** "queue A is done", "queues A, B are done". */

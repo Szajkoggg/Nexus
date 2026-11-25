@@ -21,6 +21,7 @@ import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import {
   ActionError, runGoing, stepAtWork, loadProjectState, normPath, now, pendingProvisional, type GitFile, type ProjectState, type ProjectStore, type QueueView,
+  queueView,
 } from "@nexus/protocol";
 import { checkoutOf, git, patchGit } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
@@ -263,7 +264,7 @@ export function mergeBack(store: ProjectStore, queueId: string, serverRoot = ROO
   if (q.steps.some((s) => s.integration)) {
     return withMergeLock(store, queueId, () => {
       const fresh = loadProjectState(store);
-      const qq = fresh.queues.find((x) => x.id === queueId)!;
+      const qq = queueView(fresh, queueId);
       const d = judgeMerge(store, fresh, qq, "user", serverRoot);
       switch (d.kind) {
         case "none": throw new ActionError(d.why, 409);

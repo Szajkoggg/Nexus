@@ -8,7 +8,7 @@ import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import { execFileSync } from "node:child_process";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
-  Event, isOpenQuestion, runGoing, orchestratorOverview, planLines, stopLines, switchLines, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, stepValuesText, newId, normPath, now, readRegistry, writeRegistry,
+  Event, isOpenQuestion, runGoing, orchestratorOverview, planLines, stopLines, switchLines, ProjectStore, checksLine, findNexusDir, inReportFolder, loadProjectState, stepView, stepValuesText, newId, normPath, now, readRegistry, writeRegistry,
   PICTURE_ROLES, REVIEW_HELP, checkPicture, levelNow, pictureSize, recommendedOption, stepDefs,
   NEXUS_ACTIVITIES, TAG_KINDS, TAG_ORIGINS, TAG_SIZES, tagIssues, tagProposalText, tagsText,
   STAT_DIMENSIONS, flakyReport, flakyText, readTurns, sinceTime, statDimension, statsReport, statsText, stepStats,
@@ -462,7 +462,7 @@ async function reviewDecision(action: "accept" | "send-back" | "ask-user" | "pro
   const queue = need(args()[2], "<queue>"); const step = need(args()[3], "<step>");
   checkStep(st, queue, step);
   const state = loadProjectState(st);
-  const view = state.queues.find((q) => q.id === queue)!.steps.find((x) => x.id === step)!;
+  const view = stepView(state, queue, step);
   if (view.status !== "review") throw new UsageError(`step ${queue}/${step} is not waiting for review (it is ${view.status})`);
   if (view.review_with !== "orchestrator") throw new UsageError(`step ${queue}/${step} waits for the user's review, not yours`);
   if (s.role === "helper") {
@@ -491,7 +491,7 @@ async function reviewDecision(action: "accept" | "send-back" | "ask-user" | "pro
 function helperStep(state: ReturnType<typeof loadProjectState>, s: SessionFile, queue: string, step: string): void {
   const a = helperAbout(s);
   if (!a || a.queue !== queue || a.step !== step) throw new UsageError(`you were started to review ${a ? `${a.queue}/${a.step}` : "no step"}, not ${queue}/${step}`);
-  const view = state.queues.find((q) => q.id === queue)!.steps.find((x) => x.id === step)!;
+  const view = stepView(state, queue, step);
   if (view.helper?.session !== s.id || view.helper.state !== "running") throw new UsageError(`the review of ${queue}/${step} is no longer yours (${view.helper?.state === "passed_on" ? "it was passed on" : "another review round or reviewer has it"})`);
 }
 
@@ -505,7 +505,7 @@ function passOn(): void {
   const queue = need(args()[2], "<queue>"); const step = need(args()[3], "<step>");
   checkStep(st, queue, step);
   const state = loadProjectState(st);
-  const view = state.queues.find((q) => q.id === queue)!.steps.find((x) => x.id === step)!;
+  const view = stepView(state, queue, step);
   if (view.status !== "review" || view.review_with !== "orchestrator") throw new UsageError(`step ${queue}/${step} is not waiting for the orchestrator's review`);
   helperStep(state, s, queue, step);
   const given = list(o().why);
@@ -528,7 +528,7 @@ function reviewAudit(): void {
   const reason = o().reason?.trim();
   if (!reason) throw new UsageError("--reason says why (it is recorded with the audit)");
   checkStep(st, queue, step);
-  const view = loadProjectState(st).queues.find((q) => q.id === queue)!.steps.find((x) => x.id === step)!;
+  const view = stepView(loadProjectState(st), queue, step);
   const a = view.accepted;
   if (a?.by !== "helper") throw new UsageError(`step ${queue}/${step} was not accepted by the review helper`);
   if (view.audit) throw new UsageError(`step ${queue}/${step} was audited already (${view.audit.verdict})`);

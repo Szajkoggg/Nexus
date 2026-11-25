@@ -5,9 +5,9 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RunFile, StepStatus } from "../src/schemas.ts";
-import { ProjectStore, approveQueue, loadProjectState } from "../src/index.ts";
+import { ActionError, ProjectStore, applyDraft, approveQueue, loadProjectState, queueView, stepView } from "../src/index.ts";
 import {
-  isOpenQuestion, queueWorkedOn, reviewedByOrchestrator, runCounted, runEnded, runGoing, runHoldsCheckout, stepAtWork, stepWaits, stepWorkedOn, stepsWorkedOn, waitsForUserReview,
+  REPORTED_STEP, isOpenQuestion, queueWorkedOn, reviewedByOrchestrator, runActive, runCounted, runEnded, runGoing, runHoldsCheckout, stepAtWork, stepReported, stepWaits, stepWorkedOn, stepsWorkedOn, waitsForUserReview,
 } from "../src/status-rules.ts";
 
 type RunState = RunFile["state"];
@@ -127,4 +127,37 @@ test("a step is worked on only while running with its run going, in every run st
   assert.ok(!going.includes("paused") && !going.includes("halted") && !going.includes("finished"));
   for (const status of ["waiting", "review", "checking", "done", "pending"] as StepStatus[]) assert.equal(stepWorkedOn({ state: "running" }, { status }), false, status);
   assert.equal(stepWorkedOn(undefined, { status: "running" }), true, "no run of Nexus's: a session it did not start works on it");
+});
+
+test("runActive: running or pausing, held at the limit or not; no other state, and no run", () => {
+  for (const state of RUN_STATES) {
+    assert.equal(runActive({ state }), state === "running" || state === "pausing", state);
+  }
+  assert.equal(runActive({ state: "running", held: { at: "x" } }), true, "a run held at the limit is still active");
+  assert.equal(runActive(undefined), false);
+  assert.equal(runActive(null), false);
+});
+
+test("stepReported: the step is in its review or checks, done, skipped or rejected", () => {
+  for (const status of StepStatus.options) {
+    assert.equal(stepReported({ status }), ["review", "checking", "done", "skipped", "rejected"].includes(status), status);
+    assert.equal(REPORTED_STEP.has(status), stepReported({ status }));
+  }
+});
+
+test("queueView and stepView: the views, or a 404 ActionError naming what is missing (never a TypeError)", () => {
+  const root = mkdtempSync(join(tmpdir(), "nexus-views-"));
+  process.env.NEXUS_HOME = join(root, "home");
+  const store = ProjectStore.init(root, { id: "p", name: "P", root });
+  applyDraft(store, { protocol: 1, id: "Q", title: "Q", steps: [{ id: "Q1", title: "One", goal: "Do one.", acceptance: ["one works"] }] });
+  const state = loadProjectState(store);
+  assert.equal(queueView(state, "Q").id, "Q");
+  assert.equal(stepView(state, "Q", "Q1").id, "Q1");
+  const refused = (fn: () => unknown, text: RegExp) => assert.throws(fn, (e: unknown) =>
+    e instanceof ActionError && e.status === 404 && text.test(e.message));
+  refused(() => queueView(state, "X"), /^unknown queue X$/);
+  refused(() => stepView(state, "X", "Q1"), /^unknown queue X$/);
+  refused(() => stepView(state, "Q", "Q9"), /^queue Q has no step Q9$/);
+  // A queue the derivation left out: the refusal gives the state's warning about it.
+  refused(() => queueView({ ...state, queues: [], warnings: ["queue Q: something broke"] }, "Q"), /^unknown queue Q \(queue Q: something broke\)$/);
 });

@@ -22,6 +22,7 @@ import {
   NEXUS_SESSION, applyDraft, checkSetOf, commandWord, fillTemplate, isCommand, lastDone, latestCheckSet, now, readTemplates, reviewRound, stepChecks,
   type CheckAttempt, type CheckDispute, type CheckRun, type CheckSet, type ChecksFile, type Event, type InboxEntry, type ProjectState,
   type ProjectStore, type QueueView, type RunFile, type StepView,
+  queueView,
 } from "@nexus/protocol";
 import type { Capacity, Grant, HeavyProcess, Ticket } from "./capacity.ts";
 import { checkoutOf, checkoutStatus, git } from "./gitinfo.ts";
@@ -478,7 +479,7 @@ export class CheckRunner {
   }
 
   private endBase(queue: string, step: string, done: string, state: ProjectState, result: "passed" | "failed" | "unrunnable", reason?: string, attempt?: CheckAttempt): void {
-    const commit = baseCommit(this.store, state.queues.find((x) => x.id === queue)!) ?? undefined;
+    const commit = baseCommit(this.store, queueView(state, queue)) ?? undefined;
     this.update(queue, step, done, (s) => {
       s.dispute!.base = { state: result, ...(commit ? { commit } : {}), ...(reason ? { reason } : {}), ...(attempt ? { run: attempt } : {}) };
       if (result === "passed") s.dispute!.outcome = "fix";

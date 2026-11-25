@@ -2,16 +2,9 @@
 // pending and skipped: goal, acceptance and notes; running and waiting: also the progress so far; review, done,
 // failed, stopped and rejected: also the summary, checks, review material, commits and the reason. When the step
 // changed state since the partner got it, a short "since then" addition goes with the user's next message.
-import { isOpenQuestion, stepAtWork, type ProjectState, type QueueView, type StepStatus, type StepView } from "@nexus/protocol";
+import { findStep, isOpenQuestion, stepAtWork, type ProjectState, type QueueView, type StepStatus, type StepView } from "@nexus/protocol";
 
 const PLAIN: ReadonlySet<StepStatus> = new Set(["pending", "skipped"]);
-
-/** The step a conversation is about, or why it cannot be found. */
-export function findStep(state: ProjectState, queue: string, step: string): { q: QueueView; st: StepView } | undefined {
-  const q = state.queues.find((x) => x.id === queue);
-  const st = q?.steps.find((x) => x.id === step);
-  return q && st ? { q, st } : undefined;
-}
 
 const oneLine = (s: string, max = 600) => { const t = s.replace(/\s+/g, " ").trim(); return t.length > max ? `${t.slice(0, max)}…` : t; };
 

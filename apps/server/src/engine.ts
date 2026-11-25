@@ -23,7 +23,7 @@ import {
   summaryRequest, switchReason, userStopNow, type ContextSize, type PullText,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
-import { questionBarrier } from "@nexus/protocol/status-rules";
+import { REPORTED_STEP, questionBarrier, runActive, stepReported } from "@nexus/protocol/status-rules";
 import {
   ClockTimers, REAL_CLOCK, Scheduler, type PlanChange, type PlanOptions, type Clock, type ScheduleOptions,
 } from "./scheduler.ts";
@@ -488,7 +488,7 @@ export class Engine implements Member {
     this.writeRun(queueId, toResumed(run, q.revision));
     // A step left unfinished (stopped, failed, interrupted) is continued rather than skipped; one waiting for an
     // answer just waits on (the answer arrives through the inbox). A rejected step is never run again.
-    const open = q.steps.find((s) => s.id === run.step && !["done", "skipped", "review", "checking", "rejected"].includes(s.status));
+    const open = q.steps.find((s) => s.id === run.step && !stepReported(s));
     // A step sent back while the run was paused or halted: the send-back, still in the inbox, opens its next turn. So
     // does a check-fix round (one more after the limit is given here: src/check-runs.ts).
     const pending = open && (state.sessions.find((x) => x.id === run.session)?.inbox.some(m => !m.read_at
@@ -696,7 +696,7 @@ export class Engine implements Member {
     if (closed.size && !this.stopped) this.endProcesses((q) => closed.has(q), { state });
     for (const l of this.host.all()) this.deliverInbox(state, l);
     // Also a run held at the limit: a stop or a pause still reaches it.
-    for (const q of state.queues) if (q.run?.state === "running" || q.run?.state === "pausing") this.advance(q.id, state);
+    for (const q of state.queues) if (runActive(q.run)) this.advance(q.id, state);
     for (const q of state.queues) if (q.run?.state === "approval_wait" && q.approved) this.continueApproved(q.id);
     // Recurring queues after N queues: a queue that got done may complete a count.
     if (!this.stopped && !this.draining) this.recurrer.check(state);
@@ -821,7 +821,7 @@ export class Engine implements Member {
 
   private advanceUnlocked(queueId: string, given?: ProjectState): void {
     const run = this.store.readRun(queueId);
-    if (!run || (run.state !== "running" && run.state !== "pausing")) return;
+    if (!run || !runActive(run)) return;
     const state = given ?? loadProjectState(this.store);
     const q = this.queue(state, queueId);
     if (this.restarting.has(run.session)) return; // the process restarts with another model or effort
@@ -853,7 +853,7 @@ export class Engine implements Member {
     }
     if (!live || live.proc.state === "exited") return this.halt(queueId, "the session's process is not running");
     if (live.proc.state === "working" || this.cleaning.has(live.proc)) return;
-    if ((q.status === "stopped" || (current && (OUTCOME.has(current.status) || ["skipped", "rejected"].includes(current.status)))) && this.cleanWorker(queueId, live)) return;
+    if ((q.status === "stopped" || (current && STEP_ENDED.has(current.status))) && this.cleanWorker(queueId, live)) return;
 
     // A new revision never stops the step at work: its turns, questions, answers and nudges go on as below, and only
     // the step's end looks at the approval.
@@ -1577,7 +1577,7 @@ export class Engine implements Member {
     const run = this.store.readRun(queueId);
     const q = loadProjectState(this.store).queues.find((x) => x.id === queueId);
     const status = q?.steps.find((s) => s.id === run?.step)?.status;
-    return status !== undefined && ["review", "checking", "done", "skipped", "rejected"].includes(status);
+    return status !== undefined && REPORTED_STEP.has(status);
   }
 
   private nothingLeft(queueId: string): boolean {
@@ -1589,7 +1589,7 @@ export class Engine implements Member {
   /** Ends a going run as finished (its last step is done). */
   private finish(queueId: string): void {
     const run = this.store.readRun(queueId);
-    if (!run || (run.state !== "running" && run.state !== "pausing")) return;
+    if (!run || !runActive(run)) return;
     if (questionsHold(loadProjectState(this.store), queueId, run.step)) return;
     this.clearTimer(queueId);
     this.writeRun(queueId, toFinished(run));
@@ -1603,7 +1603,7 @@ export class Engine implements Member {
   private turnFailed(queueId: string, f: TurnFailure): void {
     if (this.stopped) return;
     const run = this.store.readRun(queueId);
-    if (!run || (run.state !== "running" && run.state !== "pausing")) return;
+    if (!run || !runActive(run)) return;
     const what = `${f.code}: ${f.text}`;
     if (run.state === "pausing" && !run.resume_after_restart) {
       return this.writeRun(queueId, toPaused(run, `paused by the user; the last turn failed (${what})`));
@@ -1966,7 +1966,7 @@ export class Engine implements Member {
       const run = this.store.readRun(q);
       const view = state.queues.find((x) => x.id === q);
       const left = view && (questionsHold(state, q, run?.step) || view.steps.some((s) => !stepClosed(view, s)));
-      if (run && (["running", "pausing"].includes(run.state) || run.resume_after_restart) && left === false) {
+      if (run && (runActive(run) || run.resume_after_restart) && left === false) {
         // Its last step was done before the server stopped: the run is over, whatever stopped the process.
         this.writeRun(q, toFinished(run));
       } else if (run?.state === "retry_wait" && run.resume_at) {
@@ -1982,7 +1982,7 @@ export class Engine implements Member {
           try { this.resumeByItself(q); } catch (e) { logError(`queue ${q}: resuming after the update`, e); this.halt(q, `could not resume after the update: ${errorText(e)}`); }
           this.changed();
         }, this.startupMs));
-      } else if (run && ["running", "pausing"].includes(run.state)) {
+      } else if (run && runActive(run)) {
         this.writeRun(q, toPaused(run, "the Nexus server restarted; resume to continue"));
       } else if (run?.state === "approval_wait" && view?.approved) {
         // Approved while no server ran (or while an update drained): it goes on shortly, once this server is up.
