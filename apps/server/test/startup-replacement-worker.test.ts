@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { loadProjectState, sendMessage } from "@nexus/protocol";
+import { answerAsUser, loadProjectState, sendMessage } from "@nexus/protocol";
 import type { Engine } from "../src/engine.ts";
 import { FakeGates, type FakeHeld } from "./fake-behaviour.ts";
 import { restart, setup } from "./engine-setup.ts";
@@ -126,4 +126,84 @@ test("claude worker: a message sent to it while its start is corrected goes into
     assert.deepEqual(w.starts(), ["--session-id", "--resume", "--session-id"]);
     assert.deepEqual(w.queue().steps.map((st) => st.status), ["done", "done"]);
   } finally { cleanup(gates, [x?.engine, x?.next]); work.done(); }
+});
+
+// ---------------------------------------------------------------- an answer while the start is corrected
+
+/**
+ * A worker whose step asked a blocking question (FAKE: ask1), restarted as after an update with its record saying
+ * unsaved though its conversation was saved: the new engine starts its process for the waiting run, Claude Code refuses
+ * the fresh start ("already in use"), and that refusal is held, so the corrected start (a resume) has not begun.
+ */
+async function askedAndCorrecting(gates: FakeGates) {
+  const x = setup(["ask1", "done"]);
+  const args = join(dirname(process.env.FAKE_LOG!), "args.log");
+  process.env.FAKE_ARGS = args;
+  const starts = () => existsSync(args) ? readFileSync(args, "utf8").split("\n").filter(Boolean).map((l) => {
+    const argv = (JSON.parse(l) as { argv: string[] }).argv;
+    return argv.find((a) => a === "--resume" || a === "--session-id")!;
+  }) : [];
+  x.engine.start("Q", { runtime: "claude" });
+  await x.until("the question", () => loadProjectState(x.store).questions.length === 1, LONGER.step);
+  const session = x.queue().run!.session;
+  const qid = loadProjectState(x.store).questions[0]!.qid;
+  await x.until("the asking turn's end", () => x.store.readRuntime(session)?.state === "idle" && x.store.readRuntime(session)?.turns === 1);
+  x.engine.drainForUpdate(true);
+  x.engine.shutdown();
+  await x.until("the process to exit", () => x.store.readRuntime(session)?.state === "exited");
+  x.store.writeRuntime(session, { ...x.store.readRuntime(session)!, conversation_saved: false });
+  process.env.FAKE_GATES = gates.id;
+  const next = restart(x.store);
+  let held: FakeHeld | undefined;
+  void gates.reached("refusal").then((h) => { held = h; });
+  await x.until("the new process's start held at its refusal", () => !!held);
+  const opened = (step: string) => x.received().filter((m) => m.text.includes(`step ${step} (`)).length;
+  const answers = () => x.received().filter((m) => m.text.includes(qid));
+  return { ...x, session, qid, next, held: held!, starts, opened, answers };
+}
+
+test("claude worker: an answer (go on) that arrives while its start is corrected reaches the step's turn once, with its qid; the step opens once and the turns count as expected", async () => {
+  const gates = new FakeGates(["refusal"]);
+  let x: Awaited<ReturnType<typeof askedAndCorrecting>> | undefined;
+  try {
+    x = await askedAndCorrecting(gates);
+    const w = x;
+    answerAsUser(w.store, w.qid, "ANSWER-LCR4: take the first way", true);
+    w.next.onChange(loadProjectState(w.store));
+    assert.deepEqual(w.answers(), [], "held with the refused start: nothing read yet");
+    w.held.release();
+    await w.until("the run to finish", () => w.queue().run?.state === "finished", LONGER.run);
+    assert.equal(w.answers().length, 1, "the answer once");
+    assert.match(w.answers()[0]!.text, /ANSWER-LCR4: take the first way/);
+    assert.deepEqual([w.opened("Q1"), w.opened("Q2")], [1, 1]);
+    // The first engine's start, the refused fresh start, the corrected resume (which answers and runs Q2).
+    assert.deepEqual(w.starts(), ["--session-id", "--session-id", "--resume"]);
+    // The asking turn, the answer's turn, Q2's turn.
+    assert.equal(w.store.readRuntime(w.session)?.turns, 3);
+    assert.equal(w.store.readRuntime(w.session)?.conversation_saved, true);
+    assert.deepEqual(w.queue().steps.map((st) => st.status), ["done", "done"]);
+  } finally { cleanup(gates, [x?.engine, x?.next]); }
+});
+
+test("claude worker: an answer that asks to wait, arriving while its start is corrected, is not delivered and the run does not go on until Resume; then once, with its qid", async () => {
+  const gates = new FakeGates(["refusal"]);
+  let x: Awaited<ReturnType<typeof askedAndCorrecting>> | undefined;
+  try {
+    x = await askedAndCorrecting(gates);
+    const w = x;
+    answerAsUser(w.store, w.qid, "ANSWER-LCR4: wait for me", false);
+    w.next.onChange(loadProjectState(w.store));
+    w.held.release();
+    await w.until("the corrected start", () => w.starts().length === 3);
+    await holds("the answer held, no step opened, the run not finished", () => w.answers().length === 0 && w.opened("Q2") === 0 && w.queue().run?.state !== "finished", 300);
+    assert.equal(w.store.readRuntime(w.session)?.turns, 1, "no turn since the question");
+    w.next.resume("Q");
+    await w.until("the run to finish", () => w.queue().run?.state === "finished", LONGER.run);
+    assert.equal(w.answers().length, 1, "the answer once");
+    assert.match(w.answers()[0]!.text, /ANSWER-LCR4: wait for me/);
+    assert.deepEqual([w.opened("Q1"), w.opened("Q2")], [1, 1]);
+    assert.deepEqual(w.starts(), ["--session-id", "--session-id", "--resume"]);
+    assert.equal(w.store.readRuntime(w.session)?.turns, 3);
+    assert.deepEqual(w.queue().steps.map((st) => st.status), ["done", "done"]);
+  } finally { cleanup(gates, [x?.engine, x?.next]); }
 });
