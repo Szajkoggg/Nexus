@@ -78,6 +78,24 @@ test("a survey's worktree Nexus could not clean up waits for the user as a clean
   assert.deepEqual(items(), []);
 });
 
+test("a merge back that waits offers its Merge back; once merged, its cleanup's wait offers none (queue LKF)", () => {
+  const x = setup({ worktree: "C:/w/Q", integration: true, branch: "nexus/Q" });
+  const base = { ref: "main", sha: "a".repeat(40), at: "2026-11-25T10:00:00.000Z", branch: true };
+  const waiting = { reason: "queue Q: the checkout of main has uncommitted changes: commit or stash them, then merge", since: "2026-11-25T11:00:00.000Z" };
+  x.st.writeGit("Q", { protocol: 1, steps: {}, base, merge: { waiting } });
+  const item = () => loadProjectState(x.st).attention.find((a) => a.kind === "merge" && a.queue === "Q")!;
+  assert.deepEqual(item().merge, { into: "main", branch: "nexus/Q" }, "not merged: the card offers Merge into main…");
+  assert.equal(item().merged, undefined);
+  assert.equal(item().step, "Q.integrate");
+
+  const cleanup = { reason: "queue Q's cleanup waits for its worker process to end (session S)", since: "2026-11-25T12:00:00.000Z" };
+  x.st.writeGit("Q", { protocol: 1, steps: {}, base, merged: { at: "2026-11-25T11:30:00.000Z", into: "main", path: "C:/w/main", sha: "b".repeat(40), fast_forward: true, by: "nexus" }, merge: { waiting: cleanup } });
+  assert.equal(item().merge, undefined, "merged back: nothing to merge");
+  assert.equal(item().merged, true);
+  assert.equal(item().text, cleanup.reason);
+  assert.equal(item().step, "Q.integrate", "Open still goes to the integration step");
+});
+
 test("the mark is the server's: a draft does not set it, a revision keeps it, and it is not part of what an approval pins", () => {
   // The server marks an approved queue when it gives it its worktree: the approval still holds.
   const x = setup({ worktree: "auto" });

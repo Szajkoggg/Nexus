@@ -399,3 +399,9 @@ branch goes into which base) where it has no queue at hand (the list across proj
 `merge` gets an optional `merge: { into, branch }`, derived from `git.yaml` and the queue, a change to the state API
 only (docs/protocol, the dashboard's state). The alternative, a card saying only "Merge back…", was rejected: a
 question that moves a branch says which and where.
+
+Found with queue LKF (survey LC3 F2): a queue merged back already whose cleanup waits (its worker process still
+ending, `git.yaml` `merge.waiting` beside `merged`) showed the same card with **Merge into main…**, which had nothing
+to merge. The item now says so (`merged: true`, no `merge`), and its card offers **Open** alone (`mergeCardActions` in
+`apps/web/src/waiting.ts`). A "Merging back" card's text is no longer cut to two or three lines: the reason (why it
+waits, which process, what to do) wraps in full in all three places, at every width, rather than opening on a tap.

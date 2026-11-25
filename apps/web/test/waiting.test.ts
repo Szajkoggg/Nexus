@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeWaitText, moveOn, placeOf, waitingPosition } from "../src/waiting.ts";
+import { mergeCardActions, mergeWaitText, moveOn, placeOf, waitingPosition } from "../src/waiting.ts";
 
 type W = { project: string; queue?: string; step?: string; lift?: { place: string; continue: boolean; revision: number }; name: string };
 const lift = { place: " at step W4c", continue: true, revision: 1 };
@@ -80,4 +80,10 @@ test("a Merging back card's text: no leading queue (its first line names it), th
   const own = "queue W's branch nexus/W moved on after its integration step (it ended at 1234567, the branch is at 89abcde): its work is not merged back";
   assert.deepEqual(mergeWaitText(own, "W"), { text: own }, "a possessive stays, and a parenthesis that is not a path too");
   assert.deepEqual(mergeWaitText("queue W: a reason", "X"), { text: "queue W: a reason" }, "another queue's name stays");
+});
+
+test("a Merging back card offers Merge into main… only while there is something to merge; merged back, only Open (queue LKF)", () => {
+  assert.equal(mergeCardActions({ merge: { into: "main", branch: "nexus/W" } }), "merge");
+  assert.equal(mergeCardActions({ merged: true }), "open", "its cleanup waits: no Merge button, Open stays");
+  assert.equal(mergeCardActions({}), undefined, "no base branch to merge into");
 });

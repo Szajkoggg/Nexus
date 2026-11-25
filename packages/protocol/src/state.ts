@@ -72,9 +72,15 @@ export interface AttentionItem {
   tags?: TagProposal;
   /**
    * Kind `merge`: what the user's Merge back moves (the waiting card asks it where no queue is at hand): the queue's
-   * branch (absent: unnamed) into its base branch. Absent when the base is no branch (nothing to merge into).
+   * branch (absent: unnamed) into its base branch. Absent when the base is no branch (nothing to merge into), and
+   * when the queue is merged back already (`merged`).
    */
   merge?: { into: string; branch?: string };
+  /**
+   * Kind `merge`: the queue is merged back already (git.yaml `merged`); what waits is the cleanup of its worktree
+   * (its worker process still ending, a folder in use): no Merge back to offer, only the way to the integration step.
+   */
+  merged?: true;
 }
 export interface StepView extends StepDef {
   status: StepStatus;
@@ -635,10 +641,13 @@ function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsF
     // On the integration step, whose page says how the merge back stands.
     if (q.git?.merge?.waiting && q.status !== "cancelled") {
       const w = q.git.merge.waiting;
-      const into = q.git.base?.branch !== false ? q.git.base?.ref : undefined;
+      // Merged back already, it waits for its cleanup (queue LKF): nothing to merge.
+      const merged = !!q.git.merged;
+      const into = q.git.base?.branch !== false && !merged ? q.git.base?.ref : undefined;
       out.push({
         kind: "merge", queue: q.id, step: q.steps.find((s) => s.integration)?.id, text: w.reason + releasedText(w.released), at: w.since,
         ...(into ? { merge: { into, ...(q.branch ? { branch: q.branch } : {}) } } : {}),
+        ...(merged ? { merged: true as const } : {}),
       });
     }
     // A done survey run's worktree Nexus could not remove (src/merger.ts): until it is cleaned up.

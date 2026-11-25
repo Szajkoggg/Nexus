@@ -14,3 +14,8 @@ views:
     label: "A cleanup waiting for the worker process (Waiting list), narrow window"
     actions:
       - scroll: "all projects, newest first"
+  - key: waiting-process-wait@390
+    route: "#/demo"
+    label: "A cleanup waiting for the worker process (Waiting list), phone"
+    actions:
+      - scroll: "all projects, newest first"

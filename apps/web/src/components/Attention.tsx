@@ -11,7 +11,7 @@ import { PlanRow } from "./Plan.tsx";
 import { TagProposalRow } from "./Tags.tsx";
 import { RecurringRow } from "./Recurring.tsx";
 import { useMergeBack } from "./details/git.tsx";
-import { mergeWaitText } from "../waiting.ts";
+import { mergeCardActions, mergeWaitText } from "../waiting.ts";
 
 const KIND: Record<AttentionItem["kind"], { key: Key; tone: string }> = {
   question: { key: "waiting.kind.question", tone: "text-warn bg-warn/15" },
@@ -39,6 +39,11 @@ const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/
  */
 export const textOf = (a: AttentionItem) =>
   a.kind === "provisional" ? t("waiting.batchText", { count: a.provisional?.length ?? 0 }) : a.kind === "merge" ? mergeWaitText(plain(a.text), a.queue).text : plain(a.text);
+/**
+ * How many lines a card's text may take: a "Merging back" item's reason in full, wrapped (what keeps the merge back or
+ * its cleanup, and what to do, must not be cut off: queue LKF), the others `lines`.
+ */
+const clampOf = (a: AttentionItem, lines: "line-clamp-2" | "line-clamp-3") => (a.kind === "merge" ? "block whitespace-normal break-words" : lines);
 /** A waiting item's tooltip: a "Merging back" item's checkout path, out of its text. */
 const titleOf = (a: AttentionItem) => (a.kind === "merge" ? mergeWaitText(plain(a.text), a.queue).path : undefined);
 
@@ -93,11 +98,20 @@ function StopRow({ project, a, onOpen, onChanged, pushAccepted, queue }: {
 
 /**
  * A "Merging back" card's way on (docs/design/dashboard.md, "Merge back where it waits"): Merge into main… with its
- * question in the card, the queue panel's question and action (useMergeBack), and Open, the integration step. Nothing
- * for an item that names no base (nothing to merge into).
+ * question in the card, the queue panel's question and action (useMergeBack), and Open, the integration step. Open
+ * alone once the queue is merged back and only its cleanup waits (mergeCardActions); nothing for an item that names
+ * no base (nothing to merge into).
  */
 function MergeRow({ a, ...rest }: { project: string; a: AttentionItem; onOpen: () => void; onChanged?: () => void; className?: string }) {
-  return a.queue && a.merge ? <MergeActions {...rest} queue={a.queue} merge={a.merge} integrated={!!a.step} /> : null;
+  const way = a.queue ? mergeCardActions(a) : undefined;
+  if (way === "open") {
+    return (
+      <div className={rest.className ?? "px-3.5 pb-3"}>
+        <button onClick={rest.onOpen} className={OPEN_BUTTON}>{t("common.open")}</button>
+      </div>
+    );
+  }
+  return way === "merge" && a.merge ? <MergeActions {...rest} queue={a.queue!} merge={a.merge} integrated={!!a.step} /> : null;
 }
 
 function MergeActions({ project, queue, merge: { into, branch }, integrated, onOpen, onChanged, className = "px-3.5 pb-3" }: {
@@ -139,7 +153,7 @@ export function AttentionPanel({ project, items, queues, pushAccepted, onOpen, o
                 <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold ${kindLabel(a.kind).tone}`}>{kindLabel(a.kind).text}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block font-mono text-xs text-fg-3">{whereOf(a)}</span>
-                  <span className="line-clamp-2 text-sm text-fg" title={reasonBelow ? undefined : titleOf(a)}>{reasonBelow ? q!.title : textOf(a)}</span>
+                  <span className={`${clampOf(a, "line-clamp-2")} text-sm text-fg`} title={reasonBelow ? undefined : titleOf(a)}>{reasonBelow ? q!.title : textOf(a)}</span>
                   {a.lift && <LiftProposal lift={a.lift} />}
                 </span>
                 {a.at && <span className="shrink-0 text-xs text-fg-3"><TimeAgo at={a.at} /></span>}
@@ -187,7 +201,7 @@ export function WaitingList({ projects, onOpen, onChoose }: {
                 <span className="min-w-0 flex-1 truncate text-fg-3">{a.project_name}{a.queue && <> · <span className="font-mono">{whereOf(a)}</span></>}</span>
                 {a.at && <span className="shrink-0 text-fg-3"><TimeAgo at={a.at} /></span>}
               </span>
-              <span className="mt-1.5 line-clamp-3 text-[15px] leading-snug text-fg" title={titleOf(a)}>{textOf(a)}</span>
+              <span className={`mt-1.5 ${clampOf(a, "line-clamp-3")} text-[15px] leading-snug text-fg`} title={titleOf(a)}>{textOf(a)}</span>
               {a.lift && <LiftProposal lift={a.lift} />}
             </button>
             {a.lift && a.queue && <StopRow project={a.project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} />}
@@ -232,7 +246,7 @@ export function WaitingCards({ projects, current, onOpen }: { projects: ProjectS
               <span className="min-w-0 flex-1 truncate font-mono text-fg-3">{a.project !== current && <span className="font-sans">{a.project_name} · </span>}{whereOf(a)}</span>
               {a.at && <span className="shrink-0 text-fg-3"><TimeAgo at={a.at} /></span>}
             </span>
-            <span className="mt-1 line-clamp-2 text-sm leading-snug text-fg" title={titleOf(a)}>{textOf(a)}</span>
+            <span className={`mt-1 ${clampOf(a, "line-clamp-2")} text-sm leading-snug text-fg`} title={titleOf(a)}>{textOf(a)}</span>
             {a.lift && <LiftProposal lift={a.lift} />}
           </button>
           {a.lift && a.queue && <div className="-mt-1"><StopRow project={a.project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} /></div>}

@@ -58,3 +58,12 @@ export function mergeWaitText(text: string, queue: string | undefined): { text: 
   const m = /\s\(((?:[A-Za-z]:)?[\\/][^()]*)\)/.exec(rest);
   return m ? { text: rest.slice(0, m.index) + rest.slice(m.index + m[0].length), path: m[1] } : { text: rest };
 }
+
+/**
+ * What a "Merging back" card offers under its text (docs/design/dashboard.md, "Merge back where it waits"): `merge`
+ * (Merge into main… and Open) while the queue's branch waits to be merged into its base; `open` (Open alone) once it
+ * is merged back and only its cleanup waits (queue LKF); nothing when it names no base to merge into.
+ */
+export function mergeCardActions(a: { merge?: unknown; merged?: boolean }): "merge" | "open" | undefined {
+  return a.merged ? "open" : a.merge ? "merge" : undefined;
+}
