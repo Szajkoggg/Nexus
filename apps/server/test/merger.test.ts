@@ -727,6 +727,28 @@ test("engine: the user's Clean up while the queue's worker process has not exite
   } finally { letEnd(ends); x.merger.shutdown(); x.engine.shutdown(); }
 });
 
+test("engine: a restart while a merged-back queue's worker process ignores its end: the new server's recovery marks its record exited, and its Merger's first look cleans up (survey LC3 F11, PRC)", async () => {
+  const { x, ends, wt } = stubborn("ignore", 60_000);
+  let next: { engine: Engine; merger: Merger } | undefined;
+  try {
+    x.engine.start("W", { runtime: "claude" });
+    await x.until("W merged back", () => !!x.store.readGit("W")?.merged);
+    await x.until("the end of W's process asked", () => ends.dropped.length > 0);
+    x.merger.onChange(loadProjectState(x.store));
+    assert.equal(x.store.readGit("W")!.cleaned, undefined, "the cleanup waits for the process");
+    const session = x.queue("W").steps.at(-1)!.session!;
+    x.merger.shutdown(); x.engine.shutdown(); // its kill is ignored too: the process outlives the server
+    assert.notEqual(x.store.readRuntime(session)?.state, "exited", "nothing marked it exited before the restart");
+    const engine: Engine = new Engine(x.store, () => {}, { spawn: inProcessRuntime(), retryBaseMs: 30, usageMarginMs: 100, ...QUICK_ENGINE });
+    const merger = new Merger(x.store, { start: () => assert.fail("nothing to start"), release: () => {}, busy: () => false, serverRoot: join(x.base, "elsewhere"), processesLeft: (q) => engine.queueProcessesLeft(q) });
+    next = { engine, merger };
+    assert.equal(x.store.readRuntime(session)?.state, "exited", "the recovery marked it exited (the old server's job closed with it)");
+    merger.onChange(loadProjectState(x.store));
+    assert.ok(x.store.readGit("W")!.cleaned, "the first look cleans up: no process of the new server's to wait for");
+    assert.ok(!existsSync(wt));
+  } finally { letEnd(ends); next?.merger.shutdown(); next?.engine.shutdown(); x.merger.shutdown(); x.engine.shutdown(); }
+});
+
 const STILL_ENDING_60 = /^queue W's cleanup waits for its worker process to end \(session \S+\); Nexus kills it by force if it has not ended 60 s after it was asked$/;
 
 test("engine: a worker process that outlives even the forced kill: the cleanup's wait says so and stays; the worktree goes once it has ended (survey LC3 F2)", async () => {

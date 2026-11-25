@@ -347,6 +347,28 @@ test("an update's drain waits for a running check a while, then ends it; it runs
   } finally { x.engine.shutdown(); next?.shutdown(); x.cap.shutdown(); }
 });
 
+test("the user's Stop while a regular check set runs: the run is paused, not halted; the set interrupted, not unrunnable; no check-fix round; Resume runs it again and finishes (survey LC3 F4 a)", async () => {
+  const x = withChecks(["done"], ["unit"], { capacity: capacity(true) });
+  x.plan("unit", ["60000ms:0", 0]);
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the check to run", () => x.sets()[0]?.state === "running" && x.runs().length === 1, LONGER.run);
+    x.engine.stopNow("Q");
+    await x.until("the stop to end the check", () => x.engine.idle() && x.sets()[0]!.state === "interrupted", LONGER.step);
+    assert.deepEqual([x.queue().run?.state, x.queue().run?.reason], ["paused", "stopped by the user"], "paused by the Stop, not halted");
+    const set = x.sets()[0]!;
+    assert.equal(set.checks[0]!.runs[0]!.interrupted, true);
+    assert.equal(set.unrunnable, undefined, "not unrunnable");
+    assert.deepEqual([x.queue().steps[0]!.status, x.queue().steps[0]!.checking?.unrunnable], ["checking", undefined]);
+    assert.deepEqual(fixMessages(x), [], "no check-fix round");
+    x.engine.resume("Q");
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+    assert.deepEqual(x.runs(), ["unit", "unit"], "run again at Resume");
+    assert.equal(x.sets().at(-1)!.state, "passed");
+    assert.deepEqual(fixMessages(x), []);
+  } finally { x.engine.shutdown(); x.cap.shutdown(); }
+});
+
 test("two projects' checks run one after the other through the coordinator", async () => {
   const shared = capacity();
   const a = withChecks(["done"], ["unit"], { capacity: shared });

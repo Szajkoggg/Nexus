@@ -164,7 +164,9 @@ engine runs the command through the shell in the worktree before the run's first
 runs, at most 30 minutes) and records `done_at`. A failure (an exit code other than 0, or the time limit) is tried
 once more; failing again, it halts the run with the reason, `the worktree setup command (<command>) failed twice: exit
 code <n>; its output ends: <output>` (queue CK), and records it under `failed`; when the run goes on (Continue, resume), the project's command as it is then runs again in the same
-worktree. A worktree the queue names by path, an existing one, and the project's own checkout get no setup. A success
+worktree. A run paused or stopped while the first try ran (the user's Pause or Stop, an update's drain, the server's
+end) gets no second try: nothing is recorded under `failed`, the run does not halt, and the command runs again when the
+run goes on (queue LCK, survey LC3 F4). A worktree the queue names by path, an existing one, and the project's own checkout get no setup. A success
 records the commit it ran on (`sha`); a change of its inputs (`defaults.worktree_setup_inputs`) since then runs it again
 before a check set or after a merge of the base at a step boundary (queue MI): ["The integration step"](git.md#the-integration-step), "Without a
 model".

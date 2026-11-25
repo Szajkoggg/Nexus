@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { approveQueue, updateSettings, type ProjectStore } from "@nexus/protocol";
 import { LONGER } from "./wait.ts";
-import { setup } from "./engine-setup.ts";
+import { FAST, restart, setup } from "./engine-setup.ts";
 
 /** A git repository at the project's root, a stand-in setup command, and the project's setting naming it. */
 function withSetup(store: ProjectStore) {
@@ -17,9 +17,15 @@ function withSetup(store: ProjectStore) {
   const git = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a], { cwd: root, stdio: "ignore" });
   git("init", "-q", "-b", "main"); writeFileSync(join(root, "a.txt"), "a\n"); git("add", "a.txt"); git("commit", "-qm", "init");
   const dir = mkdtempSync(join(tmpdir(), "nexus-setup-"));
-  const script = join(dir, "setup.cjs"), log = join(dir, "setup.log"), fail = join(dir, "fail");
+  const script = join(dir, "setup.cjs"), log = join(dir, "setup.log"), fail = join(dir, "fail"), hold = join(dir, "hold"), go = join(dir, "go");
   writeFileSync(script, `const fs = require("fs"), path = require("path");
 fs.appendFileSync(path.join(__dirname, "setup.log"), process.cwd() + "\\n");
+// A file "hold": this run waits for a file "go" (the test's gate), then takes "hold" away (the next run does not wait).
+if (fs.existsSync(path.join(__dirname, "hold"))) {
+  fs.writeFileSync(path.join(__dirname, "pid"), String(process.pid));
+  while (!fs.existsSync(path.join(__dirname, "go"))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  fs.rmSync(path.join(__dirname, "hold"));
+}
 const fail = path.join(__dirname, "fail");
 if (fs.existsSync(fail)) {
   // An empty file: it fails every time; a number: it fails that many times more.
@@ -30,7 +36,7 @@ if (fs.existsSync(fail)) {
 `);
   updateSettings(store, { defaults: { worktree_setup: `node "${script}"` } });
   const runs = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map((l) => l.trim().replaceAll("\\", "/").toLowerCase()) : []);
-  return { runs, fail, dir };
+  return { runs, fail, dir, hold, go };
 }
 
 const lower = (p: string) => p.replaceAll("\\", "/").toLowerCase();
@@ -109,3 +115,48 @@ test("a setup command failing once passes on its second try: the run goes on wit
     assert.equal(queue().run!.reason, undefined, "no halt");
   } finally { engine.shutdown(); rmSync(s.dir, { recursive: true, force: true }); }
 });
+
+// Survey LC3 F4 (b), the user's decision with queue LCK: a Stop or Pause between the two tries skips the second one (no
+// setup.failed, no halt), and the next Resume runs the setup again; an update's drain (with or without ending the
+// setup) and a shutdown leave it the same way, for the next server.
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+for (const how of ["pause", "stop", "drain", "drain-now", "shutdown"] as const) {
+  test(`${how} while the first try of a failing setup command runs: no second try, no failure recorded, no halt; it runs again when the run goes on`, async () => {
+    const x = setup(["done"]);
+    let engine = x.engine;
+    const s = withSetup(x.store);
+    writeFileSync(s.fail, "1"); // fails once: the run after the interruption passes
+    writeFileSync(s.hold, "");
+    x.store.writeQueue({ ...x.store.readQueue("Q"), worktree: "auto" });
+    const killed = how === "drain-now" || how === "shutdown";
+    try {
+      engine.start("Q", { runtime: "claude" });
+      await x.until("the first try waits at its gate", () => existsSync(join(s.dir, "pid")), LONGER.run);
+      const pid = Number(readFileSync(join(s.dir, "pid"), "utf8"));
+      if (how === "pause") engine.pause("Q");
+      else if (how === "stop") engine.stopNow("Q");
+      else if (how === "drain") engine.drainForUpdate(false);
+      else if (how === "drain-now") engine.drainForUpdate(true);
+      else engine.shutdown();
+      writeFileSync(s.go, "");
+      // Ending the setup ends its shell; its node child, on Windows, runs on to its end at the gate (worktree.ts runSetup).
+      await x.until("the first try ended", () => !existsSync(s.hold) || (killed && !alive(pid)), LONGER.run);
+      if (killed) rmSync(s.fail, { force: true });
+      await x.until("the engine let go of it", () => how === "shutdown" || engine.idle(), LONGER.run);
+      const wt = lower(x.store.readQueue("Q").worktree!);
+      assert.deepEqual(s.runs(), [wt], "no second try");
+      assert.equal(x.store.readGit("Q")?.setup?.failed, undefined, "no failure recorded");
+      assert.equal(x.store.readGit("Q")?.setup?.done_at, undefined);
+      assert.notEqual(x.queue().run?.state, "halted");
+      assert.equal(x.queue().steps[0]!.status, "pending", "no step opened");
+      if (how.startsWith("drain") || how === "shutdown") {
+        if (how !== "shutdown") engine.shutdown();
+        engine = restart(x.store, FAST);
+      }
+      if (x.queue().run?.state !== "running") engine.resume("Q");
+      await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+      assert.deepEqual(s.runs(), [wt, wt], "run again when the run went on, and passed");
+      assert.ok(x.store.readGit("Q")!.setup!.done_at);
+    } finally { writeFileSync(s.go, ""); engine.shutdown(); x.engine.shutdown(); rmSync(s.dir, { recursive: true, force: true }); }
+  });
+}
