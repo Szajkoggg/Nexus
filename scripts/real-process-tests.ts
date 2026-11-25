@@ -32,6 +32,7 @@ export const REAL_PROCESS_TESTS: Readonly<Record<string, string>> = {
   "apps/server/test/chat-update.test.ts": "starts a server",
   "apps/server/test/conversation-settings.test.ts": "starts a server",
   "apps/server/test/crash.test.ts": "starts a server",
+  "apps/server/test/crash-recovery.test.ts": "kills a server process of its own (crash-server.ts) where a fake is held: a server that dies without a drain or a shutdown",
   "apps/server/test/deploy-notices.test.ts": "starts a server",
   "apps/server/test/deploy-plan.test.ts": "starts a server",
   "apps/server/test/digest.test.ts": "starts a server",
@@ -67,15 +68,16 @@ function code(text: string): string {
 
 /**
  * How a test file starts processes, by what its code names: a fake runtime as a script path (fake-claude.ts or
- * fake-codex.ts in a string, not an import), a server (spawnServer, apps/server/test/helpers.ts), the CLI as a
- * process (bin/nexus.js in a string), test files in a Node process of their own ("--test" in a string). Empty: it
- * starts none of them.
+ * fake-codex.ts in a string, not an import), a server (spawnServer, apps/server/test/helpers.ts; crashAt,
+ * apps/server/test/crash-server.ts, one that dies), the CLI as a process (bin/nexus.js in a string), test files in a
+ * Node process of their own ("--test" in a string). Empty: it starts none of them.
  */
 export function processStarts(text: string): string[] {
   const c = code(text).replace(/\bfrom\s+(["'])[^"'\n]*\1/g, "").replace(/\bimport\(\s*(["'])[^"'\n]*\1\s*\)/g, "");
   const kinds: string[] = [];
   if (/["'`][^"'`\n]*fake-(?:claude|codex)\.ts["'`]/.test(c)) kinds.push("a fake runtime as a process");
   if (/\bspawnServer\(/.test(c)) kinds.push("a server");
+  if (/\bcrashAt\(/.test(c)) kinds.push("a server that dies");
   if (/["'`][^"'`\n]*bin\/nexus\.js["'`]/.test(c)) kinds.push("the CLI as a process");
   if (/["'`]--test["'`]/.test(c)) kinds.push("test files in a Node process of their own");
   return kinds;
