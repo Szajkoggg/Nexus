@@ -115,6 +115,20 @@ export async function workerA(runtime: Runtime, behaviours: string[], o: { level
   return { ...a, helper };
 }
 export type A = Awaited<ReturnType<typeof workerA>>;
+export type B = Awaited<ReturnType<typeof workerB>>;
+
+/**
+ * Worker B, then worker A of `behaviours` on `runtime` (B ended if A does not start); `body` runs with both, and both
+ * are ended after it, whatever it did.
+ */
+export async function withWorkers(
+  o: { runtime: Runtime; behaviours: string[]; level?: number; refuse?: boolean },
+  body: (a: A, b: B) => Promise<void>,
+): Promise<void> {
+  const b = await workerB(o.runtime);
+  const a = await workerA(o.runtime, o.behaviours, o).catch(async (e: unknown) => { await b.end(); throw e; });
+  try { await body(a, b); } finally { await a.end(); await b.end(); }
+}
 
 /** Waits for the gate's acknowledgement and checks it names the helper; Q1 reported and durable, Q2 pending, no new turn. */
 export async function atGate(a: A, o: { counted?: boolean } = {}): Promise<void> {

@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { loadProjectState, sendMessage } from "@nexus/protocol";
 import { LONGER, holds, until } from "./wait.ts";
-import { FAILED, RUNTIMES, alive, atGate, isLocked, locked, sameHandle, windows, workerA, workerB } from "./worker-gate-fixture.ts";
+import { FAILED, RUNTIMES, alive, atGate, isLocked, locked, sameHandle, windows, withWorkers } from "./worker-gate-fixture.ts";
 
 // The fake runtimes as processes of their own (scripts/real-process-tests.ts).
 process.env.NEXUS_CLAUDE = fileURLToPath(new URL("./fake-claude.ts", import.meta.url));
@@ -21,9 +21,7 @@ process.env.NEXUS_CODEX = fileURLToPath(new URL("./fake-codex.ts", import.meta.u
 
 for (const runtime of RUNTIMES) {
   test(`${runtime}: End -> AwaitExit -> C -> next turn: a late exit after false/5 acknowledges once and the next step runs once`, windows, async () => {
-    const b = await workerB(runtime);
-    const a = await workerA(runtime, ["ownedholdshared", "done"]).catch(async (e: unknown) => { await b.end(); throw e; });
-    try {
+    await withWorkers({ runtime, behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
       a.finishTurn();
       await atGate(a);
       await holds("nothing goes on while the wait is held", () => a.openings("Q2") === 0 && a.queue().run?.state === "running", 300);
@@ -39,13 +37,11 @@ for (const runtime of RUNTIMES) {
       a.contentKept();
       locked(b.dir);
       assert.ok(alive(b.pid));
-    } finally { await a.end(); await b.end(); }
+    });
   });
 
   test(`${runtime}: End -> AwaitExit with the helper alive: no C, the run halts with code 5, no next step; the job's end frees the directory`, windows, async () => {
-    const b = await workerB(runtime);
-    const a = await workerA(runtime, ["ownedholdshared", "done"]).catch(async (e: unknown) => { await b.end(); throw e; });
-    try {
+    await withWorkers({ runtime, behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
       a.finishTurn();
       await atGate(a);
       a.gate.open();
@@ -59,16 +55,14 @@ for (const runtime of RUNTIMES) {
       assert.equal(a.openings("Q1"), 1);
       a.contentKept();
       locked(b.dir);
-    } finally { await a.end(); await b.end(); }
+    });
   });
 }
 
 // H1: the stops, the pipe's end and the host's kill at the held wait, each followed by the wait's success or failure.
 for (const [runtime, outcome] of [["claude", "success"], ["codex", "failure"]] as const) {
   test(`${runtime}: Stop now at the held wait, then its ${outcome}: the run pauses at once, nothing is sent, Q2 never starts`, windows, async () => {
-    const b = await workerB(runtime);
-    const a = await workerA(runtime, ["ownedholdshared", "done"]).catch(async (e: unknown) => { await b.end(); throw e; });
-    try {
+    await withWorkers({ runtime, behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
       a.finishTurn();
       await atGate(a);
       const sent = a.received().length;
@@ -91,15 +85,13 @@ for (const [runtime, outcome] of [["claude", "success"], ["codex", "failure"]] a
       assert.equal(a.queue().steps[1]!.status, "pending");
       a.contentKept();
       locked(b.dir);
-    } finally { await a.end(); await b.end(); }
+    });
   });
 }
 
 for (const [runtime, outcome] of [["codex", "success"], ["claude", "failure"]] as const) {
   test(`${runtime}: Stop at once at the held wait, then its ${outcome}: paused at once, the exit waits for the wait, Q2 never starts`, windows, async () => {
-    const b = await workerB(runtime);
-    const a = await workerA(runtime, ["ownedholdshared", "done"]).catch(async (e: unknown) => { await b.end(); throw e; });
-    try {
+    await withWorkers({ runtime, behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
       a.finishTurn();
       await atGate(a);
       let stopped = false;
@@ -125,14 +117,12 @@ for (const [runtime, outcome] of [["codex", "success"], ["claude", "failure"]] a
       await holds("Q2 never starts", () => a.openings("Q2") === 0 && a.queue().steps[1]!.status === "pending", 300);
       a.contentKept();
       locked(b.dir);
-    } finally { await a.end(); await b.end(); }
+    });
   });
 }
 
 test("claude: the server's pipe ends at the held wait (the server lost), then the wait succeeds: the job ends everything, the files keep Q2 pending", windows, async () => {
-  const b = await workerB("claude");
-  const a = await workerA("claude", ["ownedholdshared", "done"]).catch(async (e: unknown) => { await b.end(); throw e; });
-  try {
+  await withWorkers({ runtime: "claude", behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
     a.finishTurn();
     await atGate(a);
     const host = a.gate.hosts.at(-1)!;
@@ -151,7 +141,7 @@ test("claude: the server's pipe ends at the held wait (the server lost), then th
     assert.equal(a.openings("Q2"), 0);
     a.contentKept();
     locked(b.dir);
-  } finally { await a.end(); await b.end(); }
+  });
 });
 
 // The host's loss under a held cleanup is the worker process's exit: the job's close (kill-on-close) has ended its
@@ -159,9 +149,7 @@ test("claude: the server's pipe ends at the held wait (the server lost), then th
 // process as after any exit between turns. Pinned as today's behaviour: Q1 is not repeated, Q2 runs once.
 for (const runtime of RUNTIMES) {
   test(`${runtime}: the host is killed at the held wait: the job's close ends its members; the run goes on in a new process, Q1 not repeated, Q2 once`, windows, async () => {
-    const b = await workerB(runtime);
-    const a = await workerA(runtime, ["ownedholdshared", "done"]).catch(async (e: unknown) => { await b.end(); throw e; });
-    try {
+    await withWorkers({ runtime, behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
       a.finishTurn();
       await atGate(a);
       const hosts = a.gate.hosts.length;
@@ -176,16 +164,14 @@ for (const runtime of RUNTIMES) {
       assert.equal(a.openings("Q2"), 1, "Q2 once");
       a.contentKept();
       locked(b.dir);
-    } finally { await a.end(); await b.end(); }
+    });
   });
 }
 
 // H4's remainder (worker-processes.test.ts and coordinator.test.ts hold one deferred resume and a refused one).
 for (const runtime of RUNTIMES) {
   test(`${runtime}: Stop now, two resumes and Stop now again at the held wait: the later pause holds after the success; one Resume then runs Q2 once`, windows, async () => {
-    const b = await workerB(runtime);
-    const a = await workerA(runtime, ["ownedholdshared", "done"]).catch(async (e: unknown) => { await b.end(); throw e; });
-    try {
+    await withWorkers({ runtime, behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
       a.finishTurn();
       await atGate(a);
       a.engine.stopNow("Q");
@@ -204,13 +190,11 @@ for (const runtime of RUNTIMES) {
       assert.equal(isLocked(a.dir), false);
       a.contentKept();
       locked(b.dir);
-    } finally { await a.end(); await b.end(); }
+    });
   });
 
   test(`${runtime}: a resume waiting at the held wait, then the wait fails: the run halts, the waiting resume does nothing; a later Resume runs Q2 once`, windows, async () => {
-    const b = await workerB(runtime);
-    const a = await workerA(runtime, ["ownedholdshared", "done"]).catch(async (e: unknown) => { await b.end(); throw e; });
-    try {
+    await withWorkers({ runtime, behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
       a.finishTurn();
       await atGate(a);
       a.engine.stopNow("Q");
@@ -226,13 +210,11 @@ for (const runtime of RUNTIMES) {
       assert.equal(a.openings("Q1"), 1);
       a.contentKept();
       locked(b.dir);
-    } finally { await a.end(); await b.end(); }
+    });
   });
 
   test(`${runtime}: a message and the review's acceptance at the held wait: neither is taken before the success; then Q2 once, the message once`, windows, async () => {
-    const b = await workerB(runtime);
-    const a = await workerA(runtime, ["ownedholdshared", "done"], { level: 1 }).catch(async (e: unknown) => { await b.end(); throw e; });
-    try {
+    await withWorkers({ runtime, behaviours: ["ownedholdshared", "done"], level: 1 }, async (a, b) => {
       a.finishTurn();
       await atGate(a);
       assert.equal(a.queue().steps[0]!.status, "review");
@@ -250,13 +232,11 @@ for (const runtime of RUNTIMES) {
       assert.equal(unread(), false);
       a.contentKept();
       locked(b.dir);
-    } finally { await a.end(); await b.end(); }
+    });
   });
 
   test(`${runtime}: a real DACL denial halts the run; a Resume while the failed worker's job is held whole runs Q2 once, after it, and Q1 never again`, windows, async () => {
-    const b = await workerB(runtime);
-    const a = await workerA(runtime, ["owneddenyshared", "done"], { refuse: false }).catch(async (e: unknown) => { await b.end(); throw e; });
-    try {
+    await withWorkers({ runtime, behaviours: ["owneddenyshared", "done"], refuse: false }, async (a, b) => {
       // The cleanup's one open is refused (the helper's DACL) and fails it; the kill that follows is held before its
       // first open, so the old job, its runtime and the helper are all up while the user resumes.
       a.gate.holdOpen(2);
@@ -278,6 +258,6 @@ for (const runtime of RUNTIMES) {
       assert.equal(a.openings("Q1"), 1, "Q1 never again");
       a.contentKept();
       locked(b.dir);
-    } finally { await a.end(); await b.end(); }
+    });
   });
 }

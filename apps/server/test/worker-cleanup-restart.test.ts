@@ -26,7 +26,7 @@ import { crashAt, endCrashServers } from "./crash-server.ts";
 import { REAL_PROCESSES, fixtureRun, restart } from "./engine-setup.ts";
 import { fakeStarts } from "./fake-behaviour.ts";
 import { LONGER, holds, until } from "./wait.ts";
-import { alive, atGate, isLocked, locked, sameHandle, windows, workerA, workerAProject, workerB, type A } from "./worker-gate-fixture.ts";
+import { alive, atGate, isLocked, locked, sameHandle, windows, withWorkers, workerAProject, workerB, type A } from "./worker-gate-fixture.ts";
 
 // The fake runtimes as processes of their own (scripts/real-process-tests.ts).
 process.env.NEXUS_CLAUDE = fileURLToPath(new URL("./fake-claude.ts", import.meta.url));
@@ -90,9 +90,7 @@ function workDoneOnce(a: A, b: { dir: string; pid: number }, q2 = 1): void {
 
 for (const [runtime, outcome] of [["claude", "success"], ["codex", "failure"]] as const) {
   test(`${runtime}: an update's hand-over at the held wait, then its ${outcome}: the drain holds the run without waiting for the cleanup; the old processes end after it and its outcome writes nothing; the next server resumes by itself, Q1 not repeated, Q2 once in a host started after the old one ended`, windows, async () => {
-    const b = await workerB(runtime);
-    const a = await workerA(runtime, ["ownedholdshared", "done"]).catch(async (e: unknown) => { await b.end(); throw e; });
-    try {
+    await withWorkers({ runtime, behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
       a.finishTurn();
       await atGate(a);
       assert.deepEqual(a.engine.drainForUpdate(false), ["Q"], "the update holds the run");
@@ -107,14 +105,12 @@ for (const [runtime, outcome] of [["claude", "success"], ["codex", "failure"]] a
       await until("the queue finishes", () => n.run()?.state === "finished", LONGER.run);
       noOverlap(a, 2);
       workDoneOnce(a, b);
-    } finally { await a.end(); await b.end(); }
+    });
   });
 }
 
 test("claude: an update's hand-over at the held wait while Q1 waits for the user's review: the next server goes on by itself but runs nothing until the acceptance; then Q2 once", windows, async () => {
-  const b = await workerB("claude");
-  const a = await workerA("claude", ["ownedholdshared", "done"], { level: 1 }).catch(async (e: unknown) => { await b.end(); throw e; });
-  try {
+  await withWorkers({ runtime: "claude", behaviours: ["ownedholdshared", "done"], level: 1 }, async (a, b) => {
     a.finishTurn();
     await atGate(a);
     assert.equal(a.queue().steps[0]!.status, "review");
@@ -130,13 +126,11 @@ test("claude: an update's hand-over at the held wait while Q1 waits for the user
     await until("the queue finishes", () => n.run()?.state === "finished", LONGER.run);
     noOverlap(a, 2);
     workDoneOnce(a, b);
-  } finally { await a.end(); await b.end(); }
+  });
 });
 
 test("codex: every step done, an update's hand-over at the held wait: the next server finishes the run and starts no process", windows, async () => {
-  const b = await workerB("codex");
-  const a = await workerA("codex", ["ownedholdshared"]).catch(async (e: unknown) => { await b.end(); throw e; });
-  try {
+  await withWorkers({ runtime: "codex", behaviours: ["ownedholdshared"] }, async (a, b) => {
     a.finishTurn();
     await atGate(a);
     a.engine.drainForUpdate(false);
@@ -148,16 +142,14 @@ test("codex: every step done, an update's hand-over at the held wait: the next s
     assert.equal(a.openings("Q1"), 1);
     a.contentKept();
     locked(b.dir);
-  } finally { await a.end(); await b.end(); }
+  });
 });
 
 // ---------------------------------------------------------------- H2: the server's own shutdown and its sudden death
 
 for (const [runtime, outcome] of [["codex", "success"], ["claude", "failure"]] as const) {
   test(`${runtime}: the server shuts down at the held wait, then its ${outcome}: the old processes end after it and its outcome writes nothing; the next server pauses the run (a plain restart) and starts nothing; Resume runs Q2 once; the paused and halted queues untouched`, windows, async () => {
-    const b = await workerB(runtime);
-    const a = await workerA(runtime, ["ownedholdshared", "done"]).catch(async (e: unknown) => { await b.end(); throw e; });
-    try {
+    await withWorkers({ runtime, behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
       const c = controls(a);
       a.finishTurn();
       await atGate(a);
@@ -176,7 +168,7 @@ for (const [runtime, outcome] of [["codex", "success"], ["claude", "failure"]] a
       noOverlap(a, 2);
       workDoneOnce(a, b);
       c.unchanged("after the Resume");
-    } finally { await a.end(); await b.end(); }
+    });
   });
 }
 
@@ -234,9 +226,7 @@ for (const runtime of ["claude", "codex"] as const) {
 // nothing runs beside the old job.
 for (const runtime of ["claude", "codex"] as const) {
   test(`${runtime}: the runtime crashes at the held wait (its helper ends with it): its exit reaches the engine only after the cleanup's success; Q2 runs once in a host started after the old one ended (retried once when C came first); Q1 not repeated`, windows, async () => {
-    const b = await workerB(runtime);
-    const a = await workerA(runtime, ["ownedholdshared", "done"]).catch(async (e: unknown) => { await b.end(); throw e; });
-    try {
+    await withWorkers({ runtime, behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
       a.finishTurn();
       await atGate(a);
       const runtimePid = a.store.readRuntime(a.session())!.pid;
@@ -266,15 +256,13 @@ for (const runtime of ["claude", "codex"] as const) {
       }
       noOverlap(a, 2);
       workDoneOnce(a, b);
-    } finally { await a.end(); await b.end(); }
+    });
   });
 }
 
 for (const runtime of ["claude", "codex"] as const) {
   test(`${runtime}: the process settings change at the held wait: nothing restarts while it is held; after its success the old process ends first, then Q2 runs once in a new host`, windows, async () => {
-    const b = await workerB(runtime);
-    const a = await workerA(runtime, ["ownedholdshared", "done"]).catch(async (e: unknown) => { await b.end(); throw e; });
-    try {
+    await withWorkers({ runtime, behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
       a.finishTurn();
       await atGate(a);
       if (runtime === "claude") a.store.updateProject((p) => ({ ...p, runtimes: { ...p.runtimes, claude: { ...p.runtimes.claude, allowed_tools: ["Edit"] } } }));
@@ -288,14 +276,12 @@ for (const runtime of ["claude", "codex"] as const) {
       assert.ok(a.store.readActivity(a.session()).entries.some((e) => e.text.includes("restarts the session's process on the project's changed settings")), "a restart for the settings");
       noOverlap(a, 2);
       workDoneOnce(a, b);
-    } finally { await a.end(); await b.end(); }
+    });
   });
 }
 
 test("claude: Q1 unfinished (its stop condition) and the server shuts down at the held wait: the next server pauses the run; a Resume is refused at once and starts nothing", windows, async () => {
-  const b = await workerB("claude");
-  const a = await workerA("claude", ["ownedholdsharedstop", "done"]).catch(async (e: unknown) => { await b.end(); throw e; });
-  try {
+  await withWorkers({ runtime: "claude", behaviours: ["ownedholdsharedstop", "done"] }, async (a, b) => {
     a.finishTurn();
     await atGate(a);
     assert.equal(a.queue().steps[0]!.status, "stopped");
@@ -308,7 +294,7 @@ test("claude: Q1 unfinished (its stop condition) and the server shuts down at th
     assert.equal(a.openings("Q1"), 1, "Q1 not reopened");
     a.contentKept();
     locked(b.dir);
-  } finally { await a.end(); await b.end(); }
+  });
 });
 
 // ---------------------------------------------------------------- H7: the record the next server starts from
