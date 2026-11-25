@@ -34,7 +34,8 @@
 //               nexus review add (the picture keyed, as a result), then done
 //   checks      report each check its opening lists under "Checks for every step" with nexus check, under that exact
 //               name, as the opening asks, then done
-//   shortchecks the same under a short name of its own (the last word: "npm test" as "test"), as workers once did
+//   shortchecks the same under a short name of its own (the last word: "npm test" as "test"), as workers once did;
+//               nexus check refuses those names now (queue ACX, W4), so nothing is recorded
 //   ownedhold   hold an empty directory with a Windows helper until worker cleanup; work(), then done
 //   owneddeny   the same, but the helper denies PROCESS_TERMINATE on its own process DACL
 //   noopexit1   Codex's fake only: the first time (counted beside FAKE_LOG, any process of the step), end the turn
@@ -462,7 +463,8 @@ export async function respond(fake: Fake, text: string, tool: (command: string) 
     if (behaviour === "checks" || behaviour === "shortchecks") {
       const listed = /\nChecks for every step:\n((?:- .*(?:\n|$))+)/.exec(text)?.[1] ?? "";
       for (const name of listed.split("\n").filter(Boolean).map((l) => l.slice(2).trim())) {
-        await nexus("check", step, behaviour === "checks" ? name : name.split(/\s+/).at(-1)!, "--ok", "--summary", "fake run", "--duration", "1");
+        const args = ["check", step, behaviour === "checks" ? name : name.split(" ").at(-1)!, "--ok", "--summary", "fake run", "--duration", "1"];
+        if (behaviour === "checks") await nexus(...args); else await nexusOut(args); // the short names are refused (queue ACX, W4)
       }
     }
     // "commit": a commit in the working directory (a file named after the step), then done.

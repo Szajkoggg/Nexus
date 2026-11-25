@@ -13,7 +13,7 @@ function setup() {
   const root = mkdtempSync(join(tmpdir(), "nexus-cli-check-"));
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   store.writeSession({ protocol: 1, id: "w", project: "p", role: "worker", runtime: "claude", cwd: root, launched_by: "nexus", created_at: new Date().toISOString(), queue: "Q" });
-  store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "approved", stop_conditions: [], checks: [], steps: [{ id: "Q1", title: "Step", goal: "", acceptance: [] }] });
+  store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "approved", stop_conditions: [], checks: ["typecheck", "test", "lint"], steps: [{ id: "Q1", title: "Step", goal: "", acceptance: [] }] });
   store.appendEvent({ v: 1, id: newId(), at: new Date().toISOString(), session: "w", type: "step.started", queue: "Q", step: "Q1" } as Event);
   const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: store.dir, NEXUS_SESSION: "w" };
   const nexus = async (...a: string[]) => await cliOut([...a], { cwd: root, env });

@@ -16,7 +16,7 @@ import {
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateDirs, templateQueueId, unusableTemplate, type MergedTemplates,
   NoteMeta, Role, Runtime, type PictureRole, type ReviewItem, type SessionFile,
   noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, ideaStatuses, reportSourceHash,
-  capacityLines, latestCheckSet, readCapacity, reviewStats, reviewStatsText, switchReport, switchReportText, helperAbout, helperText, NEXUS_PASS_ON, PassOnReason,
+  capacityLines, latestCheckSet, stepChecks, readCapacity, reviewStats, reviewStatsText, switchReport, switchReportText, helperAbout, helperText, NEXUS_PASS_ON, PassOnReason,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -26,7 +26,8 @@ import { CONTEXT_SUMMARY_WORDS, HELP_TOPICS, topicList } from "./help.ts";
 
 const HELP = `nexus — report to and manage Nexus (protocol 1)
 
-Agent commands (session from NEXUS_SESSION or --session):
+Agent commands (session from NEXUS_SESSION or --session; a --session other than a set NEXUS_SESSION is refused;
+a review helper's session runs only nexus status, nexus help, nexus doc and its nexus review accept|send-back|pass-on):
   nexus status [--all] [--queue <id>]           current queue, step, notes and open questions (without a
                                                 session: the queues at work, then the approved ones not running).
                                                 An orchestrator's or a thinking partner's: the open queues, the finished ones counted, the
@@ -44,7 +45,8 @@ Agent commands (session from NEXUS_SESSION or --session):
                     Files are copied into .nexus/queues/<queue>/review/<step>/ (write them outside the working tree).
                     Read nexus help review before preparing review material.
   nexus check <step> <name> --ok|--fail [--summary <text>] [--duration <seconds>]   (how long the check ran; it is
-                    the metric check:<name>); refused for a check Nexus runs itself (its step's opening says so)
+                    the metric check:<name>); refused for a check Nexus runs itself (its step's opening says so), and for a
+                    name that is not one of the step's checks as its opening lists them (the refusal names them)
   nexus check <step> <name> --unrelated --evidence <text>   (worker only) a check Nexus ran fails, not because of your
                     work: Nexus runs it on the queue's base commit (end your turn without nexus step done)
   nexus check decide <queue> <step> accept|fix --reason <text>   (orchestrator only) a disputed failure Nexus could not
@@ -64,7 +66,8 @@ Agent commands (session from NEXUS_SESSION or --session):
                                       steps, when last, which check
   nexus stop <step> --condition <text> --reason <text>   the condition met, as the queue words it; the reason, short
   nexus ask <text|-> [--step <step>] [--option <text>]... [--recommend <option>] [--can-continue]
-  nexus withdraw <qid> --reason <text>
+  nexus withdraw <qid> --reason <text>   an open question of this session's (or of the one it took over from); an
+                    unknown, answered, withdrawn or another session's question is refused
   nexus context <text|-> [--topics a,b] [--files a,b] [--step <step>]
   nexus report <queue> --file <path> --summary <text> [--findings <n>]   (a maintenance queue: how many findings)
   nexus covers <file>.md#<YYYY-MM-DD>...   (thinking partner only) in a hand-over, before the summary: the Decided
@@ -139,7 +142,9 @@ Agent commands (session from NEXUS_SESSION or --session):
                                       target or a threshold. A value beyond the threshold is marked and told to you.
                                       A negative number: --warn-below=-5
   (--queue <id> names the queue whenever it is given, over the session's own; nexus status heeds it only in an orchestrator's or a thinking partner's session.
-   A text given as - is read from standard input: ask, answer, note, context. A command that takes a subcommand and gets none runs the first of its own: ideas matches, metric list, template list, recurring list, server status)
+   A text given as - is read from standard input: ask, answer, note, context; an empty one is refused. Positional
+   arguments beyond a command's own are refused (quote a text with spaces; give a list comma-separated, not as a glob).
+   A file named that is not there, and an unknown queue, are refused by name. A command that takes a subcommand and gets none runs the first of its own: ideas matches, metric list, template list, recurring list, server status)
 
 Help:
   nexus help [<topic>]                 Nexus's standards; topics: ${Object.keys(HELP_TOPICS).join(", ")}
@@ -257,6 +262,14 @@ const pathArg = (p: string) => normPath(p, workDir());
 const fullHelp = () => `${HELP}\n${topicList()}`;
 
 class UsageError extends Error {}
+/** The roles a session attached by hand may have (`nexus attach --role`). */
+const ATTACH_ROLES = ["worker", "orchestrator"] as const;
+/** A file named on the command line, read; one that is not there is a usage error naming it (H4), not a stack trace. */
+function readArgFile(given: string): string {
+  const file = pathArg(given);
+  if (!existsSync(file) || !statSync(file).isFile()) throw new UsageError(`no such file: ${file}`);
+  return readFileSync(file, "utf8");
+}
 /** A recommendation checked against the question's options (its text or number), as the option's text. */
 const recommendation = (options: readonly string[] | undefined, given: string): string => {
   try { return recommendedOption(options, given); } catch (e) { throw new UsageError((e as Error).message); }
@@ -283,8 +296,41 @@ function store(): ProjectStore {
   return new ProjectStore(dir, undefined, env());
 }
 
+/**
+ * The call's session: --session, else NEXUS_SESSION. A --session other than a set NEXUS_SESSION is refused (S7): a
+ * session writes only its own log, with its own role's rights. Without NEXUS_SESSION (a shell of the user's, a session
+ * attached by hand) --session names it, as always.
+ */
+function sessionId(): string | undefined {
+  const given = o().session; const set = env().NEXUS_SESSION;
+  if (given && set && given !== set) {
+    throw new UsageError(`--session ${given} is not this session (NEXUS_SESSION is ${set}): a session writes only its own log; leave --session out`);
+  }
+  return given ?? set;
+}
+
+/**
+ * Refuses positional arguments beyond the `n` a command takes (H6): a text with spaces left unquoted, or a list given as
+ * a shell glob (`--files src/*`, which the shell expands into several arguments), would otherwise lose its rest.
+ */
+function noMore(n: number, usage: string): void {
+  const extra = args().slice(n);
+  if (!extra.length) return;
+  throw new UsageError(`${usage} takes no more arguments, not ${extra.map((x) => `"${x}"`).join(" ")}: quote a text with spaces as one argument, and give a list comma-separated (--files a.ts,b.ts), not as a glob`);
+}
+
+/** The session and those it took over from (context care: `continues`), whose questions are its own too. */
+function ownLine(st: ProjectStore, s: SessionFile): Set<string> {
+  const ids = new Set([s.id]);
+  for (let at: SessionFile | undefined = s; at?.continues && !ids.has(at.continues);) {
+    ids.add(at.continues);
+    try { at = st.readSession(at.continues); } catch { at = undefined; }
+  }
+  return ids;
+}
+
 function session(st: ProjectStore): SessionFile {
-  const id = need(o().session ?? env().NEXUS_SESSION, "session (NEXUS_SESSION or --session; `nexus attach` creates one)");
+  const id = need(sessionId(), "session (NEXUS_SESSION or --session; `nexus attach` creates one)");
   let s: SessionFile;
   try { s = st.readSession(id); } catch { throw new UsageError(`unknown session ${id}`); }
   // What this call writes is stamped after what its session wrote and was told, and after what the server had seen
@@ -498,7 +544,7 @@ function reviewAudit(): void {
  * command, so a helper reports a refusal in its verdict instead of asking or writing anything else.
  */
 function helperGate(cmd: string): void {
-  const sid = o().session ?? env().NEXUS_SESSION;
+  const sid = sessionId();
   if (!sid) return;
   let role: string | undefined;
   try { role = store().readSession(sid).role; } catch { return; }
@@ -515,7 +561,13 @@ function report(r: { ok: boolean; message: string } | undefined): void {
 
 const list = (v?: string) => (v ? v.split(",").map((x) => x.trim()).filter(Boolean) : []);
 const stdin = () => call().stdin?.() ?? "";
-const readText = (v: string) => (v === "-" ? stdin().trim() : v);
+/** A text argument; `-` reads it from standard input, which must not be empty (H2: nothing records an empty text). */
+const readText = (v: string) => {
+  if (v !== "-") return v;
+  const text = stdin().trim();
+  if (!text) throw new UsageError("- reads the text from standard input, and it was empty: pipe the text in, or give it as the argument");
+  return text;
+};
 
 /** git's output in `cwd`, trimmed; undefined when git fails (not a repository, no git). */
 function gitOut(cwd: string, gitArgs: string[]): string | undefined {
@@ -700,7 +752,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (sub === "update" || sub === "cancel" || sub === "cancel-plan") {
       // Restarting Nexus restarts every agent's runtime: the user's call, which an orchestrator may carry out when
       // asked. A worker or a thinking partner never may (they run on the very server they would restart).
-      const sid = o().session ?? env().NEXUS_SESSION;
+      const sid = sessionId();
       if (sid) {
         let role: string | undefined;
         let project: string | undefined;
@@ -741,7 +793,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       const what = args()[2];
       if (what === undefined) return printAway((await server("GET", "/api/server")).away);
       // Away mode is the user's: no agent switches it, the orchestrator included.
-      const sid = o().session ?? env().NEXUS_SESSION;
+      const sid = sessionId();
       if (sid) throw new UsageError("only the user switches away mode (in the dashboard, or with nexus server away outside an agent session)");
       if (what === "on") return printAway((await server("POST", "/api/server/away", { until: need(o().until, "--until <8:00|ISO time>") })).away);
       if (what === "off") return printAway((await server("POST", "/api/server/away", { until: null })).away);
@@ -753,7 +805,7 @@ const commands: Record<string, () => void | Promise<void>> = {
   status() {
     const st = store();
     const state = loadProjectState(st);
-    const sid = o().session ?? env().NEXUS_SESSION;
+    const sid = sessionId();
     const s = sid ? state.sessions.find((x) => x.id === sid) : undefined;
     say(`project ${state.project.name} (${state.project.id})`);
     // An orchestrator's (and a partner's) overview: short by default, everything with --all, one queue with --queue
@@ -834,6 +886,8 @@ const commands: Record<string, () => void | Promise<void>> = {
 
   step() {
     const sub = args()[1];
+    if (sub === "start" || sub === "done" || sub === "failed") noMore(3, `nexus step ${sub} <step>`);
+    if (sub === "progress") noMore(4, "nexus step progress <step> <text>");
     if (sub === "start") return stepEvent("step.started", args()[2]);
     if (sub === "progress") return stepEvent("step.progress", args()[2], () => ({ text: need(args()[3], "<text>"), pct: o().pct ? Number(o().pct) : undefined }));
     if (sub === "done") return stepDone(args()[2]);
@@ -892,6 +946,14 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (st.readChecks(queue)?.steps[step]?.by === "nexus") {
       throw new UsageError(`Nexus runs the checks of step ${step} itself after your nexus step done, and sends you their output only if one fails; do not report them. A failure that is not your work's: nexus check ${step} "<name>" --unrelated --evidence "<what shows it>"`);
     }
+    noMore(3, "nexus check <step> <name>");
+    // W4: a check reported under another name than its step lists counts as not reported; refused, naming them.
+    const known = stepChecks(st.readRun(queue)?.checks ?? st.readProject().defaults.checks, st.readQueue(queue).checks);
+    if (!known.includes(name)) {
+      throw new UsageError(known.length
+        ? `"${name}" is not one of step ${step}'s checks; report each under its name exactly as listed: ${known.map((c) => `"${c}"`).join(", ")}`
+        : `step ${step} has no checks to report`);
+    }
     const duration = o().duration === undefined ? undefined : Number(o().duration);
     if (duration !== undefined && (o().duration!.trim() === "" || !Number.isFinite(duration) || duration < 0)) {
       throw new UsageError(`--duration takes the check's time in seconds (for example 12 or 3.5), not "${o().duration}"`);
@@ -900,10 +962,12 @@ const commands: Record<string, () => void | Promise<void>> = {
   },
 
   stop() {
+    noMore(2, "nexus stop <step>");
     stepEvent("queue.stop", args()[1], () => ({ condition: need(o().condition, "--condition"), reason: need(o().reason, "--reason") }));
   },
 
   ask() {
+    noMore(2, "nexus ask <text|->");
     const st = store(); const s = session(st);
     const text = readText(need(args()[1], "<text>"));
     const step = o().step;
@@ -919,11 +983,21 @@ const commands: Record<string, () => void | Promise<void>> = {
 
   withdraw() {
     const st = store(); const s = session(st);
-    emit(st, s, { type: "question.withdrawn", qid: need(args()[1], "<qid>"), reason: need(o().reason, "--reason") });
+    noMore(2, "nexus withdraw <qid>");
+    const qid = need(args()[1], "<qid>");
+    const reason = need(o().reason, "--reason");
+    // W2: only an open question of this session (or of the one it took over from) is withdrawn; anything else would
+    // say ok and change nothing, the question still holding its step.
+    const q = loadProjectState(st).questions.find((x) => x.qid === qid);
+    if (!q) throw new UsageError(`no question ${qid} in this project (nexus status shows your open questions and their qids)`);
+    if (!ownLine(st, s).has(q.session)) throw new UsageError(`question ${qid} is another session's (${q.session}); a session withdraws only its own questions`);
+    if (q.state === "answered" || q.state === "withdrawn") throw new UsageError(`question ${qid} is ${q.state} already: nothing to withdraw`);
+    emit(st, s, { type: "question.withdrawn", qid, reason });
     say("ok: question withdrawn");
   },
 
   context() {
+    noMore(2, "nexus context <text|->");
     const st = store(); const s = session(st);
     const text = readText(need(args()[1], "<text|->"));
     let queue: string | undefined;
@@ -1030,6 +1104,7 @@ const commands: Record<string, () => void | Promise<void>> = {
   },
 
   log() {
+    noMore(2, "nexus log <text>");
     const st = store(); const s = session(st);
     emit(st, s, { type: "log", level: (o().level ?? "info") as "info", text: need(args()[1], "<text>") });
     say("ok");
@@ -1052,7 +1127,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (o().set?.length) throw new UsageError("--set goes with --template");
     const st = store(); const s = orchestrator(st);
     const src = need(args()[2], "<file.yaml|->");
-    const text = src === "-" ? stdin() : readFileSync(pathArg(src), "utf8");
+    const text = src === "-" ? stdin() : readArgFile(src);
     let definition: unknown;
     try { definition = YAML.parse(text); } catch (e) { throw new UsageError(`not valid YAML: ${(e as Error).message}`); }
     const id = (definition as { id?: unknown } | null)?.id;
@@ -1247,6 +1322,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     const st = store(); const s = session(st);
     if (s.role !== "orchestrator") throw new UsageError("only an orchestrator session may answer questions");
     if (o().continue && o().wait) throw new UsageError("give at most one of --continue or --wait");
+    noMore(3, "nexus answer <qid> <text|->");
     const qid = need(args()[1], "<qid>");
     let recommended: string | undefined;
     const recommend = o().recommend;
@@ -1288,7 +1364,7 @@ const commands: Record<string, () => void | Promise<void>> = {
   import() {
     const st = store();
     const file = pathArg(need(args()[1], "<file.md>"));
-    const result = importMarkdownQueues(readFileSync(file, "utf8"), { source: file, prefix: o().prefix, now: now() });
+    const result = importMarkdownQueues(readArgFile(file), { source: file, prefix: o().prefix, now: now() });
     const existing = new Set(st.queueIds());
     for (const q of result.queues) {
       const clash = existing.has(q.id);
@@ -1308,10 +1384,12 @@ const commands: Record<string, () => void | Promise<void>> = {
   attach() {
     const st = store();
     const project = st.readProject();
-    const role = oneOf("--role", Role.options, o().role ?? "worker");
+    // H3/S8: a hand-attached session is a worker or an orchestrator; the other roles are Nexus's own sessions, and
+    // the loader grants events by role (a "user" session could write the user's decisions).
+    const role = oneOf("--role", ATTACH_ROLES, o().role ?? "worker");
     const runtime = oneOf("--runtime", Runtime.options, o().runtime ?? "external");
     const queue = o().queue;
-    if (queue) st.readQueue(queue);
+    if (queue && !st.queueIds().includes(queue)) throw new UsageError(`unknown queue ${queue} (nexus status lists the queues)`);
     const cwd = pathArg(workDir());
     const s: SessionFile = {
       protocol: 1, id: newId(), project: project.id, role, runtime, native_id: null, title: o().title,
@@ -1322,6 +1400,7 @@ const commands: Record<string, () => void | Promise<void>> = {
   },
 
   note() {
+    noMore(4, "nexus note <queue> <step> <text|->");
     const st = store();
     const queue = need(args()[1], "<queue>"); const step = need(args()[2], "<step>");
     checkStep(st, queue, step);

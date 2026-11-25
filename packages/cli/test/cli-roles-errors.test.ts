@@ -78,7 +78,7 @@ test("a role, runtime or note sender the protocol does not know is a usage error
   const x = setup();
   const sessions = () => x.store.sessionIds().length;
   const before = sessions();
-  refused(await x.nexus("w", "attach", "--role", "boss"), /--role is one of worker, orchestrator, .*not "boss"/);
+  refused(await x.nexus("w", "attach", "--role", "boss"), /^nexus: --role is one of worker, orchestrator, not "boss"$/m); // the whole message: the two roles a hand-attached session may have
   refused(await x.nexus("w", "attach", "--runtime", "gpt"), /--runtime is one of claude, codex, external, not "gpt"/);
   assert.equal(sessions(), before, "no session written");
   refused(await x.nexus("w", "note", "Q", "Q1", "hello", "--from", "boss"), /--from is one of user, orchestrator, not "boss"/);

@@ -147,7 +147,7 @@ test("the queue's level set to 1 hands its steps waiting for the orchestrator to
 });
 
 for (const [behaviour, missing] of [["checks", false], ["shortchecks", true]] as const) {
-  test(`a closing step that reports the checks ${missing ? "under short names of its own: the review notice lists them as not reported" : "as its opening asks (exact names): the review notice misses none"}`, async () => {
+  test(`a closing step that reports the checks ${missing ? "under short names of its own: the CLI refuses them, and the review notice lists them as not reported" : "as its opening asks (exact names): the review notice misses none"}`, async () => {
     const x = setup();
     process.env.FAKE_CLOSING = behaviour;
     try {
@@ -164,7 +164,7 @@ for (const [behaviour, missing] of [["checks", false], ["shortchecks", true]] as
       const sent = x.delivered().find((t) => t.startsWith("[Nexus] Step C.refactor"))!;
       const names = x.step("C", "C.refactor").checks.map((c) => c.name);
       if (missing) {
-        assert.deepEqual(names, ["typecheck", "test"]);
+        assert.deepEqual(names, [], "nexus check refused the short names");
         assert.match(sent, /Checks of the queue not reported this round: npm run typecheck; npm test/);
       } else {
         assert.deepEqual(names, ["npm run typecheck", "npm test"]);

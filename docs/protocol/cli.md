@@ -39,7 +39,7 @@ nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--re
                                                # the text, or - to read it from stdin; --recommend: one of the --option values, by text or number (1 = first)
 nexus context "summary text" --topics rock,support --files Runtime/Core/Rock/a.cs,Runtime/Core/Rock/b.cs [--step W3]   # a comma list, not a glob (a shell expands it and the rest is lost); the text as the argument, or - to read it from stdin (... <<< "text"); its shape: nexus help context (beyond 2000 words it warns)
 nexus report W --file <temp>/nexus-reports/<project>/W.md --summary "..." [--findings 3]   # copied to .nexus/queues/W/report.md; --findings: a maintenance queue's
-nexus withdraw <qid> --reason "..."            # a question no longer needed (question.withdrawn)
+nexus withdraw <qid> --reason "..."            # a question no longer needed (question.withdrawn); only an open one of this session's or of the one it took over from: an unknown, answered, withdrawn or another session's is refused
 nexus log "Retrying the probe" [--level info|warn|error]   # a line into the session's own log
 nexus template list | show <id>                # the queue templates in effect (see "Queue templates")
 nexus recurring list                           # the recurring queues and their state (see "Recurring queues")
@@ -79,7 +79,7 @@ nexus tags rename <old> <new> [--reason ...]    # the user accepts it (see "Tags
 nexus metric define bundle-kb --unit KB [--show line|bar|number] [--target 400] [--warn-above 500 | --warn-below=-1]
                                                # a project metric, or a change to one (see "Project metrics")
 # setup
-nexus attach [--role worker|orchestrator] [--runtime claude|codex|external] [--queue <id>] [--title <text>]   # register a hand-started session (default: a worker, external: it sets up the session itself); a role or runtime the protocol does not know is refused
+nexus attach [--role worker|orchestrator] [--runtime claude|codex|external] [--queue <id>] [--title <text>]   # register a hand-started session (default: a worker, external: it sets up the session itself); a role other than worker or orchestrator, a runtime the protocol does not know, or an unknown --queue is refused
 nexus project list                             # the registered projects
 nexus project add <path> [--id] [--name]       # creates .nexus/ (self-ignoring), registers the project, prints the rules files' check;
                                                # a kept .nexus/ (a project removed from Nexus) brings it back under its id
@@ -95,7 +95,10 @@ nexus server update [--now] [--ref <ref>]      # deploy now: let running steps f
 nexus server cancel                            # give up waiting for a deploy; the held queues go on (same rule as `server update`)
 ```
 
-A command line the CLI cannot take (an unknown option, an option without its value, a value the protocol does not know)
+A command line the CLI cannot take (an unknown option, an option without its value, a value the protocol does not know,
+positional arguments beyond the command's own, such as an unquoted text or a list given as a glob, a text given as `-`
+with an empty standard input, a file named that is not there, an unknown queue, a `--session` other than a set
+`NEXUS_SESSION`, a `nexus check` name that is not one of the step's checks, which the message lists)
 ends with `nexus: <what is wrong>` on stderr and exit code 2, as every refusal does, never with a stack trace. A
 negative number reads as an option: a positional one goes after `--` (`nexus metric record delta -- -5`), an option's
 with `=` (`--warn-below=-5`); the message says so.

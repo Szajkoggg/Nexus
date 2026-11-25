@@ -24,7 +24,7 @@ function setup() {
   const at = new Date().toISOString();
   store.writeSession({ protocol: 1, id: "w", project: "p", role: "worker", runtime: "claude", cwd: root, launched_by: "nexus", created_at: at, queue: "Q" });
   store.writeSession({ protocol: 1, id: "o", project: "p", role: "orchestrator", runtime: "claude", cwd: root, launched_by: "nexus", created_at: at });
-  store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "approved", stop_conditions: [], checks: [], steps: [{ id: "Q1", title: "Step", goal: "", acceptance: [] }, { id: "Q2", title: "Next", goal: "", acceptance: [] }] });
+  store.writeQueue({ protocol: 1, id: "Q", title: "Queue", revision: 1, status: "approved", stop_conditions: [], checks: ["npm test"], steps: [{ id: "Q1", title: "Step", goal: "", acceptance: [] }, { id: "Q2", title: "Next", goal: "", acceptance: [] }] });
   const run = async (session: string, a: string[]) => {
     const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_DIR: store.dir, NEXUS_SESSION: session };
     try { return { out: await cliOut([...a], { cwd: root, env }), err: "" }; }
