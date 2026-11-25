@@ -273,16 +273,81 @@ test("an unrenewed lease expires even when its recorded PID is alive", async () 
   } finally { lock?.release(); }
 });
 
-test("a renewed lease keeps another run waiting beyond the original expiry", async () => {
+test("a renewed lease keeps another run waiting beyond the original expiry", async (t) => {
+  // On mock time (queue CI11): holder and waiter share this process, so on real time a stall of the process longer than
+  // the 300 ms lease (a busy machine, a slow write) let the waiter's poll run before the renewal and take the lease over.
+  // The renewal's mtime and the waiter's clock are both the mocked Date, so only the ticks below move time.
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: Date.now() });
   const file = lockFile();
   const first = await acquire({ file, lease: true, staleMs: 300, say: () => {} });
   try {
     assert.ok(first);
-    const second = await acquire({ file, lease: true, staleMs: 300, signal: AbortSignal.timeout(800), pollMs: 20, say: () => {} });
-    try { assert.equal(second, undefined); }
-    finally { second?.release(); }
+    const stop = new AbortController();
+    let second: Awaited<ReturnType<typeof acquire>> | "waiting" = "waiting";
+    const waiting = acquire({ file, lease: true, staleMs: 300, signal: stop.signal, pollMs: 20, say: () => {} }).then((l) => { second = l; });
+    const settle = () => new Promise((r) => setImmediate(r));
+    for (let ms = 0; ms < 1000; ms += 20) { t.mock.timers.tick(20); await settle(); }
+    assert.equal(second, "waiting", "still waiting at 1000 ms, past the original 300 ms expiry");
+    stop.abort();
+    t.mock.timers.tick(20);
+    await waiting;
+    assert.equal(second, undefined);
+    assert.ok(Date.now() - statSync(file).mtimeMs <= 100, "renewed within the last 100 ms of mock time");
     assert.equal(JSON.parse(readFileSync(file, "utf8")).token, first.token);
   } finally { first?.release(); }
+});
+
+/**
+ * Sets the delete disposition of `file` from a PowerShell process and keeps that handle open for `holdMs`: the state
+ * an unlink is in between marking the file and closing it (Windows only). Resolves once the file is delete-pending,
+ * with the helper's end.
+ */
+async function deletePending(file: string, holdMs: number): Promise<Promise<void>> {
+  const script = `
+Add-Type @"
+using System; using System.Runtime.InteropServices; using Microsoft.Win32.SafeHandles;
+public static class Disposition {
+  [DllImport("kernel32.dll", SetLastError=true)] public static extern bool SetFileInformationByHandle(SafeFileHandle h, int cls, ref uint info, int size);
+}
+"@
+$fs = New-Object IO.FileStream('${file}', [IO.FileMode]::Open, [Security.AccessControl.FileSystemRights]'Delete, Read', [IO.FileShare]'ReadWrite, Delete', 4096, [IO.FileOptions]::None)
+$flags = [uint32]3 # FileDispositionInfoEx: DELETE | POSIX_SEMANTICS
+if (-not [Disposition]::SetFileInformationByHandle($fs.SafeFileHandle, 21, [ref]$flags, 4)) { 'failed'; exit 1 }
+'pending'
+Start-Sleep -Milliseconds ${holdMs}
+$fs.Close()`;
+  const ps = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { stdio: ["ignore", "pipe", "inherit"], windowsHide: true });
+  const ended = new Promise<void>((r) => ps.on("exit", () => r()));
+  const said = await new Promise<string>((r) => { ps.stdout.setEncoding("utf8").once("data", (d: string) => r(d.trim())); ps.on("exit", () => r("exited")); });
+  assert.equal(said, "pending", "the helper set the delete disposition");
+  return ended;
+}
+
+test("a lock file being deleted refuses its exclusive create for a moment (EPERM): the waiting run waits on, then takes the lock", { skip: process.platform !== "win32" && "Windows only" }, async () => {
+  const file = lockFile();
+  writeFileSync(file, JSON.stringify({ pid: process.pid, cwd: "C:/busy", since: new Date().toISOString() }));
+  const env: NodeJS.ProcessEnv = { ...process.env, NEXUS_TEST_LOCK: file, NEXUS_TEST_MACHINE_LOG: "off" };
+  delete env.NEXUS_DIR; delete env.NEXUS_SESSION; delete env.NEXUS_HANDOVER; delete env.NODE_TEST_CONTEXT;
+  const child = spawn(process.execPath, [join(scripts, "test-lock.ts"), "--test", tinyTest()], { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  let out = "";
+  child.stdout.setEncoding("utf8").on("data", (d: string) => { out += d; });
+  child.stderr.setEncoding("utf8").on("data", (d: string) => { out += d; });
+  const exited = new Promise<number | null>((r) => child.on("exit", r));
+  try {
+    for (const deadline = Date.now() + 30_000; !out.includes("npm test: waiting");) {
+      assert.ok(Date.now() < deadline && child.exitCode === null, out);
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    // The live run ends, its delete held open over at least two of the waiting run's 1 s polls.
+    const ended = await deletePending(file, 2500);
+    assert.ok(!existsSync(file), "delete-pending: no longer there for a reader");
+    await ended;
+    assert.equal(await exited, 0, out);
+  } finally { if (child.exitCode === null && child.signalCode === null) child.kill(); }
+  assert.doesNotMatch(out, /EPERM/);
+  assert.match(out, /npm test: waiting for the full test run in C:\/busy/);
+  assert.match(out, /pass 1/);
+  assert.ok(!existsSync(file), "its own lock is removed after the run");
 });
 
 test("an old holder neither renews nor removes a replacement lease with the same PID", async () => {

@@ -334,7 +334,10 @@ than the maximum age since acquisition. Renewal is every second or one third of 
 Release checks both PID and token. Old records without `lease` retain the original dead-PID/absolute-age rules.
 A waiting run waits until it has the lock; since queue EC (EC2) no time lets it proceed without it, and
 `NEXUS_TEST_LOCK_MAX_MS` is gone (see ["The capacity coordinator"](checks.md#the-capacity-coordinator)). The rules for when a lock counts as held are in
-`packages/protocol/src/full-test-lock.ts`, shared with the server's capacity coordinator.
+`packages/protocol/src/full-test-lock.ts`, shared with the server's capacity coordinator. On Windows the lock's
+exclusive create can be refused for a moment (EPERM while the file's delete is in progress, EACCES or EBUSY while
+another process holds it): the waiting run treats it as a held lock and tries again at its next poll; only a refusal
+lasting 30 s ends it with the error (queue CI11).
 
 The internal `--watchdog <wrapper pid> <starter pid> <lock path>` child owns the runner. The wrapper's Node IPC sends
 `{args, token}` to start it, `{signal}` to forward a signal, or `{stop:true}` to end it. The watchdog announces

@@ -20,6 +20,9 @@
 //   appends them with the run's time to nexus-test-machine.jsonl in the temporary folder and prints them (queue TI4,
 //   scripts/machine-probe.ts): whether a later slowdown is the machine's or the code's.
 // - The lock is removed when the run ends (only if it is still this run's).
+// - On Windows an exclusive create can be refused for a moment (EPERM while the lock file's delete is in progress,
+//   EACCES or EBUSY while a scanner holds it): the run waits for its next poll, as for a held lock; only a refusal that
+//   lasts 30 s is an error (queue CI11).
 // - The run ends with whoever started it (queue TF): a watchdog process watches the run's starter (this script's
 //   parent, and the shells and npm above it) and this script. The watchdog owns the runner. A known starter gone or
 //   the wrapper's IPC channel closed: it ends its own child and releases the lock. This needs no process query for
@@ -75,11 +78,29 @@ interface Lock { file: string; token?: string; release: () => void }
 
 const MINUTE = 60_000;
 
-/** Creates the lock file exclusively, optionally renewing its lease; undefined when it exists. */
-function create(file: string, holder: Holder, staleMs: number): Lock | undefined {
+/**
+ * Refusals Windows gives an exclusive create for a moment (queue CI11): EPERM while the lock file's delete is in
+ * progress (another process's unlink has marked it and not yet closed its handle: STATUS_DELETE_PENDING, seen when the
+ * holder's release or a takeover met a waiting run's poll), EACCES and EBUSY while a scanner holds it. Like the store's
+ * writes (store.ts, renameRetrying), they are tried again rather than thrown at once; only one that lasts is an error.
+ */
+const PASSING = new Set(["EPERM", "EACCES", "EBUSY"]);
+/** How long a passing refusal is tried again, at each poll, before it is thrown (a lasting one: a folder not ours). */
+const REFUSED_MS = 30_000;
+
+/**
+ * Creates the lock file exclusively, optionally renewing its lease; undefined when it exists, `{ refused }` when
+ * Windows refuses it for a moment.
+ */
+function create(file: string, holder: Holder, staleMs: number): Lock | { refused: unknown } | undefined {
   let fd: number;
   try { fd = openSync(file, "wx"); }
-  catch (e) { if ((e as NodeJS.ErrnoException).code === "EEXIST") return undefined; throw e; }
+  catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "EEXIST") return undefined;
+    if (process.platform === "win32" && PASSING.has(code ?? "")) return { refused: e };
+    throw e;
+  }
   try { writeSync(fd, JSON.stringify(holder)); } catch (error) { closeSync(fd); throw error; }
   // Renew through the open file, never its path: a replaced lock belongs to someone else.
   const timer = holder.lease ? setInterval(() => {
@@ -117,16 +138,26 @@ export async function acquire(o: LockOptions = {}): Promise<Lock | undefined> {
   const me: Holder = { pid: o.pid ?? process.pid, cwd: resolve(o.cwd ?? process.cwd()), since: new Date().toISOString(), token: randomUUID(), ...(o.lease ? { lease: true } : {}) };
   const started = Date.now();
   let lastSaid: number | undefined;
+  let refusedSince: number | undefined;
+  const sleep = () => new Promise((r) => setTimeout(r, pollMs));
+  /** A passing refusal: undefined to wait for the next poll, or thrown once it has lasted REFUSED_MS. */
+  const refused = (r: { refused: unknown }) => {
+    refusedSince ??= Date.now();
+    if (Date.now() - refusedSince >= REFUSED_MS) throw r.refused;
+  };
   for (;;) {
     if (o.signal?.aborted) return undefined;
     const fresh = create(file, me, staleMs);
+    if (fresh && "refused" in fresh) { refused(fresh); await sleep(); continue; }
     if (fresh) return fresh;
+    refusedSince = undefined;
     const gone = fullTestStale(file, staleMs);
     if (gone) {
       // Taken over: removed, then created exclusively again (of two runs taking it over at once, one gets it). A run
       // that held it too long is left running: it is not this run's to end, and its end leaves the lock alone.
       try { unlinkSync(file); } catch { /* another run removed it */ }
       const taken = create(file, me, staleMs);
+      if (taken && "refused" in taken) { refused(taken); await sleep(); continue; }
       if (taken) {
         const h = gone.holder;
         if (h?.lease) say(`npm test: took over an expired full-test lease (pid ${h.pid}, ${h.cwd})`);
@@ -143,7 +174,7 @@ export async function acquire(o: LockOptions = {}): Promise<Lock | undefined> {
       lastSaid = Date.now();
       say(`npm test: waiting for ${who} to end (${Math.round(waited / MINUTE)} min so far; it never runs without the lock)`);
     }
-    await new Promise((r) => setTimeout(r, pollMs));
+    await sleep();
   }
 }
 
