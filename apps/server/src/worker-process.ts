@@ -153,16 +153,12 @@ export class WorkerProcess extends EventEmitter implements RuntimeChild {
   private write(line: string): void { if (!this.exited) this.host.stdin.write(line + "\n"); }
   kill(signal?: NodeJS.Signals): void {
     if (this.exited) return;
-    if (signal === "SIGKILL") {
-      // A K the host did not carry out (a refused TerminateProcess, a stuck reader): its own end closes the job, and
-      // Windows' kill-on-job-close takes every member (queue LCK, F2).
-      this.write("K");
-      this.host.kill();
-      return;
-    }
     this.write("K");
-    // A stuck control reader must not strand its job. Node still owns this exact child's process handle.
-    this.killing ??= setTimeout(() => this.host.kill(), 15_000);
+    // SIGKILL: a K the host did not carry out (a refused TerminateProcess, a stuck reader); the host's own end closes
+    // the job, and Windows' kill-on-job-close takes every member (queue LCK, F2). Otherwise a stuck control reader must
+    // not strand its job either, given 15 s. Node still owns this exact child's process handle.
+    if (signal === "SIGKILL") this.host.kill();
+    else this.killing ??= setTimeout(() => this.host.kill(), 15_000);
   }
 
   /**

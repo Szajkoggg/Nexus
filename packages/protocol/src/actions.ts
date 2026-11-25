@@ -29,8 +29,11 @@ export class ActionError extends Error {
  * "unknown" queue or session (404) and not the server's own failure (500). Any other error goes through as it is.
  */
 export function refuseUnreadable(e: unknown): unknown {
-  return isUnreadableFile(e) ? new ActionError(`${e.message}: repair the file, or move it away`, 409) : e;
+  return isUnreadableFile(e) ? unreadableRefusal(e.message) : e;
 }
+
+/** The refusal of an action on an unreadable file: `why` names the file (an error's message, or the state's warning). */
+const unreadableRefusal = (why: string) => new ActionError(`${why}: repair the file, or move it away`, 409);
 
 /** Reads through `read`; a file it finds unreadable is refused (refuseUnreadable). */
 function readForAction<T>(read: () => T): T {
@@ -64,7 +67,7 @@ export function queueView(state: ProjectState, queue: string): QueueView {
   const q = state.queues.find((x) => x.id === queue);
   if (q) return q;
   const why = state.warnings.find((w) => w.startsWith(`queue ${queue}: `));
-  if (why) throw new ActionError(`${why}: repair the file, or move it away`, 409);
+  if (why) throw unreadableRefusal(why);
   throw new ActionError(`unknown queue ${queue}`, 404);
 }
 
@@ -76,7 +79,7 @@ export function sessionView<S extends { id: string }>(state: { sessions: S[]; wa
   const s = state.sessions.find((x) => x.id === id);
   if (s && s.id !== USER_SESSION) return s;
   const why = s ? undefined : state.warnings.find((w) => w.startsWith(`session ${id}: `) && w.includes(" cannot be read"));
-  if (why) throw new ActionError(`${why}: repair the file, or move it away`, 409);
+  if (why) throw unreadableRefusal(why);
   throw new ActionError(`unknown session ${id}`, 404);
 }
 
