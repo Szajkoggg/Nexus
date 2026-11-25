@@ -91,8 +91,9 @@ after the membership check. These results are injected; the real-handle wait and
 `WorkerProcess` (`apps/server/src/worker-process.ts`), the server's end of the host's control pipe, takes the start of
 the host as an optional constructor argument; the default starts `worker-job.ps1` as before.
 `worker-process-frames.test.ts` gives it a pipe of its own and node:test's mock timers (queue WHR, WHR3): only the
-matching `C <id>` resolves a cleanup, once; F and the host's close reject every pending one; the 15 s cleanup limit, the
-15 s kill backstop after K and the 5 s grace after the input's E are passed on their boundaries, with the kills counted
+matching `C <id>` resolves a cleanup, once; F and the host's close reject every pending one; the 15 s cleanup limit
+(it fails the cleanup as `CleanupTimedOut` and sends no K since queue LCK; a next C has its own 15 s), the 15 s kill
+backstop after K and the 5 s grace after the input's E are passed on their boundaries, with the kills counted
 and no timer left. A fake pipe frees no OS resource, so the file's native case runs the real host. Its job member
 writes a ready file once it runs: a child's current directory is held only from its start, not from `spawn`'s return,
 and asserting the lock before that failed 2 of 20 runs under load.

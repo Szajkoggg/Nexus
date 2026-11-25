@@ -7,6 +7,7 @@ import { EventEmitter } from "node:events";
 import { constants, setPriority } from "node:os";
 import { PassThrough, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
+import { CleanupTimedOut } from "./agent.ts";
 
 /**
  * `owned`: a worker's or a check's process, below normal priority when the server asks for it (lowerOwnedProcesses).
@@ -156,11 +157,15 @@ export class WorkerProcess extends EventEmitter implements RuntimeChild {
     this.killing ??= setTimeout(() => this.host.kill(), 15_000);
   }
 
+  /**
+   * Asks the host to end the job's processes but the runtime (C). No answer in 15 s fails it with CleanupTimedOut and
+   * sends no K: the engine asks once more with a fresh 15 s, and only a second timeout ends the job (queue LCK, F5).
+   */
   cleanup(): Promise<void> {
     if (this.exited) return Promise.resolve();
     const id = ++this.next;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error("worker cleanup timed out")); this.kill(); }, 15_000);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new CleanupTimedOut()); }, 15_000);
       this.pending.set(id, { resolve, reject, timer });
       this.write(`C ${id}`);
     });

@@ -303,7 +303,10 @@ storing it when it is missing; when the cache fails it compiles in memory and wr
 `NEXUS_JOB_CACHE_TRACE=1` makes it also tell on stderr whether it loaded (`cached`), stored (`stored`) or compiled in
 memory (`fallback`); it removes the variable before the runtime starts. An EOF on its control input ends the job. The
 helper allows ten seconds for repeated descendant enumeration (each termination waits at most two seconds); the server
-allows fifteen seconds for a cleanup acknowledgement and otherwise halts the run and requests termination. A kill
+allows fifteen seconds for a cleanup acknowledgement. A first timeout sends no `K`: the engine sends a second `C <id>`
+(a new id) with a fresh fifteen seconds, and an acknowledgement of the first id that comes later resolves nothing. Only
+a second timeout halts the run, with the reason "worker process cleanup timed out twice", and requests termination;
+any other cleanup failure (an `F`, the helper's exit) halts and terminates at once (queue LCK, survey LC3 F5). A kill
 not completed in fifteen seconds ends the helper through Node's child handle, closing the job. Only handles whose
 membership in this private job was verified may be terminated, with no name/command-line matching. The helper
 reports exit only after runtime and descendants have gone; helper death also triggers Windows kill-on-job-close. After

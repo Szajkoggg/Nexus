@@ -141,8 +141,9 @@ git dozens of times. In the full suite every core is busy, so each file takes ab
   processes with every cleanup counted (`calls`, each with whether the process had run a turn) and passed through a
   gate the test holds, releases or makes fail; `failBeforeTurn` fails the cleanups before a first turn, as a busy
   machine's slow job host does. `delayMs` makes each cleanup take time before the process's own, `timeoutMs` fails
-  each after that long with the job host's "worker cleanup timed out" (queue LCK, survey LC3 F17: the in-process
-  child has no cleanup of its own, so without them the barrier passes in a microtask; cleanup-barrier.test.ts).
+  each after that long with the job host's `CleanupTimedOut`, or only the first `timeouts` of them, to reach the
+  engine's one retry (queue LCK, survey LC3 F5/F17: the in-process child has no cleanup of its own, so without them the
+  barrier passes in a microtask; cleanup-barrier.test.ts).
 - **A process that does not end when told** (queue LCK): `inProcessRuntime({ ends })` with a `ProcessEnds` makes the
   processes' `kill()` ignored or late (`{ delayMs }`) and their `close()` ignored; the modes are read at each call, so
   a test sets them while its processes run, and `letEnd(ends)` lifts them and makes the dropped calls after all (a

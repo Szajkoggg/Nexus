@@ -148,8 +148,16 @@ export interface AgentProcess extends EventEmitter<AgentEvents> {
    */
   compact?(): boolean;
   kill(): void;
-  /** Worker-only boundary barrier: end descendants while preserving the runtime for the next step. */
+  /**
+   * Worker-only boundary barrier: end descendants while preserving the runtime for the next step. A cleanup that got no
+   * answer in time fails with CleanupTimedOut and ends nothing itself: the engine asks once more (queue LCK, F5).
+   */
   cleanup?(): Promise<void>;
+}
+
+/** A worker's cleanup got no answer within its limit (worker-process.ts); the job host may still be working on it. */
+export class CleanupTimedOut extends Error {
+  constructor() { super("worker cleanup timed out"); this.name = "CleanupTimedOut"; }
 }
 
 /** A message can reach the process: it has not exited, nor is it exiting (AgentProcess.exiting; queue CXD). */

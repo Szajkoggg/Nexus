@@ -6,7 +6,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AgentProcess } from "../src/agent.ts";
+import { CleanupTimedOut, type AgentProcess } from "../src/agent.ts";
 import type { Launch } from "../src/agent-host.ts";
 import { ClaudeSession, type ClaudeOptions } from "../src/claude.ts";
 import { CodexSession, type CodexOptions } from "../src/codex.ts";
@@ -37,14 +37,17 @@ export interface GatedCleanup {
  * process's Windows job host starts later than the cleanup limit: "worker cleanup timed out", queue CI8). The gate
  * starts open. `delayMs`: each cleanup that passes the gate takes this long before the process's own (a cleanup that
  * takes time, as the job host's does; queue LCK). `timeoutMs`: each cleanup that passes the gate waits this long, then
- * fails with "worker cleanup timed out" as the job host's limit does (worker-process.ts), never reaching the
- * process's own.
+ * fails with CleanupTimedOut as the job host's limit does (worker-process.ts), never reaching the process's own;
+ * `timeouts`: only the first that many do, later ones run as usual (the engine's one retry, F5). A `failBeforeTurn` of
+ * "worker cleanup timed out" fails with CleanupTimedOut too.
  */
-export function gatedCleanup(o: { make?: (launch: Launch) => AgentProcess; failBeforeTurn?: string; delayMs?: number; timeoutMs?: number } = {}): GatedCleanup {
+export function gatedCleanup(o: { make?: (launch: Launch) => AgentProcess; failBeforeTurn?: string; delayMs?: number; timeoutMs?: number; timeouts?: number } = {}): GatedCleanup {
   const make = o.make ?? ((launch: Launch) => (launch.runtime === "claude" ? new ClaudeSession(launch.options) : new CodexSession(launch.options)));
   const calls: CleanupCall[] = [];
   let gate: { open: boolean; error?: string } = { open: true };
   let waiters: (() => void)[] = [];
+  let timedOut = 0;
+  const failure = (message: string) => (message === new CleanupTimedOut().message ? new CleanupTimedOut() : new Error(message));
   const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); };
   const pass = async (): Promise<void> => {
     while (!gate.open && gate.error === undefined) await new Promise<void>((r) => waiters.push(r));
@@ -60,11 +63,12 @@ export function gatedCleanup(o: { make?: (launch: Launch) => AgentProcess; failB
       const call: CleanupCall = { turned };
       calls.push(call);
       try {
-        if (!turned && o.failBeforeTurn !== undefined) throw new Error(o.failBeforeTurn);
+        if (!turned && o.failBeforeTurn !== undefined) throw failure(o.failBeforeTurn);
         await pass();
-        if (o.timeoutMs !== undefined) {
+        if (o.timeoutMs !== undefined && timedOut < (o.timeouts ?? Infinity)) {
+          timedOut++;
           await new Promise((r) => setTimeout(r, o.timeoutMs));
-          throw new Error("worker cleanup timed out");
+          throw new CleanupTimedOut();
         }
         if (o.delayMs !== undefined) await new Promise((r) => setTimeout(r, o.delayMs));
         await own?.();

@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import type { AgentEvents, AgentProcess } from "../src/agent.ts";
+import { CleanupTimedOut, type AgentEvents, type AgentProcess } from "../src/agent.ts";
 import type { Launch } from "../src/agent-host.ts";
 import { gatedCleanup } from "./gated-cleanup.ts";
 
@@ -46,13 +46,13 @@ test("gatedCleanup counts every cleanup, holds them at its gate, and releases or
 test("gatedCleanup's failBeforeTurn fails a cleanup only before the process's first turn (queue LH)", async () => {
   const g = gatedCleanup({ make: () => new Stand(), failBeforeTurn: "worker cleanup timed out" });
   const proc = g.spawn(launch) as Stand;
-  await assert.rejects(proc.cleanup(), /worker cleanup timed out/);
+  await assert.rejects(proc.cleanup(), CleanupTimedOut, "that message fails as the job host's timeout does");
   proc.send();
   await proc.cleanup();
   assert.equal(proc.cleaned, 1);
 });
 
-test("gatedCleanup's delayMs makes a cleanup that passes the gate take that long before the process's own; timeoutMs fails it as the job host's limit does (queue LCK)", async () => {
+test("gatedCleanup's delayMs makes a cleanup that passes the gate take that long before the process's own; timeoutMs fails it as the job host's limit does, all or the first `timeouts` (queue LCK)", async () => {
   const slow = gatedCleanup({ make: () => new Stand(), delayMs: 40 });
   const proc = slow.spawn(launch) as Stand;
   const p = proc.cleanup();
@@ -64,7 +64,13 @@ test("gatedCleanup's delayMs makes a cleanup that passes the gate take that long
   const stuck = late.spawn(launch) as Stand;
   const q = stuck.cleanup();
   assert.equal(await settled(q), "waiting");
-  await assert.rejects(q, /^Error: worker cleanup timed out$/);
+  await assert.rejects(q, (e) => e instanceof CleanupTimedOut && e.message === "worker cleanup timed out");
+  await assert.rejects(stuck.cleanup(), CleanupTimedOut, "without `timeouts`, every one");
   assert.equal(stuck.cleaned, 0, "a timed-out cleanup never reaches the process's own");
-  assert.deepEqual(late.calls, [{ turned: false, outcome: "failed" }]);
+  assert.deepEqual(late.calls, [{ turned: false, outcome: "failed" }, { turned: false, outcome: "failed" }]);
+  const once = gatedCleanup({ make: () => new Stand(), timeoutMs: 1, timeouts: 1 });
+  const retried = once.spawn(launch) as Stand;
+  await assert.rejects(retried.cleanup(), CleanupTimedOut);
+  await retried.cleanup();
+  assert.equal(retried.cleaned, 1, "the second runs the process's own");
 });

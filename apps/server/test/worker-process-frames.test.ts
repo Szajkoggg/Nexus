@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { CleanupTimedOut } from "../src/agent.ts";
 import { WorkerProcess, spawnRuntimeChild } from "../src/worker-process.ts";
 import { LONGER, until } from "./wait.ts";
 
@@ -154,7 +155,7 @@ test("the host closing before C fails the pending cleanups and clears the timers
   await quiet(h);
 });
 
-test("a missing C: the cleanup fails at 15 s, not before, sends K, and the host is killed 15 s later; a late C changes nothing", async (t) => {
+test("a missing C: the cleanup fails at 15 s, not before, as CleanupTimedOut, and ends nothing (the engine asks once more, queue LCK); a late C changes nothing; the next C has a fresh 15 s", async (t) => {
   const h = start(t);
   const a = watch(h.worker.cleanup());
   await h.tick(14_999);
@@ -162,16 +163,19 @@ test("a missing C: the cleanup fails at 15 s, not before, sends K, and the host 
   assert.deepEqual(h.host.frames(), ["C 1"]);
   await h.tick(1);
   assert.equal(a.rejected, 1);
-  assert.equal(a.error?.message, "worker cleanup timed out");
-  assert.deepEqual(h.host.frames(), ["C 1", "K"]);
+  assert.ok(a.error instanceof CleanupTimedOut);
+  assert.equal(a.error.message, "worker cleanup timed out");
+  assert.deepEqual(h.host.frames(), ["C 1"], "no K");
   h.host.send("C 1\n"); await settle();
   assert.deepEqual([a.resolved, a.rejected], [0, 1], "the late C resolves nothing");
+  const b = watch(h.worker.cleanup());
+  assert.deepEqual(h.host.frames(), ["C 1", "C 2"]);
   await h.tick(14_999);
-  assert.equal(h.host.kills, 0);
-  await h.tick(1);
-  assert.equal(h.host.kills, 1);
-  h.host.close(null); await settle();
+  assert.deepEqual([b.resolved, b.rejected], [0, 0], "its own 15 s, not the first one's");
+  h.host.send("C 2\n"); await settle();
+  assert.deepEqual([b.resolved, b.rejected], [1, 0]);
   assert.equal(a.rejected, 1, "rejected once");
+  assert.equal(h.host.kills, 0);
   await quiet(h);
 });
 
@@ -209,12 +213,12 @@ test("the server's 15 s before the native settle timeout: the cleanup fails as t
   h.host.send(`F ${b64(NOT_SETTLED)}\nC 1\n`); await settle();
   assert.deepEqual([a.resolved, a.rejected], [0, 1]);
   assert.equal(a.error?.message, "worker cleanup timed out", "the first error stays");
-  assert.deepEqual(h.host.frames(), ["C 1", "K", "K"], "today: the late F writes K once more");
+  assert.deepEqual(h.host.frames(), ["C 1", "K"], "the timeout wrote no K (queue LCK); the late F writes one");
   assert.equal(h.errors(), NOT_SETTLED, "its text goes to the runtime's stderr");
   await h.tick(14_999);
   assert.equal(h.host.kills, 0);
   await h.tick(1);
-  assert.equal(h.host.kills, 1, "the backstop armed by the first K, once");
+  assert.equal(h.host.kills, 1, "the backstop armed by the F's K, once");
   h.host.close(null); await settle();
   await quiet(h);
 });

@@ -15,7 +15,7 @@ import {
   type SessionView, type StepView, type PlanBy,
   addNote, errorText,
 } from "@nexus/protocol";
-import { reachable, type TurnFailure } from "./agent.ts";
+import { CleanupTimedOut, reachable, type TurnFailure } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import { nexusDenyRules } from "./claude.ts";
 import {
@@ -1006,23 +1006,35 @@ export class Engine implements Member {
     return true;
   }
 
-  /** Start one cleanup barrier per idle turn; no inbox or next step may enter while it is pending. */
+  /**
+   * Start one cleanup barrier per idle turn; no inbox or next step may enter while it is pending. A first timeout (the
+   * job host may only be slow on a busy machine) asks once more within the same barrier, with a fresh limit and no
+   * kill; a second one, or any other failure, halts the run and ends the process (the user's decision with queue LCK,
+   * survey LC3 F5).
+   */
   private cleanWorker(queueId: string, live: Live): boolean {
     const proc = live.proc;
     if (!proc.cleanup || this.cleaned.has(proc)) return false;
     if (this.cleaning.has(proc)) return true;
-    const cleanup = proc.cleanup();
-    this.cleaning.set(proc, cleanup);
-    void cleanup.then(() => {
+    const current = () => !this.stopped && this.host.get(live.session)?.proc === proc;
+    let retried = false;
+    const barrier = proc.cleanup().catch((error: unknown) => {
+      if (!(error instanceof CleanupTimedOut) || !current()) throw error;
+      retried = true;
+      this.store.appendActivity(live.session, { at: now(), kind: "error", text: "The worker's process cleanup timed out; Nexus asks for it once more", queue: queueId });
+      return proc.cleanup!();
+    });
+    this.cleaning.set(proc, barrier);
+    void barrier.then(() => {
       this.cleaning.delete(proc);
       this.cleaned.add(proc);
-      if (this.stopped || this.host.get(live.session)?.proc !== proc) return;
+      if (!current()) return;
       this.advance(queueId);
       this.changed();
     }, (error: unknown) => {
       this.cleaning.delete(proc);
-      if (this.stopped || this.host.get(live.session)?.proc !== proc) return;
-      this.halt(queueId, `worker process cleanup failed: ${String(error)}`);
+      if (!current()) return;
+      this.halt(queueId, retried && error instanceof CleanupTimedOut ? "worker process cleanup timed out twice" : `worker process cleanup failed: ${String(error)}`);
       this.ending.add(live.session);
       proc.kill();
       this.changed();
