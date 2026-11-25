@@ -102,16 +102,11 @@ function StopRow({ project, a, onOpen, onChanged, pushAccepted, queue }: {
  * alone once the queue is merged back and only its cleanup waits (mergeCardActions); nothing for an item that names
  * no base (nothing to merge into).
  */
-function MergeRow({ a, ...rest }: { project: string; a: AttentionItem; onOpen: () => void; onChanged?: () => void; className?: string }) {
-  const way = a.queue ? mergeCardActions(a) : undefined;
-  if (way === "open") {
-    return (
-      <div className={rest.className ?? "px-3.5 pb-3"}>
-        <button onClick={rest.onOpen} className={OPEN_BUTTON}>{t("common.open")}</button>
-      </div>
-    );
-  }
-  return way === "merge" && a.merge ? <MergeActions {...rest} queue={a.queue!} merge={a.merge} integrated={!!a.step} /> : null;
+function MergeRow({ a, className = "px-3.5 pb-3", ...rest }: { project: string; a: AttentionItem; onOpen: () => void; onChanged?: () => void; className?: string }) {
+  if (!a.queue) return null;
+  const way = mergeCardActions(a);
+  if (way === "open") return <div className={className}><button onClick={rest.onOpen} className={OPEN_BUTTON}>{t("common.open")}</button></div>;
+  return way === "merge" && a.merge ? <MergeActions {...rest} className={className} queue={a.queue} merge={a.merge} integrated={!!a.step} /> : null;
 }
 
 function MergeActions({ project, queue, merge: { into, branch }, integrated, onOpen, onChanged, className = "px-3.5 pb-3" }: {
