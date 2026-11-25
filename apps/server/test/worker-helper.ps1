@@ -1,5 +1,8 @@
 # A test-owned directory holder. The denied variant tightens only its own process DACL; no elevation or file ACL change.
-param([string]$Ready, [string]$Release, [switch]$DenyTerminate)
+# -Late <file> (queue WHR, WHR6): once "<file>.go" exists, it starts a child of its own, this script again, holding the
+# sibling directory "<its directory>-late", sharing this console (no window, no conhost of its own); the child writes
+# its PID to <file> and ends when "<file>.release" exists. Started by a job member, the child is one too (inherited).
+param([string]$Ready, [string]$Release, [switch]$DenyTerminate, [string]$Late)
 $ErrorActionPreference = 'Stop'
 if ($DenyTerminate) {
     Add-Type -TypeDefinition @'
@@ -28,4 +31,17 @@ public static class RestrictedWorkerHelper {
     [RestrictedWorkerHelper]::Restrict()
 }
 [IO.File]::WriteAllText($Ready, [string]$PID)
-while (-not [IO.File]::Exists($Release)) { Start-Sleep -Milliseconds 25 }
+$started = $false
+while (-not [IO.File]::Exists($Release)) {
+    if ($Late -and -not $started -and [IO.File]::Exists("$Late.go")) {
+        $started = $true
+        $dir = (Get-Location).Path + '-late'
+        [void][IO.Directory]::CreateDirectory($dir)
+        $info = New-Object Diagnostics.ProcessStartInfo 'powershell.exe', ('-NoProfile -NonInteractive -File "' + $PSCommandPath + '" -Ready "' + $Late + '" -Release "' + $Late + '.release"')
+        $info.UseShellExecute = $false
+        $info.CreateNoWindow = $false
+        $info.WorkingDirectory = $dir
+        [void][Diagnostics.Process]::Start($info)
+    }
+    Start-Sleep -Milliseconds 25
+}

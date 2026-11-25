@@ -85,11 +85,15 @@ public static class NexusWorkerJob
         throw new InvalidOperationException("worker job membership exceeded the limit");
     }
 
-    // The native calls End and AwaitExit make, and the thread's last error after them. One seam, so that a test can
-    // record the calls and give the results Windows returns only in a race (queue WHR, WHR1): the test compiles its
-    // own copy of this file with apps/server/test/worker-end-calls.cs and sets `calls` by reflection. The default is
-    // the kernel32 calls themselves, and nothing at run time (no variable, no frame) selects another.
+    // The native calls End and AwaitExit make, and the thread's last error after them; and Clean's two inputs, the
+    // job's membership and its clock (queue WHR, WHR6). One seam, so that a test can record the calls and give the
+    // results Windows returns only in a race (queue WHR, WHR1): the test compiles its own copy of this file with
+    // apps/server/test/worker-end-calls.cs and sets `calls` by reflection. The default is the kernel32 calls, Members()
+    // and a Stopwatch themselves, and nothing at run time (no variable, no frame) selects another.
     internal interface EndCalls {
+        List<uint> Members();
+        object StartTimer();
+        long ElapsedMilliseconds(object timer);
         IntPtr OpenProcess(uint access, bool inherit, uint pid);
         bool IsProcessInJob(IntPtr process, IntPtr job, out bool member);
         uint WaitForSingleObject(IntPtr handle, uint ms);
@@ -98,6 +102,9 @@ public static class NexusWorkerJob
         int LastError();
     }
     sealed class Kernel32EndCalls : EndCalls {
+        public List<uint> Members() { return NexusWorkerJob.Members(); }
+        public object StartTimer() { return Stopwatch.StartNew(); }
+        public long ElapsedMilliseconds(object timer) { return ((Stopwatch)timer).ElapsedMilliseconds; }
         public IntPtr OpenProcess(uint access, bool inherit, uint pid) { return NexusWorkerJob.OpenProcess(access, inherit, pid); }
         public bool IsProcessInJob(IntPtr process, IntPtr job, out bool member) { return NexusWorkerJob.IsProcessInJob(process, job, out member); }
         public uint WaitForSingleObject(IntPtr handle, uint ms) { return NexusWorkerJob.WaitForSingleObject(handle, ms); }
@@ -143,12 +150,12 @@ public static class NexusWorkerJob
 
     static void Clean(bool keepRuntime) {
         lock (cleanup) {
-            var timer = Stopwatch.StartNew();
+            var timer = calls.StartTimer();
             while (true) {
-                var targets = Members().FindAll(pid => pid != self && (!keepRuntime || pid != runtime.Id));
+                var targets = calls.Members().FindAll(pid => pid != self && (!keepRuntime || pid != runtime.Id));
                 if (targets.Count == 0) return;
                 foreach (uint pid in targets) End(pid);
-                if (timer.ElapsedMilliseconds > 10000) throw new TimeoutException("worker job did not settle");
+                if (calls.ElapsedMilliseconds(timer) > 10000) throw new TimeoutException("worker job did not settle");
             }
         }
     }

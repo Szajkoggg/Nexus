@@ -42,6 +42,8 @@
 //               windowsHide, a console helper gets a conhost of its own inside the job, and ending that conhost first
 //               ends the helper too, whatever its DACL; the job's member order decides (worker-cleanup-gate.test.ts)
 //   ownedholdsharedstop  ownedholdshared, but the step reports a stop condition instead of done (its step unfinished)
+//   ownedholdsharedlate  ownedholdshared whose helper starts a child of its own on the test's signal (worker-helper.ps1,
+//               -Late: "<FAKE_LOG>.helper-<step>.late.go"; the child's PID in "….late", its release "….late.release")
 //   noopexit1   Codex's fake only: the first time (counted beside FAKE_LOG, any process of the step), end the turn
 //               without an outcome, then exit with its stdout held open (exitHeld below); after: done
 // The closing refactoring step's standard goal has no "FAKE:": it does FAKE_CLOSING's behaviour, by default done, with a
@@ -633,13 +635,13 @@ async function answer(fake: Fake, text: string, tool: (command: string) => void,
     }
     // Own a real Windows directory handle, optionally denying new PROCESS_TERMINATE handles. Held until the test
     // lets this turn finish; the worker job must release it before the next step. No model or foreign process.
-    if (/^owned(hold|deny)(shared)?(stop)?$/.test(behaviour)) {
+    if (/^owned(hold|deny)(shared)?(stop|late)?$/.test(behaviour)) {
       const dir = join(cwd, `.owned-${step}`);
       mkdirSync(dir, { recursive: true });
       const ready = `${env.FAKE_LOG}.helper-${step}`;
       const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-File", join(dirname(fileURLToPath(import.meta.url)), "worker-helper.ps1"),
-        "-Ready", ready, "-Release", `${ready}.release`, ...(behaviour.startsWith("owneddeny") ? ["-DenyTerminate"] : [])],
-      { cwd: dir, stdio: "ignore", windowsHide: !behaviour.endsWith("shared") });
+        "-Ready", ready, "-Release", `${ready}.release`, ...(behaviour.startsWith("owneddeny") ? ["-DenyTerminate"] : []), ...(behaviour.endsWith("late") ? ["-Late", `${ready}.late`] : [])],
+      { cwd: dir, stdio: "ignore", windowsHide: !behaviour.includes("shared") });
       child.unref();
       await work(fake, step);
       behaviour = behaviour.endsWith("stop") ? "stop" : "done";

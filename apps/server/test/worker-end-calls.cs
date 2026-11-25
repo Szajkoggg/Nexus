@@ -10,12 +10,30 @@ using System.Runtime.InteropServices;
 using System.Text;
 
 // One scripted reply per call, in order, per operation: "open <handle> <error>", "member <ok> <member> <error>",
-// "wait <result> <error>", "terminate <ok> <error>", "close <ok>". Each call sets the emulated last error to its
-// reply's error (close and an omitted error leave it as it was), as a SetLastError call sets the thread's.
+// "wait <result> <error>", "terminate <ok> <error>", "close <ok>"; for Clean (queue WHR, WHR6) "list <pid>..." (the
+// job's membership, Members) and "elapsed <ms>" (the clock Clean reads after each list it ended). Each call sets the
+// emulated last error to its reply's error (close and an omitted error leave it as it was), as a SetLastError call
+// sets the thread's.
 public sealed class ScriptedEndCalls : NexusWorkerJob.EndCalls {
     readonly Dictionary<string, Queue<long[]>> replies = new Dictionary<string, Queue<long[]>>();
     public readonly List<string> Log = new List<string>();
     int lastError;
+    readonly object timer = new object();
+
+    public List<uint> Members() {
+        long[] reply = Next("list");
+        var result = new List<uint>();
+        foreach (long pid in reply) result.Add((uint)pid);
+        Log.Add("Members " + string.Join(" ", result.ConvertAll(x => x.ToString()).ToArray()));
+        return result;
+    }
+    public object StartTimer() { Log.Add("StartTimer"); return timer; }
+    public long ElapsedMilliseconds(object t) {
+        if (t != timer) throw new InvalidOperationException("not the timer StartTimer gave");
+        long ms = Next("elapsed")[0];
+        Log.Add("Elapsed " + ms);
+        return ms;
+    }
 
     public void Reply(string op, long[] values) {
         Queue<long[]> queue;
@@ -73,11 +91,17 @@ public static class EndHarness {
     static readonly FieldInfo Calls = typeof(NexusWorkerJob).GetField("calls", Private);
     static readonly FieldInfo Job = typeof(NexusWorkerJob).GetField("job", Private);
     static readonly MethodInfo End = typeof(NexusWorkerJob).GetMethod("End", Private);
+    static readonly MethodInfo Clean = typeof(NexusWorkerJob).GetMethod("Clean", Private);
+    static readonly FieldInfo Runtime = typeof(NexusWorkerJob).GetField("runtime", Private);
+    static readonly FieldInfo Self = typeof(NexusWorkerJob).GetField("self", Private);
 
     // Requests separated by a line "---"; each answered by its block of lines, separated the same way.
     //   scripted <pid> <job>, then reply lines: End(pid) on the scripted seam, with the job field set to <job>.
     //   real <member> <stranger>: End on the default seam for a process this harness puts into a new job, for one it
     //   leaves outside, and for PID 0 (no process).
+    //   clean <keep runtime: 0|1> <job>, then reply lines: Clean on the scripted seam (queue WHR, WHR6); in "list"
+    //   lines the words "self" and "runtime" stand for the host's own PID and its runtime's (a process this harness
+    //   started and saw exit, as the runtime field holds a Process). Its first answer line names the two.
     public static string Run(string text) {
         var blocks = new List<string>();
         foreach (string request in text.Replace("\r", "").Split(new[] { "\n---\n" }, StringSplitOptions.None)) {
@@ -85,6 +109,7 @@ public static class EndHarness {
             string[] head = lines[0].Trim().Split(' ');
             if (head[0] == "scripted") blocks.Add(Scripted(uint.Parse(head[1]), long.Parse(head[2]), lines));
             else if (head[0] == "real") blocks.Add(Real(uint.Parse(head[1]), uint.Parse(head[2])));
+            else if (head[0] == "clean") blocks.Add(Cleaned(head[1] == "1", long.Parse(head[2]), lines));
             else throw new ArgumentException("unknown request: " + lines[0]);
         }
         return string.Join("\n---\n", blocks.ToArray()) + "\n";
@@ -110,6 +135,40 @@ public static class EndHarness {
         output.Append("outcome ").Append(outcome).Append('\n');
         output.Append("restored ").Append(Calls.GetValue(null).GetType().FullName);
         return output.ToString();
+    }
+
+    static string Cleaned(bool keep, long job, string[] lines) {
+        var started = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c exit 0") { UseShellExecute = false, CreateNoWindow = true });
+        started.WaitForExit();
+        int self = (int)Self.GetValue(null), runtime = started.Id;
+        var seam = new ScriptedEndCalls();
+        for (int i = 1; i < lines.Length; i++) {
+            string line = lines[i].Trim();
+            if (line.Length == 0) continue;
+            string[] parts = line.Split(' ');
+            var values = new long[parts.Length - 1];
+            for (int j = 1; j < parts.Length; j++)
+                values[j - 1] = parts[j] == "self" ? self : parts[j] == "runtime" ? runtime : long.Parse(parts[j]);
+            seam.Reply(parts[0], values);
+        }
+        object before = Calls.GetValue(null), beforeJob = Job.GetValue(null), beforeRuntime = Runtime.GetValue(null);
+        string outcome;
+        Calls.SetValue(null, seam); Job.SetValue(null, new IntPtr(job)); Runtime.SetValue(null, started);
+        try {
+            try { Clean.Invoke(null, new object[] { keep }); outcome = "returned"; }
+            catch (TargetInvocationException e) { outcome = Threw(e.InnerException); }
+        } finally { Calls.SetValue(null, before); Job.SetValue(null, beforeJob); Runtime.SetValue(null, beforeRuntime); }
+        var output = new StringBuilder();
+        output.Append("pids ").Append(self).Append(' ').Append(runtime).Append('\n');
+        foreach (string call in seam.Log) output.Append(call).Append('\n');
+        output.Append("outcome ").Append(outcome).Append('\n');
+        output.Append("restored ").Append(Calls.GetValue(null).GetType().FullName);
+        return output.ToString();
+    }
+
+    static string Threw(Exception inner) {
+        var win32 = inner as Win32Exception;
+        return "threw " + inner.GetType().FullName + " " + (win32 != null ? win32.NativeErrorCode.ToString() : "-") + " " + inner.Message.Replace("\r", " ").Replace("\n", " ");
     }
 
     static string Real(uint member, uint stranger) {

@@ -139,3 +139,90 @@ CASES.forEach((c, i) => {
     if (terminates) assert.ok(calls.indexOf(MEMBER) >= 0 && calls.indexOf(MEMBER) < calls.indexOf(TERMINATE));
   });
 });
+
+// H8 of the LWH survey (queue WHR, WHR6): Clean, the loop over the job's membership, on the scripted seam: the lists
+// Members gives and the clock Clean reads are the test's (`list`, `elapsed`), and so are the native results of each
+// End. The real membership (a child started by a member is one, a member gone before its open) is shown with the real
+// job host in worker-cleanup-membership.test.ts; here the deadline branches are deterministic.
+const SETTLE = /^outcome threw System\.TimeoutException - worker job did not settle$/;
+
+/** One member's End, live: the replies it takes and the calls it makes (terminate succeeds, the exit comes in the wait). */
+function live(pid: number | "runtime", h: number) {
+  return {
+    replies: [`open ${h} 0`, "member 1 1 0", "wait 258 0", "terminate 1 0", "wait 0 0", "close 1"],
+    calls: [`OpenProcess 0x101001 False ${pid}`, `IsProcessInJob ${h} ${JOB}`, `WaitForSingleObject ${h} 0`, `TerminateProcess ${h} 1`, `WaitForSingleObject ${h} 2000`, `CloseHandle ${h}`],
+  };
+}
+/** Gone between the list and its open: OpenProcess fails with 87, End returns. */
+const gone = (pid: number) => ({ replies: ["open 0 87"], calls: [`OpenProcess 0x101001 False ${pid}`, "LastError 87"] });
+/** Exited, but still openable: the zero-time wait sees the exit, nothing is terminated. */
+const exited = (pid: number, h: number) => ({
+  replies: [`open ${h} 0`, "member 1 1 0", "wait 0 0", "close 1"],
+  calls: [`OpenProcess 0x101001 False ${pid}`, `IsProcessInJob ${h} ${JOB}`, `WaitForSingleObject ${h} 0`, `CloseHandle ${h}`],
+});
+
+/**
+ * Runs Clean(keep) once: `rounds` are the lists in order, each with its members' Ends and the clock read after it (none
+ * for a list Clean finds empty). Returns the harness's answer: the PIDs line, then every call, the outcome and the
+ * restored seam; and the calls Clean must have made, built from the same rounds.
+ */
+async function clean(keep: boolean, rounds: { list: string; ends: ReturnType<typeof live>[]; elapsed?: number }[]) {
+  const replies = rounds.flatMap((r) => [`list ${r.list}`, ...r.ends.flatMap((e) => e.replies), ...(r.elapsed === undefined ? [] : [`elapsed ${r.elapsed}`])]);
+  const answer = (await endHarness([[`clean ${keep ? 1 : 0} ${JOB}`, ...replies].join("\n")]))[0]!;
+  const [self, runtime] = answer[0]!.split(" ").slice(1).map(Number);
+  assert.ok(self! > 0 && runtime! > 0 && self !== runtime, answer[0]);
+  const named = (list: string) => list.split(" ").filter(Boolean).map((x) => (x === "self" ? self : x === "runtime" ? runtime : Number(x))).join(" ");
+  const expected = ["StartTimer", ...rounds.flatMap((r) => [`Members ${named(r.list)}`, ...r.ends.flatMap((e) => e.calls).map((c) => c.replace(/ runtime$/, ` ${runtime}`)), ...(r.elapsed === undefined ? [] : [`Elapsed ${r.elapsed}`])])];
+  return { answer: answer.slice(1), expected, runtime: runtime! };
+}
+
+test("Clean: children that join after a list are ended on the next ones; it returns only on a list with nothing but the host and its runtime, and reads the clock after each list it ended, never after the empty one", windows, async () => {
+  const { answer, expected } = await clean(true, [
+    { list: "self runtime 101", ends: [live(101, 11)], elapsed: 1000 },
+    { list: "self runtime 102", ends: [live(102, 12)], elapsed: 3000 },
+    { list: "runtime 103 self 104", ends: [live(103, 13), live(104, 14)], elapsed: 7000 },
+    { list: "self runtime 105", ends: [live(105, 15)], elapsed: 9000 },
+    { list: "runtime self", ends: [] },
+  ]);
+  assert.deepEqual(answer, [...expected, "outcome returned", `restored ${DEFAULT_SEAM}`]);
+});
+
+test("Clean: a member gone between the list and its open (87) is skipped, one that exited but can still be opened is not terminated, the live one is ended", windows, async () => {
+  const { answer, expected } = await clean(true, [
+    { list: "self runtime 101 102 103", ends: [gone(101), exited(102, 12), live(103, 13)], elapsed: 500 },
+    { list: "self runtime", ends: [] },
+  ]);
+  assert.deepEqual(answer, [...expected, "outcome returned", `restored ${DEFAULT_SEAM}`]);
+  assert.equal(answer.filter((l) => l.startsWith("TerminateProcess")).length, 1, "only the live member is terminated");
+});
+
+test("Clean for the job's end (keep false, K and the input's end): the runtime is a member to end like any other; the host is never one", windows, async () => {
+  const { answer, expected, runtime } = await clean(false, [{ list: "self runtime", ends: [live("runtime", 21)], elapsed: 200 }, { list: "self", ends: [] }]);
+  assert.deepEqual(answer, [...expected, "outcome returned", `restored ${DEFAULT_SEAM}`]);
+  assert.equal(answer.find((l) => l.startsWith("OpenProcess")), `OpenProcess 0x101001 False ${runtime}`);
+});
+
+test("Clean's 10 s is a checkpoint after a whole list, not a wall-clock limit: 10 000 ms goes on, 10 001 ms fails with the settle error only after every member of that list was ended", windows, async () => {
+  const { answer, expected } = await clean(true, [
+    { list: "self runtime 101 102", ends: [live(101, 11), live(102, 12)], elapsed: 10_000 },
+    { list: "self runtime 103 104", ends: [live(103, 13), live(104, 14)], elapsed: 10_001 },
+  ]);
+  assert.deepEqual(answer.slice(0, -2), expected);
+  assert.match(answer.at(-2)!, SETTLE);
+  assert.equal(answer.at(-1), `restored ${DEFAULT_SEAM}`);
+});
+
+test("Clean past 10 s on a list whose members are now all ended: still the settle error, no list is read after the check", windows, async () => {
+  const { answer, expected } = await clean(true, [{ list: "self runtime 101", ends: [live(101, 11)], elapsed: 10_001 }]);
+  assert.deepEqual(answer.slice(0, -2), expected);
+  assert.equal(answer.filter((l) => l.startsWith("Members")).length, 1);
+  assert.match(answer.at(-2)!, SETTLE);
+});
+
+test("Clean with six members each waiting out its own 2000 ms: every one gets its one wait, then the clock (12 000 ms) fails the cleanup with the settle error", windows, async () => {
+  const pids = [101, 102, 103, 104, 105, 106];
+  const { answer, expected } = await clean(true, [{ list: `self runtime ${pids.join(" ")}`, ends: pids.map((p, i) => live(p, 11 + i)), elapsed: 12_000 }]);
+  assert.deepEqual(answer.slice(0, -2), expected);
+  assert.equal(answer.filter((l) => / 2000$/.test(l)).length, 6, "one 2000 ms wait per member");
+  assert.match(answer.at(-2)!, SETTLE);
+});

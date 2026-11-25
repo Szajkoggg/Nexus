@@ -104,6 +104,12 @@ export interface NativeGate {
   crashed(): { pid: number; code: number } | undefined;
   /** For each gate host started, in order: how many earlier ones had not exited when it started (WHR5). */
   overlaps: number[];
+  /** The gate's `k`th hold (k > 1, WHR6): its acknowledgement ("<pid> <handle> member" or "<pid> 0 open"), else undefined. */
+  arrivedAt(k: number): { pid: number; handle: number } | undefined;
+  /** Lets the gate's `k`th hold go on (k > 1; the first is open()). */
+  openAt(k: number): void;
+  /** Every membership list Clean read and every native call End made, for any member, in order (WHR6). */
+  trace(): string[];
 }
 
 /** `dir`: the gate's folder, when a server process of the test's own makes the hosts (crash-server.ts); else a new one. */
@@ -139,6 +145,9 @@ export function nativeGate(dir = tempDir("nexus-gate-")): NativeGate {
     open: () => writeFileSync(join(dir, "open"), ""),
     calls: () => (existsSync(join(dir, "calls.log")) ? readFileSync(join(dir, "calls.log"), "utf8").trim().split("\n").filter(Boolean) : []),
     crashRuntime: () => writeFileSync(join(dir, "crash"), ""),
+    arrivedAt: (k) => { const x = read(`arrived-${k}`); return x && { pid: x[0]!, handle: x[1]! }; },
+    openAt: (k) => writeFileSync(join(dir, `open-${k}`), ""),
+    trace: () => (existsSync(join(dir, "trace.log")) ? readFileSync(join(dir, "trace.log"), "utf8").split(/\r?\n/).filter(Boolean) : []),
     crashed: () => { const x = read("crashed"); return x && { pid: x[0]!, code: x[1]! }; },
   };
 }

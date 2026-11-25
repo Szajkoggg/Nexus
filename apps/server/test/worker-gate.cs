@@ -8,11 +8,14 @@
 //   refuse    when present, the target's first TerminateProcess is not made: it returns false with error 5, as the
 //             Codex trace did (WH2); the target lives on until the test lets it end by itself
 //   arrived   written by the gate when End waits at it: "<pid> <handle> member" (the handle End checked)
-//   holdopen  N: End holds before its Nth OpenProcess of any member instead ("arrived" then reads "<pid> 0 open")
+//   holdopen  N: End holds before its Nth OpenProcess of any member as well ("<pid> 0 open")
 //   open      written by the test: the held wait (or open) goes on, as the real call
+//             The gate's first hold answers in "arrived" and goes on at "open", its kth (k > 1, queue WHR, WHR6) in
+//             "arrived-k" and at "open-k": a wait and a later open can be held in one cleanup.
 //   crash     written by the test while End is held at the wait: the host ends its runtime through its own Process
 //             object (a runtime crash during the cleanup), then writes "crashed" ("<pid> <exit code>") and holds on
 //   calls.log every native call End made for the target, one line each
+//   trace.log every membership list Clean read and every native call End made, for any member (WHR6)
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -25,9 +28,14 @@ public sealed class GatedEndCalls : NexusWorkerJob.EndCalls {
     readonly Dictionary<long, uint> opened = new Dictionary<long, uint>();
     readonly object guard = new object();
     bool refused, held;
-    int opens;
+    int opens, holds;
     int injectedError;
     [ThreadStatic] static bool injected;
+    // A failed call's own error, read at once: the gate's file writes after it would replace the thread's last error
+    // before End reads it (LastError below gives this one).
+    [ThreadStatic] static bool saved;
+    [ThreadStatic] static int savedError;
+    void Save(bool failed) { saved = failed; if (failed) savedError = real.LastError(); }
 
     internal GatedEndCalls(NexusWorkerJob.EndCalls real, string dir) { this.real = real; this.dir = dir; }
 
@@ -38,12 +46,29 @@ public sealed class GatedEndCalls : NexusWorkerJob.EndCalls {
     }
     bool IsTarget(IntPtr handle) { lock (guard) return opened.ContainsKey(handle.ToInt64()); }
     // Written whole, then renamed: the test never reads a file the gate is still writing.
-    void Arrive(string text) {
-        string temp = Path.Combine(dir, "arrived.tmp");
+    void Arrive(string name, string text) {
+        string temp = Path.Combine(dir, name + ".tmp");
         File.WriteAllText(temp, text);
-        File.Move(temp, Path.Combine(dir, "arrived"));
+        File.Move(temp, Path.Combine(dir, name));
+    }
+    // The gate's next hold: answered in its own file, gone on from at its own (see above). `waiting` runs while held.
+    void Hold(string text, Action waiting) {
+        int k;
+        lock (guard) k = ++holds;
+        Arrive(k == 1 ? "arrived" : "arrived-" + k, text);
+        string open = Path.Combine(dir, k == 1 ? "open" : "open-" + k);
+        while (!File.Exists(open)) { if (waiting != null) waiting(); Thread.Sleep(10); }
     }
     void Log(string line) { lock (guard) File.AppendAllText(Path.Combine(dir, "calls.log"), line + "\n"); }
+    void Trace(string line) { lock (guard) File.AppendAllText(Path.Combine(dir, "trace.log"), line + "\n"); }
+
+    public List<uint> Members() {
+        List<uint> members = real.Members();
+        Trace("Members " + string.Join(" ", members.ConvertAll(x => x.ToString()).ToArray()));
+        return members;
+    }
+    public object StartTimer() { return real.StartTimer(); }
+    public long ElapsedMilliseconds(object timer) { return real.ElapsedMilliseconds(timer); }
 
     // Holds before the Nth OpenProcess End makes for any member (the file "holdopen" names N), before the open itself:
     // for a target End cannot open (a DACL denial), whose cleanup fails at the open and never reaches the wait, this
@@ -54,14 +79,15 @@ public sealed class GatedEndCalls : NexusWorkerJob.EndCalls {
         lock (guard) count = ++opens;
         if (!File.Exists(file) || !int.TryParse(File.ReadAllText(file).Trim(), out n) || n != count) return;
         Log("held open " + pid);
-        Arrive(pid + " 0 open");
-        string open = Path.Combine(dir, "open");
-        while (!File.Exists(open)) Thread.Sleep(10);
+        Trace("held open " + pid);
+        Hold(pid + " 0 open", null);
     }
 
     public IntPtr OpenProcess(uint access, bool inherit, uint pid) {
         if (pid != 0) HoldOpen(pid);
         IntPtr handle = real.OpenProcess(access, inherit, pid);
+        Save(handle == IntPtr.Zero);
+        Trace("OpenProcess " + pid + " " + handle.ToInt64() + (saved ? " error " + savedError : ""));
         if (pid != 0 && pid == Target()) {
             lock (guard) if (handle != IntPtr.Zero) opened[handle.ToInt64()] = pid;
             Log("OpenProcess " + pid + " " + handle.ToInt64());
@@ -80,6 +106,8 @@ public sealed class GatedEndCalls : NexusWorkerJob.EndCalls {
     }
     public bool IsProcessInJob(IntPtr process, IntPtr job, out bool member) {
         bool ok = real.IsProcessInJob(process, job, out member);
+        Save(!ok);
+        Trace("IsProcessInJob " + process.ToInt64() + " " + ok + " " + member);
         if (IsTarget(process)) Log("IsProcessInJob " + process.ToInt64() + " " + ok + " " + member);
         return ok;
     }
@@ -89,16 +117,13 @@ public sealed class GatedEndCalls : NexusWorkerJob.EndCalls {
             lock (guard) { first = !held; held = true; }
             if (first) {
                 Log("held " + handle.ToInt64());
-                Arrive(Target() + " " + handle.ToInt64() + " member");
-                string open = Path.Combine(dir, "open"), crash = Path.Combine(dir, "crash");
+                string crash = Path.Combine(dir, "crash");
                 bool crashed = false;
-                while (!File.Exists(open)) {
-                    if (!crashed && File.Exists(crash)) { crashed = true; CrashRuntime(); }
-                    Thread.Sleep(10);
-                }
+                Hold(Target() + " " + handle.ToInt64() + " member", () => { if (!crashed && File.Exists(crash)) { crashed = true; CrashRuntime(); } });
             }
         }
         uint result = real.WaitForSingleObject(handle, ms);
+        Trace("WaitForSingleObject " + handle.ToInt64() + " " + ms + " " + result);
         if (IsTarget(handle)) Log("WaitForSingleObject " + handle.ToInt64() + " " + ms + " " + result);
         return result;
     }
@@ -112,22 +137,29 @@ public sealed class GatedEndCalls : NexusWorkerJob.EndCalls {
                 return false;
             }
             bool ok = real.TerminateProcess(process, code);
-            Log("TerminateProcess " + process.ToInt64() + " " + ok);
+            Save(!ok);
             injected = false;
+            Log("TerminateProcess " + process.ToInt64() + " " + ok);
+            Trace("TerminateProcess " + process.ToInt64() + " " + ok + (saved ? " error " + savedError : ""));
             return ok;
         }
         injected = false;
-        return real.TerminateProcess(process, code);
+        bool done = real.TerminateProcess(process, code);
+        Save(!done);
+        Trace("TerminateProcess " + process.ToInt64() + " " + done + (saved ? " error " + savedError : ""));
+        return done;
     }
     public bool CloseHandle(IntPtr handle) {
         bool target;
         lock (guard) { target = opened.Remove(handle.ToInt64()); }
         if (target) Log("CloseHandle " + handle.ToInt64());
+        Trace("CloseHandle " + handle.ToInt64());
         return real.CloseHandle(handle);
     }
     public int LastError() {
         // End reads the error right after the call it belongs to: the injected one after an injected refusal.
         if (injected) { injected = false; return injectedError; }
+        if (saved) { saved = false; return savedError; }
         return real.LastError();
     }
 }
