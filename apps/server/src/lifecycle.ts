@@ -32,6 +32,8 @@ import type { Engine } from "./engine.ts";
 import type { Orchestrator } from "./orchestrator.ts";
 
 const run = promisify(execFile);
+/** How often a drain looks whether the workers are out of their turns (LifecycleOptions.tickMs). */
+const TICK_MS = 2000;
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 /** A project's part in an update (projectPart). */
@@ -101,6 +103,8 @@ export interface LifecycleOptions {
   successor?: string[];
   /** How long the successor has to signal ready. */
   timeoutMs?: number;
+  /** How often a drain looks whether every project's workers are out of their turns (default 2000 ms; tests: less). */
+  tickMs?: number;
   /** Runs npm in the root. */
   npm?: (root: string, ...args: string[]) => Promise<void>;
   /** Stops every agent and every write of this server and frees the port (main.ts). */
@@ -167,6 +171,7 @@ export class Lifecycle {
     this.o = {
       successor: options.successor ?? [process.execPath, join(this.root, "apps/server/src/main.ts")],
       timeoutMs: options.timeoutMs ?? HANDOVER_TIMEOUT_MS,
+      tickMs: options.tickMs ?? TICK_MS,
       npm: options.npm ?? npmIn,
       release: options.release ?? (async () => {}),
       reacquire: options.reacquire ?? (async () => {}),
@@ -257,7 +262,7 @@ export class Lifecycle {
     this.status = { phase: "draining", since: now(), now: !!opts.now, ref: opts.ref || "main", held, waiting: [], log: [], id: newId(), by: opts.by };
     this.from = undefined;
     this.note(held.length ? `holding ${held.join(", ")} at the end of their current step` : "no queue is running");
-    this.timer = setInterval(() => void this.tick(), 2000);
+    this.timer = setInterval(() => void this.tick(), this.o.tickMs);
     void this.tick();
     return this.status;
   }

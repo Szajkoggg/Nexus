@@ -24,6 +24,12 @@ the old server goes only once the new one has shown it works.
 4. If the successor does not come up, the predecessor rolls back. That is when it gets no signal within 60 seconds
    (a constant), finds `failed.json`, or sees the successor exit early. See "Rolling back" below.
 
+**What the drain waits for.** Every `tickMs` (`LifecycleOptions`, 2 s by default; tests set less) the drain asks every
+project whether a worker is still in a turn. A worker settling after a turn that had a `next` message sent into it
+counts as in a turn (`AgentHost.idle`, `AgentProcess.settling`): Claude Code may still run that message as a late turn
+of its own, and a restart in that moment would lose it (queue LS, finding 14). So the drain waits for the late turn to
+run and end, or for the moment to pass without one (`test/update-drain-settling.test.ts`, queue LCF).
+
 **The chats during an update** (decided 2026-11-15, queue OP). Before, the drain waited for every agent's turn and
 refused the user's chat messages, so a deploy that waited an hour for a step closed the orchestrator's chat and the
 conversations for that hour, with nothing gained: a chat turn starts no work, and a run start stays refused anyway. Now
