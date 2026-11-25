@@ -117,25 +117,47 @@ public static class NexusWorkerJob
 
     // A PID is only a way to open a handle. Check membership on that same handle before terminating it: Windows
     // can reuse the enumerated PID before OpenProcess. Holding the handle pins the identity through termination.
+    // End is Begin and Finish: Clean begins every member of a list before it finishes any (queue LCK, F5).
     static void End(uint pid) {
+        Ending ending = Begin(pid);
+        if (ending != null) Finish(ending);
+    }
+
+    // A member asked to end: the handle its membership was checked on, and the termination's error (0: none).
+    sealed class Ending {
+        public readonly IntPtr Handle;
+        public readonly int TerminationError;
+        public Ending(IntPtr handle, int terminationError) { Handle = handle; TerminationError = terminationError; }
+    }
+
+    // Opens the member, checks it on its handle and terminates it, without waiting for its exit. Null when there is
+    // nothing to wait for (gone, not a member, exited already); the handle is then closed.
+    static Ending Begin(uint pid) {
         IntPtr handle = calls.OpenProcess(0x100000 | 0x1000 | 1, false, pid); // synchronize, query limited, terminate
         if (handle == IntPtr.Zero) {
             int error = calls.LastError();
-            if (error == 87) return; // already gone
+            if (error == 87) return null; // already gone
             throw new Win32Exception(error, "OpenProcess for worker job member " + pid + ": " + new Win32Exception(error).Message);
         }
+        bool kept = false;
         try {
             bool member;
             if (!calls.IsProcessInJob(handle, job, out member)) {
                 int error = calls.LastError();
                 throw new Win32Exception(error, "IsProcessInJob for worker job member " + pid + ": " + new Win32Exception(error).Message);
             }
-            if (!member) return;
-            if (calls.WaitForSingleObject(handle, 0) == 0) return;
+            if (!member) return null;
+            if (calls.WaitForSingleObject(handle, 0) == 0) return null;
             bool terminated = calls.TerminateProcess(handle, 1);
             int terminationError = terminated ? 0 : calls.LastError();
-            AwaitExit(handle, terminationError);
-        } finally { calls.CloseHandle(handle); }
+            kept = true;
+            return new Ending(handle, terminationError);
+        } finally { if (!kept) calls.CloseHandle(handle); }
+    }
+
+    // Waits for a begun member's exit (AwaitExit), then closes its handle.
+    static void Finish(Ending ending) {
+        try { AwaitExit(ending.Handle, ending.TerminationError); } finally { calls.CloseHandle(ending.Handle); }
     }
 
     // TerminateProcess can report ACCESS_DENIED while another termination is still completing (observed with
@@ -148,16 +170,37 @@ public static class NexusWorkerJob
         throw new TimeoutException("worker child did not exit");
     }
 
+    // Ends the job's members but the host (and the runtime when kept), list after list until one holds no other. The
+    // members of a list end together (queue LCK, F5, the user's decision): each is terminated before any exit is waited
+    // for, so a list of N members takes about the longest one's wait, not the sum of them. The 10 s limit is looked at
+    // after each member's wait (and after a list with none to wait for), so it fails with this host's own error before
+    // the server's 15 s run out, however many members a list holds. A failure closes the handles still held.
     static void Clean(bool keepRuntime) {
         lock (cleanup) {
             var timer = calls.StartTimer();
             while (true) {
                 var targets = calls.Members().FindAll(pid => pid != self && (!keepRuntime || pid != runtime.Id));
                 if (targets.Count == 0) return;
-                foreach (uint pid in targets) End(pid);
-                if (calls.ElapsedMilliseconds(timer) > 10000) throw new TimeoutException("worker job did not settle");
+                var ending = new List<Ending>();
+                try {
+                    foreach (uint pid in targets) {
+                        Ending begun = Begin(pid);
+                        if (begun != null) ending.Add(begun);
+                    }
+                    if (ending.Count == 0) Settled(timer);
+                    while (ending.Count > 0) {
+                        Ending next = ending[0];
+                        ending.RemoveAt(0);
+                        Finish(next);
+                        Settled(timer);
+                    }
+                } finally { foreach (Ending left in ending) calls.CloseHandle(left.Handle); }
             }
         }
+    }
+
+    static void Settled(object timer) {
+        if (calls.ElapsedMilliseconds(timer) > 10000) throw new TimeoutException("worker job did not settle");
     }
 
     static ushort Port(uint raw) { return (ushort)(((raw & 0xff) << 8) | ((raw >> 8) & 0xff)); } // network byte order

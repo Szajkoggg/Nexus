@@ -10,6 +10,9 @@ export const REAL_PROCESS_TESTS: Readonly<Record<string, string>> = {
   "apps/server/test/worker-exit.test.ts": "the job host ends a worker's process tree at a step's boundary",
   "apps/server/test/worker-processes.test.ts": "a worker's descendants and what the job host does with them",
   "apps/server/test/worker-job.test.ts": "the worker's Windows job host itself",
+  "apps/server/test/worker-job-load.test.ts": "a real job host's cleanup of many busy members and a parent starting children, timed against the server's 15 s",
+  "apps/server/test/worker-end.test.ts": "compiles the job host's C# with the End harness in a PowerShell of its own, and ends real processes on the default seam",
+  "apps/server/test/worker-process-frames.test.ts": "one case starts a real job host to show the frames it sends",
   "apps/server/test/worker-cleanup-gate.test.ts": "stops, resumes and a host's loss meet a cleanup held inside the real job host's native wait",
   "apps/server/test/worker-cleanup-membership.test.ts": "a job member starts a child, and another exits, while a cleanup is held inside the real job host's native wait",
   "apps/server/test/worker-cleanup-restart.test.ts": "a server's restart, its death in a server process of its own, a runtime crash and stale records meet a cleanup held inside the real job host's native wait",
@@ -73,7 +76,8 @@ function code(text: string): string {
  * How a test file starts processes, by what its code names: a fake runtime as a script path (fake-claude.ts or
  * fake-codex.ts in a string, not an import), a server (spawnServer, apps/server/test/helpers.ts; crashAt,
  * apps/server/test/crash-server.ts, one that dies), the CLI as a process (bin/nexus.js in a string), test files in a
- * Node process of their own ("--test" in a string). Empty: it starts none of them.
+ * Node process of their own ("--test" in a string), a Windows job host or its code in a PowerShell (spawnRuntimeChild,
+ * new WorkerProcess, or a job host's or the End harness's script in a string: queue LCK). Empty: it starts none.
  */
 export function processStarts(text: string): string[] {
   const c = code(text).replace(/\bfrom\s+(["'])[^"'\n]*\1/g, "").replace(/\bimport\(\s*(["'])[^"'\n]*\1\s*\)/g, "");
@@ -83,6 +87,7 @@ export function processStarts(text: string): string[] {
   if (/\bcrashAt\(/.test(c)) kinds.push("a server that dies");
   if (/["'`][^"'`\n]*bin\/nexus\.js["'`]/.test(c)) kinds.push("the CLI as a process");
   if (/["'`]--test["'`]/.test(c)) kinds.push("test files in a Node process of their own");
+  if (/\bspawnRuntimeChild\(|\bnew WorkerProcess\(|["'`][^"'`\n]*worker-(?:job|gate|end)\.ps1["'`]/.test(c)) kinds.push("a Windows job host or its code in a PowerShell");
   return kinds;
 }
 

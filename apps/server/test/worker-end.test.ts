@@ -140,89 +140,141 @@ CASES.forEach((c, i) => {
   });
 });
 
-// H8 of the LWH survey (queue WHR, WHR6): Clean, the loop over the job's membership, on the scripted seam: the lists
-// Members gives and the clock Clean reads are the test's (`list`, `elapsed`), and so are the native results of each
-// End. The real membership (a child started by a member is one, a member gone before its open) is shown with the real
-// job host in worker-cleanup-membership.test.ts; here the deadline branches are deterministic.
+// H8 of the LWH survey (queue WHR, WHR6), with queue LCK's change (F5, the user's decision): Clean, the loop over the
+// job's membership, on the scripted seam: the lists Members gives and the clock Clean reads are the test's (`list`,
+// `elapsed`), and so are the native results of each End. Clean ends a list's members together: it begins each (open,
+// membership, zero-time wait, terminate) before it finishes any (the 2000 ms wait, close), and reads its clock after
+// each member's finish, or once after a list with none to finish. The real membership (a child started by a member is
+// one, a member gone before its open) is shown with the real job host in worker-cleanup-membership.test.ts, and a job
+// under load in worker-job-load.test.ts; here the deadline branches are deterministic.
 const SETTLE = /^outcome threw System\.TimeoutException - worker job did not settle$/;
 
-/** One member's End, live: the replies it takes and the calls it makes (terminate succeeds, the exit comes in the wait). */
-function live(pid: number | "runtime", h: number) {
+/** One member's part in a Clean: what its Begin and (when there is one) its Finish take and call. */
+interface Member { begin: { replies: string[]; calls: string[] }; finish?: { replies: string[]; calls: string[] }; handle?: number }
+
+/** Live: its Begin terminates it, its Finish sees the exit in the 2000 ms wait and closes the handle. */
+function live(pid: number | "runtime", h: number): Member {
   return {
-    replies: [`open ${h} 0`, "member 1 1 0", "wait 258 0", "terminate 1 0", "wait 0 0", "close 1"],
-    calls: [`OpenProcess 0x101001 False ${pid}`, `IsProcessInJob ${h} ${JOB}`, `WaitForSingleObject ${h} 0`, `TerminateProcess ${h} 1`, `WaitForSingleObject ${h} 2000`, `CloseHandle ${h}`],
+    begin: { replies: [`open ${h} 0`, "member 1 1 0", "wait 258 0", "terminate 1 0"], calls: [`OpenProcess 0x101001 False ${pid}`, `IsProcessInJob ${h} ${JOB}`, `WaitForSingleObject ${h} 0`, `TerminateProcess ${h} 1`] },
+    finish: { replies: ["wait 0 0", "close 1"], calls: [`WaitForSingleObject ${h} 2000`, `CloseHandle ${h}`] },
+    handle: h,
   };
 }
-/** Gone between the list and its open: OpenProcess fails with 87, End returns. */
-const gone = (pid: number) => ({ replies: ["open 0 87"], calls: [`OpenProcess 0x101001 False ${pid}`, "LastError 87"] });
-/** Exited, but still openable: the zero-time wait sees the exit, nothing is terminated. */
-const exited = (pid: number, h: number) => ({
-  replies: [`open ${h} 0`, "member 1 1 0", "wait 0 0", "close 1"],
-  calls: [`OpenProcess 0x101001 False ${pid}`, `IsProcessInJob ${h} ${JOB}`, `WaitForSingleObject ${h} 0`, `CloseHandle ${h}`],
+/** Gone between the list and its open: OpenProcess fails with 87, nothing to finish. */
+const gone = (pid: number): Member => ({ begin: { replies: ["open 0 87"], calls: [`OpenProcess 0x101001 False ${pid}`, "LastError 87"] } });
+/** Exited, but still openable: the zero-time wait sees the exit, nothing is terminated, the handle closed at once. */
+const exited = (pid: number, h: number): Member => ({
+  begin: { replies: [`open ${h} 0`, "member 1 1 0", "wait 0 0", "close 1"], calls: [`OpenProcess 0x101001 False ${pid}`, `IsProcessInJob ${h} ${JOB}`, `WaitForSingleObject ${h} 0`, `CloseHandle ${h}`] },
 });
 
 /**
- * Runs Clean(keep) once: `rounds` are the lists in order, each with its members' Ends and the clock read after it (none
- * for a list Clean finds empty). Returns the harness's answer: the PIDs line, then every call, the outcome and the
- * restored seam; and the calls Clean must have made, built from the same rounds.
+ * A list and its members, and the clock Clean reads in it: one value per member it finishes, in order (or one for a list
+ * with none to finish; none for the empty list that ends Clean). `throwsAt`: the index of the reading that fails the
+ * cleanup; the members not finished by then have their handles closed, without a wait.
  */
-async function clean(keep: boolean, rounds: { list: string; ends: ReturnType<typeof live>[]; elapsed?: number }[]) {
-  const replies = rounds.flatMap((r) => [`list ${r.list}`, ...r.ends.flatMap((e) => e.replies), ...(r.elapsed === undefined ? [] : [`elapsed ${r.elapsed}`])]);
+interface Round { list: string; ends: Member[]; elapsed?: number[]; throwsAt?: number }
+
+/**
+ * Runs Clean(keep) once over `rounds`. Returns the harness's answer (the calls, the outcome, the restored seam; the
+ * PIDs line taken off), the calls Clean must have made, built from the same rounds, and the runtime's PID.
+ */
+async function clean(keep: boolean, rounds: Round[]) {
+  // Each operation's replies are taken in order of its calls: every Begin of a list comes before its Finishes.
+  const replies = rounds.flatMap((r) => [
+    `list ${r.list}`, ...r.ends.flatMap((m) => m.begin.replies), ...r.ends.flatMap((m) => m.finish?.replies ?? []),
+    ...(r.elapsed ?? []).map((ms) => `elapsed ${ms}`),
+  ]);
   const answer = (await endHarness([[`clean ${keep ? 1 : 0} ${JOB}`, ...replies].join("\n")]))[0]!;
   const [self, runtime] = answer[0]!.split(" ").slice(1).map(Number);
   assert.ok(self! > 0 && runtime! > 0 && self !== runtime, answer[0]);
   const named = (list: string) => list.split(" ").filter(Boolean).map((x) => (x === "self" ? self : x === "runtime" ? runtime : Number(x))).join(" ");
-  const expected = ["StartTimer", ...rounds.flatMap((r) => [`Members ${named(r.list)}`, ...r.ends.flatMap((e) => e.calls).map((c) => c.replace(/ runtime$/, ` ${runtime}`)), ...(r.elapsed === undefined ? [] : [`Elapsed ${r.elapsed}`])])];
-  return { answer: answer.slice(1), expected, runtime: runtime! };
+  const expected = ["StartTimer"];
+  for (const r of rounds) {
+    expected.push(`Members ${named(r.list)}`, ...r.ends.flatMap((m) => m.begin.calls));
+    const finishing = r.ends.filter((m) => m.finish);
+    const elapsed = r.elapsed ?? [];
+    if (!finishing.length && elapsed.length) expected.push(`Elapsed ${elapsed[0]}`);
+    for (const [i, m] of finishing.entries()) {
+      if (i >= elapsed.length) break;
+      expected.push(...m.finish!.calls, `Elapsed ${elapsed[i]}`);
+      if (r.throwsAt === i) { expected.push(...finishing.slice(i + 1).map((x) => `CloseHandle ${x.handle}`)); break; }
+    }
+  }
+  return { answer: answer.slice(1), expected: expected.map((c) => c.replace(/ runtime$/, ` ${runtime}`)), runtime: runtime! };
 }
 
-test("Clean: children that join after a list are ended on the next ones; it returns only on a list with nothing but the host and its runtime, and reads the clock after each list it ended, never after the empty one", windows, async () => {
+test("Clean: children that join after a list are ended on the next ones; it returns only on a list with nothing but the host and its runtime, and reads the clock after each member it finished, never after the empty list", windows, async () => {
   const { answer, expected } = await clean(true, [
-    { list: "self runtime 101", ends: [live(101, 11)], elapsed: 1000 },
-    { list: "self runtime 102", ends: [live(102, 12)], elapsed: 3000 },
-    { list: "runtime 103 self 104", ends: [live(103, 13), live(104, 14)], elapsed: 7000 },
-    { list: "self runtime 105", ends: [live(105, 15)], elapsed: 9000 },
+    { list: "self runtime 101", ends: [live(101, 11)], elapsed: [1000] },
+    { list: "self runtime 102", ends: [live(102, 12)], elapsed: [3000] },
+    { list: "runtime 103 self 104", ends: [live(103, 13), live(104, 14)], elapsed: [6000, 7000] },
+    { list: "self runtime 105", ends: [live(105, 15)], elapsed: [9000] },
     { list: "runtime self", ends: [] },
   ]);
   assert.deepEqual(answer, [...expected, "outcome returned", `restored ${DEFAULT_SEAM}`]);
 });
 
+test("Clean ends a list's members together: every member is terminated before the first exit is waited for, then each is waited for and closed in turn", windows, async () => {
+  const pids = [101, 102, 103, 104, 105, 106];
+  const { answer, expected } = await clean(true, [
+    { list: `self runtime ${pids.join(" ")}`, ends: pids.map((p, i) => live(p, 11 + i)), elapsed: [2000, 2000, 2000, 2000, 2000, 2000] },
+    { list: "self runtime", ends: [] },
+  ]);
+  assert.deepEqual(answer, [...expected, "outcome returned", `restored ${DEFAULT_SEAM}`]);
+  const lastTerminate = answer.findLastIndex((l) => l.startsWith("TerminateProcess"));
+  const waits = (l: string) => l.startsWith("WaitForSingleObject ") && l.endsWith(" 2000");
+  const firstWait = answer.findIndex(waits);
+  assert.ok(lastTerminate < firstWait, "all six terminated before the first 2000 ms wait");
+  assert.equal(answer.filter(waits).length, 6, "one 2000 ms wait per member");
+});
+
 test("Clean: a member gone between the list and its open (87) is skipped, one that exited but can still be opened is not terminated, the live one is ended", windows, async () => {
   const { answer, expected } = await clean(true, [
-    { list: "self runtime 101 102 103", ends: [gone(101), exited(102, 12), live(103, 13)], elapsed: 500 },
+    { list: "self runtime 101 102 103", ends: [gone(101), exited(102, 12), live(103, 13)], elapsed: [500] },
     { list: "self runtime", ends: [] },
   ]);
   assert.deepEqual(answer, [...expected, "outcome returned", `restored ${DEFAULT_SEAM}`]);
   assert.equal(answer.filter((l) => l.startsWith("TerminateProcess")).length, 1, "only the live member is terminated");
 });
 
+test("Clean: a list whose members are all gone or exited has nothing to finish: the clock is read once after it", windows, async () => {
+  const { answer, expected } = await clean(true, [
+    { list: "self runtime 101 102", ends: [gone(101), exited(102, 12)], elapsed: [300] },
+    { list: "self runtime", ends: [] },
+  ]);
+  assert.deepEqual(answer, [...expected, "outcome returned", `restored ${DEFAULT_SEAM}`]);
+  assert.equal(answer.filter((l) => l.startsWith("Elapsed")).length, 1);
+});
+
 test("Clean for the job's end (keep false, K and the input's end): the runtime is a member to end like any other; the host is never one", windows, async () => {
-  const { answer, expected, runtime } = await clean(false, [{ list: "self runtime", ends: [live("runtime", 21)], elapsed: 200 }, { list: "self", ends: [] }]);
+  const { answer, expected, runtime } = await clean(false, [{ list: "self runtime", ends: [live("runtime", 21)], elapsed: [200] }, { list: "self", ends: [] }]);
   assert.deepEqual(answer, [...expected, "outcome returned", `restored ${DEFAULT_SEAM}`]);
   assert.equal(answer.find((l) => l.startsWith("OpenProcess")), `OpenProcess 0x101001 False ${runtime}`);
 });
 
-test("Clean's 10 s is a checkpoint after a whole list, not a wall-clock limit: 10 000 ms goes on, 10 001 ms fails with the settle error only after every member of that list was ended", windows, async () => {
+test("Clean's 10 s is looked at after each member: 10 000 ms goes on, 10 001 ms after a member fails with the settle error at once; the members not yet waited for were terminated, and their handles are closed", windows, async () => {
   const { answer, expected } = await clean(true, [
-    { list: "self runtime 101 102", ends: [live(101, 11), live(102, 12)], elapsed: 10_000 },
-    { list: "self runtime 103 104", ends: [live(103, 13), live(104, 14)], elapsed: 10_001 },
+    { list: "self runtime 101 102", ends: [live(101, 11), live(102, 12)], elapsed: [9000, 10_000] },
+    { list: "self runtime 103 104 105", ends: [live(103, 13), live(104, 14), live(105, 15)], elapsed: [10_001], throwsAt: 0 },
   ]);
   assert.deepEqual(answer.slice(0, -2), expected);
   assert.match(answer.at(-2)!, SETTLE);
   assert.equal(answer.at(-1), `restored ${DEFAULT_SEAM}`);
+  assert.deepEqual(answer.slice(-4, -2), ["CloseHandle 14", "CloseHandle 15"], "the rest closed without a wait");
+  assert.equal(answer.filter((l) => l.startsWith("TerminateProcess")).length, 5, "every member of both lists was terminated");
 });
 
-test("Clean past 10 s on a list whose members are now all ended: still the settle error, no list is read after the check", windows, async () => {
-  const { answer, expected } = await clean(true, [{ list: "self runtime 101", ends: [live(101, 11)], elapsed: 10_001 }]);
+test("Clean past 10 s after the last member of a list: still the settle error, no list is read after the check", windows, async () => {
+  const { answer, expected } = await clean(true, [{ list: "self runtime 101", ends: [live(101, 11)], elapsed: [10_001], throwsAt: 0 }]);
   assert.deepEqual(answer.slice(0, -2), expected);
   assert.equal(answer.filter((l) => l.startsWith("Members")).length, 1);
   assert.match(answer.at(-2)!, SETTLE);
 });
 
-test("Clean with six members each waiting out its own 2000 ms: every one gets its one wait, then the clock (12 000 ms) fails the cleanup with the settle error", windows, async () => {
-  const pids = [101, 102, 103, 104, 105, 106];
-  const { answer, expected } = await clean(true, [{ list: `self runtime ${pids.join(" ")}`, ends: pids.map((p, i) => live(p, 11 + i)), elapsed: 12_000 }]);
-  assert.deepEqual(answer.slice(0, -2), expected);
-  assert.equal(answer.filter((l) => / 2000$/.test(l)).length, 6, "one 2000 ms wait per member");
-  assert.match(answer.at(-2)!, SETTLE);
+test("Clean: a Begin that fails (the membership check refused) fails the cleanup with its error; the members begun before it are closed without a wait", windows, async () => {
+  const refused: Member = { begin: { replies: ["open 12 0", "member 0 0 5", "close 1"], calls: ["OpenProcess 0x101001 False 102", `IsProcessInJob 12 ${JOB}`, "LastError 5", "CloseHandle 12"] } };
+  const first = live(101, 11);
+  const { answer } = await clean(true, [{ list: "self runtime 101 102", ends: [first, refused] }]);
+  assert.deepEqual(answer.slice(0, -2), ["StartTimer", answer[1]!, ...first.begin.calls, ...refused.begin.calls, "CloseHandle 11"]);
+  assert.match(answer.at(-2)!, /^outcome threw System\.ComponentModel\.Win32Exception 5 IsProcessInJob for worker job member 102: /);
 });

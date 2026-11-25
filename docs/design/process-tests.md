@@ -129,14 +129,26 @@ clock, go through the same seam (`Members`, `StartTimer`, `ElapsedMilliseconds` 
 (Kernel32EndCalls) calls the host's own Members() and a Stopwatch exactly as Clean did before, and as for End, nothing
 at run time selects another seam: only a test's own compiled copy sets one by reflection. On the scripted seam
 (`apps/server/test/worker-end-calls.cs`, request `clean`) `worker-end.test.ts` gives Clean its lists and clock: children
-joining after a list, a member gone or exited before its open, the job's end, the 10 s checkpoint (read only after a
-whole list, so it is no wall-clock limit) and several members each waiting 2000 ms. `worker-process-frames.test.ts`
+joining after a list, a member gone or exited before its open, the job's end, the 10 s limit and several members
+each waiting 2000 ms. Since queue LCK (F5, the user's decision) Clean ends a list's members together: it begins each
+(open, membership, zero-time wait, terminate) before it finishes any (the 2000 ms wait, close), and reads its clock
+after each member's finish (or once after a list with nothing to finish), so a list of many members takes about the
+longest wait, not their sum, and the host fails with its own "worker job did not settle" before the server's 15 s; a
+failure closes the handles still held, without a wait. `worker-process-frames.test.ts`
 separates the host's "worker job did not settle" from the server's 15 s. With real processes,
 `apps/server/test/worker-cleanup-membership.test.ts` has the step's helper start a child after Clean's first list
 (`apps/server/test/worker-helper.ps1` with -Late, fake behaviour `ownedholdsharedlate`): the child is a member by inheritance and is ended
 before C; and a member exits between its listing and its open. The gate traces every list and every End call for any
 member (`trace.log`; a failed call's error is kept before the gate writes its files, so End reads its own) and can
 hold a wait and a later open in one cleanup (the kth hold answers in `arrived-k`, goes on at `open-k`).
+
+A job under load (queue LCK, the survey's Recommended addition 4): `apps/server/test/worker-job-load.test.ts` runs a
+real job host whose runtime starts 12 busy-loop children and a parent that starts an idle child every 20 ms, and asks
+for a cleanup: it must answer within the server's 15 s, done (the runtime reports each busy child's and the parent's
+exit: its own children's exit events, which a reused PID cannot fake) or with the host's own failure. Before the
+change, 20 runs under `node scripts/load-tests.mjs` (12 burners, 4 copies) all passed, in 5.6 to 8.1 s each; the change
+rests on the code path (the sum of the waits, and a limit looked at only after a whole list), not on a reproduced
+failure. `NEXUS_TEST_JOB_LOAD_LOG` names a file that gets each run's time.
 
 What these tests do not show, and how far each layer reaches: the deadline branches (10 s, several 2000 ms waits) are
 scripted, never waited out on a real job; the server's 15 s is shown on mock timers only; a member's exit racing its

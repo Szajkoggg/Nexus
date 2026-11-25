@@ -3,7 +3,7 @@
 // ownedholdsharedlate, worker-helper.ps1 -Late); the gate holds End at the helper's 2000 ms wait, so Clean's first
 // membership list is taken and the child is born after it, a member by inheritance. The gate's trace (every list Clean
 // read and every native call End made, for any member) shows what Clean saw and did. The deadline branches (the 10 s
-// checkpoint, several members each waiting, the server's 15 s) are deterministic on the scripted seam
+// limit, several members each waiting, the server's 15 s) are deterministic on the scripted seam
 // (worker-end.test.ts, worker-process-frames.test.ts): here only real processes, nothing injected but the helper's
 // first TerminateProcess (false/5, as the WH2 trace).
 import { test } from "node:test";
