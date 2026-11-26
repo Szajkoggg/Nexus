@@ -154,3 +154,14 @@ The Node option must precede file patterns:
 appending it with `npm test -- --test-concurrency=4` did not apply the limit. No assertions, per-test timeouts,
 internal concurrency scenarios or repository runner configuration change; review reports retain the failed
 attempts alongside the final verification result.
+
+## Done but not confirmed, link proposals, long-paused queues (IWS1)
+
+[The IWS1 design](../ux/idea-work-signals.md) gives the combination "every linked queue done, implementation not
+confirmed" its own signal (one badge per entry, a filter, the same phrase in `nexus ideas status`) without changing the
+confirmation rule; adds the linked entries' states to the orchestrator's notice of a finished queue, with the offer to
+confirm that only the user can act on; turns a run paused longer than a deadline (default 3 days) into an attention
+item, noticed by a timer of the server's change pass rather than the run-control code; and lets the orchestrator, a
+thinking partner and a maintenance queue's worker propose idea links by an event, kept in a server-written proposals
+file until the user accepts or declines them in the dashboard. A proposal names an edge, and the server maps it onto
+the origin-level link operations when the user accepts; nothing is written to the link or status files before that.

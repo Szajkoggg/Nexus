@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>28 Idea work signals, link proposals, paused queues</title>
+<link rel="stylesheet" href="dash-mock.css">
+<!-- Queue IWS (IWS1). The design in docs/ux/idea-work-signals.md, drawn over today's dashboard as captured from
+     scripts/capture/seed-idea-work-signals.ts (the same notes, queues and paused queue AD). New parts have a dashed
+     outline. Views by the address: ?v=overview|entry|entry-proposal|links|waiting-links|waiting-paused|settings and
+     &w=1440|492|390 (the window's width; 492 and 390 draw the phone layout). All data is synthetic. -->
+<style>
+  html, body { height: 100%; }
+  .desk { height: 100vh; }
+  .scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+  .mid .scroll { padding: 20px 24px 24px; }
+  .sig { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 6px; white-space: nowrap; }
+  .sig::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+  .sig.qd { color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, transparent); }
+  .sig.qd::before { background: transparent; box-shadow: inset 0 0 0 2px currentColor; }
+  .sig.full { color: var(--ok); background: color-mix(in srgb, var(--ok) 13%, transparent); }
+  .sig.part { color: var(--info); background: color-mix(in srgb, var(--info) 13%, transparent); }
+  .sig.part::before { background: linear-gradient(90deg, currentColor 50%, transparent 50%); box-shadow: inset 0 0 0 1.5px currentColor; }
+  .sig.lnk { color: var(--fg-2); background: var(--surface-3); }
+  .sig.lnk::before { background: var(--accent); }
+  .chips { display: flex; flex-wrap: wrap; }
+  .chip { padding: 4px 10px; font-size: 13px; color: var(--fg-2); border-left: 1px solid var(--line-strong); white-space: nowrap; }
+  .chip:first-child { border-left: 0; }
+  .chip b { font-weight: 400; color: var(--fg-3); margin-left: 4px; }
+  .chip.on { background: var(--surface-3); color: var(--fg); font-weight: 600; border-radius: 6px; }
+  .chip.qdchip { color: var(--warn); }
+  .input { border: 1px solid var(--line-strong); border-radius: 8px; padding: 6px 10px; font-size: 13px; color: var(--fg-3); background: var(--canvas); }
+  .grp { display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; }
+  .notes { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  .nrow { padding: 12px 14px; border-top: 1px solid var(--line); }
+  .nrow:first-child { border-top: 0; }
+  .nhead { display: flex; gap: 10px; align-items: baseline; }
+  .nhead .t { font-weight: 600; white-space: nowrap; }
+  .eline { display: grid; grid-template-columns: 52px 1fr; gap: 2px 10px; padding: 6px 0 0 12px; font-size: 13px; }
+  .eline .d { color: var(--fg-3); }
+  .eline .s { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--fg-3); }
+  .q { color: var(--accent); font-family: var(--mono); font-size: 12px; }
+  .openq { color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 60%, transparent); border-radius: 5px; padding: 0 5px; font-size: 12px; white-space: nowrap; }
+  .rail { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .wcard { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .wtop { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-3); }
+  .kind.appr { color: var(--info); background: color-mix(in srgb, var(--info) 15%, transparent); }
+  .kind.links { color: var(--review); background: color-mix(in srgb, var(--review) 15%, transparent); }
+  .kind.paused { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+  .wtext { font-size: 14px; line-height: 1.4; }
+  .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  .btn.sm { padding: 3px 10px; font-size: 13px; }
+  .op { font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 4px; white-space: nowrap; letter-spacing: .02em; }
+  .op.add { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+  .op.rem { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+  .op.chg { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+  .prow { display: flex; flex-direction: column; gap: 3px; font-size: 13px; line-height: 1.4; }
+  .prow .ref { font-family: var(--mono); font-size: 12px; color: var(--accent); overflow-wrap: anywhere; }
+  .why { color: var(--fg-2); font-size: 13px; }
+  .maps { color: var(--fg-3); font-size: 12px; }
+  .ecard { border: 1px solid var(--line-strong); border-radius: 10px; background: var(--canvas); padding: 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .ehead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ehead .date { font-weight: 600; }
+  .alink { color: var(--accent); text-decoration: underline; font-size: 13px; white-space: nowrap; }
+  .fold { color: var(--fg-3); font-size: 13px; }
+  .fold::before { content: "▸ "; }
+  .note-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+  .note-panel .nbody { padding: 14px 24px 20px; display: flex; flex-direction: column; gap: 10px; }
+  .note-foot { border-top: 1px solid var(--line); padding: 12px 20px; display: flex; justify-content: flex-end; gap: 8px; flex: none; }
+  .note-foot .btn { border: 1px solid var(--line-strong); }
+  .prop { border: 1px solid color-mix(in srgb, var(--review) 45%, transparent); background: color-mix(in srgb, var(--review) 6%, transparent); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .pbox { border: 1px solid color-mix(in srgb, var(--review) 40%, transparent); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; background: color-mix(in srgb, var(--review) 4%, transparent); }
+  .pgroup { display: flex; flex-direction: column; gap: 8px; }
+  .pghead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+  .pitem { border-top: 1px solid var(--line); padding-top: 8px; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: start; }
+  .pitem.stale { opacity: .6; }
+  .lcard { border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
+  .fchips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .fchip { border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 12px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .fchip.on { background: var(--surface-3); }
+  .drawer-wrap { position: fixed; inset: 0; }
+  .dim { position: absolute; inset: 0; background: rgba(0,0,0,.55); }
+  .drawer { position: absolute; top: 0; bottom: 0; right: 0; width: 672px; background: var(--surface); border-left: 1px solid var(--line); overflow-y: auto; scrollbar-width: none; padding: 0 24px 24px; }
+  .srow { display: grid; grid-template-columns: 188px 1fr auto; gap: 6px 16px; padding: 12px 0; align-items: start; }
+  .srow .name { font-weight: 500; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+  .gtag { font-size: 11px; font-weight: 600; letter-spacing: .05em; color: var(--fg-3); background: var(--surface-3); border-radius: 4px; padding: 0 6px; }
+  .field { border: 1px solid var(--line-strong); border-radius: 6px; padding: 5px 10px; background: var(--canvas); min-height: 32px; display: flex; align-items: center; }
+  .seg2 { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; font-size: 13px; }
+  .seg2 span { padding: 4px 9px; color: var(--fg-2); }
+  .seg2 span:first-child { background: var(--surface-3); color: var(--fg); font-weight: 600; border-right: 1px solid var(--line-strong); }
+  .hint { grid-column: 2 / 4; font-size: 12.5px; color: var(--fg-2); line-height: 1.4; }
+  /* the phone */
+  .phone-shell { width: 100%; height: 100vh; position: relative; overflow: hidden; background: var(--canvas); }
+  .phone-shell .pcontent { overflow-y: auto; scrollbar-width: none; padding: 14px 12px 20px; }
+  .layer { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--canvas); }
+  .layer .ltop { display: flex; align-items: center; gap: 12px; padding: 14px 16px 4px; color: var(--fg-2); }
+  .layer .lscroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: 0 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .phone-shell .nhead { flex-wrap: wrap; row-gap: 4px; }
+  .phone-shell .nhead .t { white-space: normal; }
+  .phone-shell .srow { grid-template-columns: 1fr auto; padding: 10px 0; }
+  .phone-shell .srow .name { grid-column: 1 / 3; }
+  .phone-shell .hint { grid-column: 1 / 3; }
+</style></head>
+<body><div id="root"></div>
+<script>
+const q = new URLSearchParams(location.search);
+const v = q.get("v") ?? "overview";
+const w = Number(q.get("w") ?? innerWidth);
+const phone = w < 1024;
+const NEW = " new";
+
+// ---------------------------------------------------------------- the pieces of (a): one signal per dated entry
+const SIG = {
+  qd: `<span class="sig qd${NEW}">Queues done · not confirmed</span>`,
+  full: `<span class="sig full">Fully implemented</span>`,
+  part: `<span class="sig part">Partially implemented</span>`,
+};
+const entryLine = (d, lead, n, sig, queues) =>
+  `<div class="eline"><span class="d">${d}</span><span>${lead} <span class="fg3">· ${n}</span></span>
+   <span class="s">${sig}${queues}</span></div>`;
+const qs = (...a) => a.map(([id, st]) => `<span><span class="q">${id}</span> · ${st}</span>`).join("");
+
+function notesList() {
+  const head = (t, sum, right, open = "") => `<div class="nhead"><span class="t">${t}</span>${phone ? "" : `<span class="fg3 xs grow">${sum}</span>`}${open}${phone ? `<span class="grow"></span>` : ""}<span class="xs">${right}</span></div>${phone ? `<div class="fg3 xs" style="margin-top:4px">${sum}</div>` : ""}`;
+  return `
+  <div class="grp"><span class="fg3">⌄</span><span class="label fg2">Lifecycle</span><span class="xs fg3">3 notes</span></div>
+  <div class="notes" data-box>
+    <div class="nrow">${head("Deploy changes for orchestrators", "At a deploy, every project's orchestrator is told the commits' Agents: lines.", SIG.qd)}
+      ${entryLine("14 Nov", "Agents: lines in commits, told at a deploy", 4, SIG.qd, qs(["N4", "done"]))}</div>
+    <div class="nrow">${head("Deploy timing", "Deploys can be planned after a step, after a queue, or at a time (with an optional deadline).", SIG.qd)}
+      ${entryLine("13 Nov", "Planned deploys: after a step, a queue, or at a time", 5, SIG.full, qs(["PD", "done"]))}
+      ${entryLine("14 Nov", "A deadline, and what waits for a running step", 3, SIG.qd, qs(["PD", "done"]))}</div>
+    <div class="nrow">${head("Parallel worktrees and merge-back", "Independent queues run in their own worktrees; a closing integration step merges main in.", SIG.part, `<span class="openq">1 open</span>`)}
+      ${entryLine("15 Nov", "Own worktrees; Nexus merges back after the integration step", 6, SIG.part, qs(["PW", "done"]))}</div>
+  </div>
+  <div class="grp"><span class="fg3">⌄</span><span class="label fg2">Protocol</span><span class="xs fg3">2 notes</span></div>
+  <div class="notes" data-box>
+    <div class="nrow">${head("Stopped queue: a new revision", "Only the user lifts a stop: by approving a new revision of the stopped queue, or with Continue.", `${SIG.qd} <span class="fg3">· Needs attention 1</span>`)}
+      ${entryLine("13 Nov", "A stop is lifted by a new revision or Continue", 3, SIG.qd, qs(["SC", "done"]))}</div>
+  </div>`;
+}
+
+function overviewMid() {
+  const chips = `<div class="chips xs" style="gap:2px 0">
+    <span class="chip on">All<b>17</b></span>
+    <span class="chip qdchip${NEW}">Queues done, not confirmed<b>7</b></span>
+    <span class="chip">Being worked out<b>1</b></span><span class="chip">Unconfirmed<b>13</b></span>
+    <span class="chip">Partially implemented<b>1</b></span><span class="chip">Fully implemented<b>1</b></span>
+    <span class="chip">Decided<b>2</b></span><span class="chip">Handed over<b>1</b></span><span class="chip">Work linked<b>3</b></span>
+    <span class="chip">Work finished<b>9</b></span><span class="chip">Dropped<b>1</b></span><span class="chip">Needs attention<b>4</b></span></div>`;
+  return `<div class="row" style="margin-bottom:12px"><span class="fg2 sm">No pending suggestions</span><span class="grow"></span><span class="btn line">Manage links</span></div>
+    ${chips}<div class="input" style="margin-top:10px">Filter notes…</div>${notesList()}`;
+}
+
+// ---------------------------------------------------------------- the note (entry) with the confirmation's place
+function entryCards(proposal) {
+  const prop = proposal ? `<div class="prop${NEW}">
+      <div class="row wrap xs"><span class="kind links">Proposed link</span><span class="fg3">from the orchestrator · 5 min ago</span></div>
+      <div class="prow"><span><span class="op add">ADD</span> <span class="q">N4</span> · Deploy from the orchestrator chat</span>
+        <span class="why">“N4's second step built the deploy deadline; its description names this note.”</span>
+        <span class="maps">Adds a manual link to this date; N4's other links stay.</span></div>
+      <div class="btns"><span class="btn sm primary">Accept</span><span class="btn sm line">Decline</span><span class="fold">Evidence</span></div></div>` : "";
+  return `
+  <div class="ecard" data-box>
+    <div class="ehead"><span class="date">14 Nov 2026</span><span class="grow"></span>${SIG.qd}</div>
+    <div class="sm">A deadline, and what waits for a running step / 3 decisions</div>
+    <div class="xs fg2${NEW}">Linked queues: <span class="q">PD</span> done (1 of 1). Done queues do not show that the decision is implemented: only you confirm it.</div>
+    ${prop}
+    <div class="row wrap"><span class="btn sm line${NEW}">Review and confirm…</span><span class="alink">History</span></div>
+    <div class="fold">Complete dated decision</div>
+  </div>
+  <div class="ecard" data-box>
+    <div class="ehead"><span class="date">13 Nov 2026</span><span class="grow"></span>${SIG.full}</div>
+    <div class="sm">Planned deploys: after a step, a queue, or at a time / 5 decisions</div>
+    <div class="xs fg2${NEW}">Confirmed by you · 26 Nov: “Planned deploys work after a step, a queue and at a time.” Linked queues: <span class="q">PD</span> done.</div>
+    <div class="row wrap"><span class="alink">Change status</span><span class="alink">History</span></div>
+    <div class="fold">Complete dated decision</div>
+  </div>`;
+}
+function notePanel(proposal) {
+  const body = `<div class="label">Summary</div><div class="sm">Deploys can be planned after a step, after a queue, or at a time (with an optional deadline).</div>
+    <div class="label">Open · 0</div><div class="xs fg2">No open questions recorded.</div>
+    <div class="label">Decided / 2 dates</div>${entryCards(proposal)}
+    <div class="semi sm" style="margin-top:6px">▸ Related work / 1 queues</div><div class="xs">▸ Conversations and handoff history</div>
+    <div class="row"><span class="alink">Manage links</span><span class="alink">Open note file</span></div>`;
+  const foot = `<div class="note-foot"><span class="btn sm">Chat about this</span><span class="btn sm">Hand to orchestrator…</span></div>`;
+  if (phone) return `<div class="layer"><div class="ltop"><span>‹</span><span class="grow">lifecycle</span><span>✕</span></div>
+    <div class="lscroll"><div><div class="semi" style="font-size:18px">Deploy timing</div><div class="mono xs accent">docs/ideas/deploy-timing.md</div></div>${body}</div>${foot}</div>`;
+  return `<div class="note-panel"><div style="padding:16px 24px 12px;border-bottom:1px solid var(--line)"><div class="row xs fg3">lifecycle<span class="grow"></span>✕</div>
+    <div class="semi" style="font-size:20px;margin-top:6px">Deploy timing</div><div class="mono xs accent">docs/ideas/deploy-timing.md</div></div>
+    <div class="scroll"><div class="nbody">${body}</div></div>${foot}</div>`;
+}
+
+// ---------------------------------------------------------------- (d) the proposals in Manage links
+const P = {
+  n4: { op: "add", q: "N4", t: "Deploy from the orchestrator chat", ref: "docs/ideas/deploy-timing.md#2026-11-14", why: "N4's second step built the deploy deadline; its description names this note.", maps: "Adds a manual link." },
+  ps: { op: "rem", q: "PS", t: "Never two queues in one checkout", ref: "docs/ideas/queue-plan-view.md#2026-11-14", why: "PS is about checkouts, not the plan view; the source names the wrong note.", maps: "This is the queue's own source: ignores it (the queue file does not change)." },
+  pb: { op: "chg", q: "PB", t: "The plan view, part 1", ref: "docs/ideas/queue-plan-view.md#2026-11-15", to: "docs/ideas/queue-plan-view.md#2026-11-14", why: "PB built the graph of 14 Nov; the layouts of 15 Nov are PL's.", maps: "Corrects the queue's source: ignores it and adds a manual link to the new date." },
+  sb: { op: "add", q: "SB", t: "Side panels: the place in a chat is kept", ref: "docs/ideas/side-panels-and-waiting-list.md#2026-11-14", why: "SB's description quotes the heading “2026-11-14 (later): the place in a chat is kept”.", maps: "Adds a manual link (the matching's suggestion was rejected on 16 Nov)." },
+  tg: { op: "add", q: "TG", t: "Tags in queue.yaml and on the cards", ref: "docs/ideas/tags.md#2026-11-14", stale: "Outdated: this link already exists (Historical match, accepted 16 Nov)." },
+};
+const OPW = { add: "ADD", rem: "REMOVE", chg: "CHANGE TARGET" };
+function pitem(p, buttons = true) {
+  const target = p.to ? `<span class="ref">${p.ref}</span><span class="fg3 xs">→</span><span class="ref">${p.to}</span>` : `<span class="ref">${p.ref}</span>`;
+  const right = !buttons ? "" : p.stale ? `<div class="btns"><span class="btn sm line">Dismiss</span></div>`
+    : `<div class="btns"><span class="btn sm line">Accept</span><span class="btn sm open">Decline</span></div>`;
+  return `<div class="pitem${p.stale ? " stale" : ""}"><div class="prow"><span><span class="op ${p.op}">${OPW[p.op]}</span> <span class="q">${p.q}</span> · ${p.t}</span>${target}
+    ${p.stale ? `<span class="warn xs">${p.stale}</span>` : `<span class="why">“${p.why}”</span><span class="maps">${p.maps}</span><span class="fold">Evidence</span>`}</div>${phone ? "" : right}${phone ? `<div style="grid-column:1/3">${right}</div>` : ""}</div>`;
+}
+function proposalsBox() {
+  return `<div class="pbox${NEW}">
+    <div class="row wrap"><span class="semi">Proposed by agents · 5</span><span class="xs fg3 grow">Nothing changes until you accept. Each is checked again when you accept it.</span></div>
+    <div class="pgroup"><div class="pghead"><span class="semi sm">The orchestrator</span><span class="xs fg3">5 min ago · 3 proposals</span><span class="grow"></span>
+      <span class="btn sm primary">Accept all 3</span><span class="btn sm line">Decline all</span></div>
+      <div class="xs fg2">“From the notes survey's report (notes-20261124-0113, Recommended additions).”</div>
+      ${pitem(P.n4)}${pitem(P.ps)}${pitem(P.pb)}</div>
+    <div class="pgroup"><div class="pghead"><span class="semi sm">Notes survey <span class="q">notes-20261124-0113</span></span><span class="xs fg3">2 h ago · 2 proposals, 1 outdated</span><span class="grow"></span>
+      <span class="btn sm primary">Accept the valid one</span><span class="btn sm line">Decline all</span></div>
+      ${pitem(P.sb)}${pitem(P.tg)}</div>
+  </div>`;
+}
+function linksMid() {
+  return `<div class="accent xs">‹ Ideas overview</div><div class="semi" style="font-size:20px;margin:8px 0 12px">Manage links</div>
+    <div class="fchips"><span class="fchip on">All · 18</span><span class="fchip${NEW}" style="color:var(--review)">Proposed · 5</span><span class="fchip">Pending · 0</span><span class="fchip">Linked · 14</span><span class="fchip">Rejected · 4</span><span class="fchip">Needs attention · 0</span></div>
+    <div style="margin-top:16px">${proposalsBox()}</div>
+    <div class="row" style="margin:16px 0 10px"><span class="xs fg2 grow">Correct one origin; keep the queue's other links.</span><span class="btn line">Add link</span></div>
+    <div class="input" style="padding:9px 12px;font-size:14px">Find a queue or note</div>
+    <div class="lcard" data-box style="margin-top:16px"><div class="semi">CH2 · Chat tools: quoting and pictures</div><div class="xs fg3">Queue source · linked</div><div>Chat improvements</div>
+      <div class="mono xs accent">docs/ideas/chat-improvements.md#2026-11-14</div><div class="btns"><span class="btn line">Correct source</span><span class="btn line">Ignore source</span></div></div>`;
+}
+
+// ---------------------------------------------------------------- the waiting list: (d) the batch card, (c) the paused card
+const approvalCard = `<div class="wcard" data-box><div class="wtop"><span class="kind appr">Needs approval</span><span class="mono">${phone ? "Nexus · CI" : "CI"}</span><span class="grow"></span>10 d ago</div><div class="wtext">Pictures in the chats by pasting or dragging</div></div>`;
+const linksCard = `<div class="wcard${NEW}" data-box><div class="wtop"><span class="kind links">Link proposals</span><span>${phone ? "Nexus · " : ""}orchestrator</span><span class="grow"></span>5 min ago</div>
+  <div class="wtext">The orchestrator proposes 3 idea links: “From the notes survey's report (notes-20261124-0113).”</div>
+  <div class="prow xs"><span><span class="op add">ADD</span> <span class="q">N4</span> → deploy-timing.md#2026-11-14</span><span><span class="op rem">REMOVE</span> <span class="q">PS</span> ✕ queue-plan-view.md#2026-11-14</span><span><span class="op chg">CHANGE</span> <span class="q">PB</span> → queue-plan-view.md#2026-11-14</span></div>
+  <div class="btns"><span class="btn sm primary">Accept all 3</span><span class="btn sm line">Review…</span><span class="btn sm open">Decline all</span></div></div>`;
+const pausedCard = `<div class="wcard${NEW}" data-box><div class="wtop"><span class="kind paused">Paused for long</span><span class="mono">${phone ? "Nexus · " : ""}AD</span><span class="grow"></span>1 d ago</div>
+  <div class="wtext">Agent digest in the morning</div>
+  <div class="xs fg2">Paused by you 4 days ago, before step AD2 (Summarize). Nothing runs until you resume it.</div>
+  <div class="btns"><span class="btn sm primary">Resume</span><span class="btn sm line">Open</span><span class="btn sm open">Remind me in 3 days</span></div></div>`;
+function waitingCards() {
+  if (v === "waiting-paused") return [linksCard, pausedCard, approvalCard];
+  if (v === "waiting-links") return [linksCard, approvalCard];
+  return [approvalCard];
+}
+function rail() {
+  const cards = waitingCards();
+  return `<div class="rail"><div class="row"><span class="label warn" style="color:var(--warn)">Waiting for you · ${cards.length}</span><span class="grow"></span><span class="xs fg3">all projects</span></div>
+    ${cards.join("")}<div class="label" style="margin-top:14px">Running in Nexus</div><div class="fg3">Nothing runs.</div></div>
+    <div style="margin-top:auto;padding:12px 12px 14px;border-top:1px solid var(--line)"><div class="btn line" style="width:100%;padding:8px">All queues of Nexus</div></div>`;
+}
+
+// ---------------------------------------------------------------- (c) the setting
+function settingRows() {
+  const row = (name, value, hint, extra = "", cls = "") => `<div class="srow${cls}"><div class="name">${name} <span class="gtag">GLOBAL</span></div>
+    <div class="row">${value}${extra}</div><div class="seg2"><span>Global</span><span>Own</span></div><div class="hint">${hint}</div></div>`;
+  return `<div class="label" style="padding-top:2px">Defaults</div>
+  ${row("Review level", `<div class="field grow">2 · Orchestrator checks</div>`, "Level 2: the orchestrator checks what can be checked; what is yours waits for you, and so does the queue. Without an orchestrator, or with its notices off, levels 2 and 3 wait for you too.")}
+  ${row("Send-backs before you", `<div class="field grow">2</div>`, "How many times the orchestrator may send a step back to its worker; the next time the step goes to you. 0: every send-back goes to you.")}
+  ${row("Check-fix rounds", `<div class="field grow">3</div>`, "How many rounds a step's worker gets to fix the checks Nexus runs after its done, when they fail; after that the run halts for the orchestrator. 0: the first failure halts it.")}
+  ${row("Paused queue warning", `<div class="field grow">3</div>`, "A queue you paused waits for you in Waiting after this many days, so it is not forgotten; Remind me puts it off by as many days again. 0: never.", `<span class="fg2" style="margin-left:8px">days</span>`, NEW)}
+  ${row("Stop conditions", `<span class="fg3">None: only each queue's own.</span>`, "Every queue's workers get these besides the queue's own: meeting one ends the queue. A running queue gets a change at its next step.")}
+  ${row("Push what was accepted", `<span class="fg2">☐ push accepted steps</span>`, "When a step is accepted (by you or the orchestrator), Nexus pushes the commit the step was reviewed at to the branch the queue runs on (its upstream remote, else origin). Never forced; a failed push shows on the step.")}
+  ${row("Provisional work", `<span class="fg2">☑ Counts as accepted for pushing</span>`, "What the orchestrator accepted provisionally (level 3) is pushed like an accepted step. Off: neither it nor anything built on it is pushed until you confirm it.")}`;
+}
+
+// ---------------------------------------------------------------- the frames
+const sidebar = (n) => `<aside class="side"><div class="brand">Nexus<span class="grow"></span><span class="xs fg3">live <span class="dot sm done"></span></span></div>
+  <div class="label" style="padding:6px 10px 8px">Projects</div><div class="proj"><span class="av">N</span>Nexus<span class="grow"></span><span class="badge">${n}</span></div>
+  <div class="row" style="padding:14px 14px">Stats<span class="grow"></span><span class="xs fg3">all projects</span></div></aside>`;
+const ideasHead = `<div class="deskhead"><span class="seg"><span>Orchestrator</span><span class="on">Ideas · 3</span><span>Stats</span></span><span class="seg"><span>Conversations</span><span class="on">Overview</span></span><span class="search">⌕ Search history…</span></div>`;
+const chatHead = `<div class="deskhead"><span class="seg"><span class="on">Orchestrator</span><span>Ideas · 3</span><span>Stats</span></span><span class="xs fg2">starts with your first message</span><span class="search">⌕ Search history…</span></div>`;
+const chatMid = `<div class="scroll"><p class="fg2" style="text-align:center;margin-top:60px;line-height:1.75">Plan queues with the orchestrator, ask where things stand, or have it start a run.<br>It reads the project and works through <b>nexus</b>; it never edits files or approves queues.</p></div>
+  <div style="margin:0 28px 20px;height:78px;border:1px solid var(--line-strong);border-radius:14px;padding:18px 54px;color:var(--fg-3);flex:none">Message the orchestrator…</div>`;
+const tabs = (on, n) => `<div class="pbar">${["Orchestrator", "Waiting", "Queues", "Ideas", "Stats"].map((t) => `<div class="${t === on ? "on" : ""}">${t === "Waiting" ? `<span class="badge">${n}</span>` : ""}<span style="height:20px">${{ Orchestrator: "▭", Waiting: "⌂", Queues: "≡", Ideas: "◌", Stats: "▥" }[t]}</span>${t}</div>`).join("")}</div>`;
+const ptop = (n) => `<div class="ptop"><span class="pproj">Nexus <span class="badge">${n}</span> ⌄</span><span class="grow"></span><span class="fg2">⌕</span><span class="fg2">⚙</span></div>`;
+
+function render() {
+  const n = waitingCards().length;
+  if (!phone) {
+    let mid, right = rail();
+    if (v === "overview") mid = ideasHead + `<div class="scroll">${overviewMid()}</div>`;
+    else if (v === "entry" || v === "entry-proposal") { mid = ideasHead + `<div class="scroll">${overviewMid()}</div>`; right = notePanel(v === "entry-proposal"); }
+    else if (v === "links") mid = ideasHead + `<div class="scroll">${linksMid()}</div>`;
+    else mid = chatHead + chatMid;
+    const desk = `<div class="desk">${sidebar(n)}<main class="mid">${mid}</main><aside class="right">${right}</aside></div>`;
+    return v === "settings" ? desk + `<div class="drawer-wrap"><div class="dim"></div><div class="drawer">${settingRows()}</div></div>` : desk;
+  }
+  if (v === "entry" || v === "entry-proposal") return `<div class="phone-shell">${notePanel(v === "entry-proposal")}</div>`;
+  if (v === "settings") return `<div class="phone-shell"><div class="pcontent" style="top:0;bottom:0;padding:8px 16px">${settingRows()}</div></div>`;
+  let content;
+  if (v === "overview") content = `<div class="seg" style="display:flex;margin-bottom:12px"><span class="grow" style="text-align:center;padding:10px">Conversations</span><span class="on grow" style="text-align:center;padding:10px">Overview</span></div>${overviewMid()}`;
+  else if (v === "links") content = linksMid();
+  else content = `<div class="row" style="margin:4px 4px 12px"><span class="label" style="color:var(--warn);font-size:14px">Waiting for you · ${n}</span><span class="grow"></span><span class="xs fg3">all projects, newest first</span></div><div class="rail" style="padding:0">${waitingCards().join("")}</div>`;
+  const on = v.startsWith("waiting") ? "Waiting" : "Ideas";
+  return `<div class="phone-shell">${ptop(n)}<div class="pcontent">${content}</div>${tabs(on, n)}</div>`;
+}
+document.getElementById("root").innerHTML = render();
+</script></body></html>

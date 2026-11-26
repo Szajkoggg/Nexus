@@ -1,0 +1,58 @@
+# IWS: the befores of IWS1 and the afters of IWS2 (ideas-overview, ideas-entry), IWS3 (waiting-list as
+# waiting-paused, settings-defaults) and IWS4B (idea-links, waiting-list as waiting-link-proposals, ideas-entry as
+# ideas-entry-proposal). The mockups are docs/ux/mockups/28-idea-work-signals.html.
+seed: scripts/capture/seed-idea-work-signals.ts
+views:
+  - key: ideas-overview@1440
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: [{ click: Ideas }, { click: Overview }]
+  - key: ideas-entry@1440
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: [{ click: Ideas }, { click: Overview }, { click: Deploy timing }]
+  - key: idea-links@1440
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: [{ click: Ideas }, { click: Overview }, { click: Manage links }]
+  - key: settings-defaults@1440
+    route: "#/demo"
+    actions: [{ click: { selector: "button[title='Project settings']" } }, { scroll: Defaults }]
+  - key: waiting-list@1440
+    route: "#/demo"
+  - key: ideas-overview@492
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: [{ click: Ideas }, { click: Overview }]
+  - key: ideas-entry@492
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: [{ click: Ideas }, { click: Overview }, { click: Deploy timing }]
+  - key: idea-links@492
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: [{ click: Ideas }, { click: Overview }, { click: Manage links }]
+  - key: settings-defaults@492
+    route: "#/demo"
+    actions: [{ click: { selector: "button[title='Project settings']" } }, { scroll: Defaults }]
+  - key: waiting-list@492
+    route: "#/demo"
+    actions: [{ click: Waiting }]
+  - key: ideas-overview@390
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: [{ click: Ideas }, { click: Overview }]
+  - key: ideas-entry@390
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: [{ click: Ideas }, { click: Overview }, { click: Deploy timing }]
+  - key: idea-links@390
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: [{ click: Ideas }, { click: Overview }, { click: Manage links }]
+  - key: settings-defaults@390
+    route: "#/demo"
+    actions: [{ click: { selector: "button[title='Project settings']" } }, { scroll: Defaults }]
+  - key: waiting-list@390
+    route: "#/demo"
+    actions: [{ click: Waiting }]
