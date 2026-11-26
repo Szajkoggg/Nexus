@@ -223,17 +223,31 @@ test("claude: a message for the old session while the switch waits goes to the f
   // recorded as delivered, reached neither session.
   process.env.FAKE_LATE_NEXT = "inside";
   const { store, engine, queue, received, until, done, accept } = setup(["summary", "done"], { fill: 0.8, lateTurnMs: 3000 });
+  let unhook = () => {};
   try {
     engine.start("Q", { runtime: "claude" });
     await until("Q1 in review in its turn", () => queue().steps[0]!.status === "review" && loadProjectState(store).sessions.find((s) => s.id === queue().run!.session)?.live?.state === "working", LONGER.step);
     accept();
     delete process.env.FAKE_LATE_NEXT; // for the fresh session's process
     const old = queue().run!.session;
+    // The second message is sent as the engine starts to wait (synchronously, at the wait's activity line), and handed
+    // to the engine right after that call (a microtask): inside the moment, however long a loaded machine takes. Sent
+    // once the test had seen the line, it came after the moment's 3 s under load, after the switch, to a session that
+    // was continued already (queue CWA3, LCF3B).
+    const activity = join(store.sessionDir(old), "activity.jsonl");
+    let sent = false, switchedBefore = false;
+    unhook = onWrite((f) => {
+      if (sent || resolve(f) !== resolve(activity) || !store.readActivity(old).entries.some((e) => /^Nexus waits a moment before step Q2/.test(e.text))) return;
+      sent = true;
+      switchedBefore = !!store.readRun("Q")?.switches?.length;
+      sendMessage(store, old, "Also keep the river.", { queue: "Q", step: "Q1" });
+      queueMicrotask(() => engine.onChange(loadProjectState(store)));
+    });
     sendMessage(store, old, "Use the grassland settings.", { queue: "Q", step: "Q1" });
     engine.onChange(loadProjectState(store));
-    await until("the switch to wait", () => store.readActivity(old).entries.some((e) => /^Nexus waits a moment before step Q2/.test(e.text)), LONGER.step);
-    sendMessage(store, old, "Also keep the river.", { queue: "Q", step: "Q1" });
-    engine.onChange(loadProjectState(store));
+    await until("the second message, sent as the switch waits", () => sent, LONGER.step);
+    unhook();
+    assert.equal(switchedBefore, false, "sent within the moment: no switch yet");
     await until("the run to finish", () => queue().run?.state === "finished", LONGER.run);
     const fresh = queue().steps[1]!.session!;
     assert.notEqual(fresh, old);
@@ -241,7 +255,7 @@ test("claude: a message for the old session while the switch waits goes to the f
     const opening = received().find((m) => m.session === fresh)!;
     assert.match(opening.text, /step Q2 \(2 of 2\)[\s\S]*Also keep the river\./, "it goes to the fresh session");
     assert.ok(!opening.text.includes("grassland"), "the message read in the last turn is not given again");
-  } finally { done(); delete process.env.FAKE_LATE_NEXT; }
+  } finally { unhook(); done(); delete process.env.FAKE_LATE_NEXT; }
 });
 
 test("claude: a server that ends after Nexus ended a late turn, before the switch: the next server still gives the message to the fresh session (queue LH, finding 11)", async () => {

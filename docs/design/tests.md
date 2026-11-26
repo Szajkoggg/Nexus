@@ -139,6 +139,11 @@ git dozens of times. In the full suite every core is busy, so each file takes ab
   start). The orchestrator's and the partners' processes take it from
   `AgentHostOptions.lateTurnMs` (queue LH), for every Claude launch that sets none; with `FAKE_LATE_NEXT=inside` the
   fake reads the message inside its turn, so a test reaches the settling that ends with no late turn (`settled`).
+  A test that must act inside that moment acts as the engine starts it, not once it has seen it: the LH finding 11
+  test sent its second message after polling for the wait's activity line, and under the ten-file load of queue CWA3
+  (23 s for the test) the 3 s moment had passed, the switch had come, and the message went to a session already
+  continued (1 run in 20). It now sends it in an `onWrite` hook at that line and hands it to the engine in a microtask
+  (queue LCF3B).
 - **The workers' cleanup barrier has one stand-in** (gated-cleanup.ts, queue LH): `gatedCleanup()` makes the fakes'
   processes with every cleanup counted (`calls`, each with whether the process had run a turn) and passed through a
   gate the test holds, releases or makes fail; `failBeforeTurn` fails the cleanups before a first turn, as a busy
