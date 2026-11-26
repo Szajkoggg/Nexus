@@ -3,7 +3,7 @@
 // acceptance (the return batch and the step), and the away-mode switch with its "until HH:MM" field and its sign.
 import { useEffect, useState } from "react";
 import { act, actResult, enc, projectUrl, request, useAction, type AttentionItem, type StepView } from "../api.ts";
-import { insteadText } from "../decisions.ts";
+import { answererWord, insteadText } from "../decisions.ts";
 import { Button, TEXTAREA, TimeAgo } from "./ui.tsx";
 import { formatClock, t } from "../i18n.ts";
 import { usePage } from "../page.ts";
@@ -178,8 +178,6 @@ export function BatchRows({ project, item, onOpen, onChanged, className = "px-3.
   );
 }
 
-const byWord = (by: "user" | "orchestrator" | "helper") => t(by === "user" ? "decisions.by.you" : by === "helper" ? "decisions.by.helper" : "decisions.by.orchestrator");
-
 function BatchRow({ project, p, onOpen, onChanged }: { project: string; p: BatchStep; onOpen: (queue: string, step: string) => void; onChanged?: () => void }) {
   const [preset, setPreset] = useState<{ text: string }>();
   return (
@@ -202,7 +200,7 @@ function BatchRow({ project, p, onOpen, onChanged }: { project: string; p: Batch
                 )}
               </div>
               <p className="break-words text-xs text-fg-3">
-                {byWord(d.by)} · <TimeAgo at={d.at} />
+                {answererWord(d.by)} · <TimeAgo at={d.at} />
                 {d.away && ` · ${t("decisions.batch.away")}`}{d.provisional && ` · ${t("decisions.provisional")}`}
                 {d.words && <> · “{d.words}”</>}
               </p>

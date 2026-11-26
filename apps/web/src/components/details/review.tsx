@@ -156,6 +156,7 @@ export function PictureActions({ project, queue, step, path, src, material }: {
   const original = { label: t("details.picture.original"), onSelect: () => window.open(src, "_blank", "noreferrer") };
   const phone = usePhone();
   const fail = error ?? comment.error ?? (reviewing ? decision.error : undefined);
+  const held = reviewing ? decision.hint(true) : undefined;
   return (
     <ActionBar
       left={
@@ -174,7 +175,7 @@ export function PictureActions({ project, queue, step, path, src, material }: {
         </div>
       }
       hintRow={reviewing && cards.length > 0}
-      hint={fail ? <span role="alert" className="text-danger">{fail}</span> : reviewing && decision.hint(true) ? <span className="block text-right">{decision.hint(true)}</span> : reviewing && !phone ? <span className="block text-right">{t("details.picture.theStep")}</span> : undefined}
+      hint={fail ? <span role="alert" className="text-danger">{fail}</span> : held ? <span className="block text-right">{held}</span> : reviewing && !phone ? <span className="block text-right">{t("details.picture.theStep")}</span> : undefined}
       menu={reviewing ? [...decision.menu, original] : [original]}
       secondary={reviewing ? <>
         {cards.length > 0 && <Button variant="quiet" action="decisions" pressed={sheet} onClick={() => setSheet(!sheet)}>{t("decisions.sheet", { answered, total })}</Button>}

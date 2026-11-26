@@ -6,10 +6,11 @@
 import { useRef, useState, useSyncExternalStore } from "react";
 import { act, enc, type QueueView, type StepView } from "../../api.ts";
 import {
-  acceptHold, answeredCount, decisionCards, draftId, draftStore, materialFirst, roundOf, seenAnswers, unsaved, type CardState, type Draft,
+  acceptHold, answeredCount, answererWord, decisionCards, draftId, draftStore, materialFirst, seenAnswers, unsaved, type CardState, type Draft,
 } from "../../decisions.ts";
 import { t } from "../../i18n.ts";
 import { usePage } from "../../page.ts";
+import { reviewRound } from "@nexus/protocol/checks";
 import { errorText } from "@nexus/protocol/errors";
 import type { DecisionAnswer } from "@nexus/protocol/review-decisions";
 import { Button, TEXTAREA, TimeAgo } from "../ui.tsx";
@@ -17,7 +18,7 @@ import { Button, TEXTAREA, TimeAgo } from "../ui.tsx";
 /** What the step's decisions are now for the user: the cards, the round, what holds Accept, the answers shown. */
 export function useStepDecisions(project: string, queue: QueueView, step: StepView) {
   useSyncExternalStore(draftStore.subscribe, draftStore.version);
-  const round = roundOf(queue, step);
+  const round = reviewRound(queue, step);
   const cards = decisionCards(step, round);
   const unsavedIds = cards.filter((c) => unsaved(draftStore.get(draftId(project, queue.id, step, c.d, round)), c.current)).map((c) => c.d.id);
   return { round, cards, unsavedIds, hold: acceptHold(cards, unsavedIds), seen: seenAnswers(step, round), ...answeredCount(cards) };
@@ -44,9 +45,6 @@ export function goToDecision(id: string): boolean {
   (card.querySelector<HTMLElement>("[role=radio][tabindex='0'], button, textarea") ?? card).focus({ preventScroll: true });
   return true;
 }
-
-/** The answerer of an answer, in words: you, the orchestrator, the review helper. */
-const who = (a: DecisionAnswer) => t(a.by === "user" ? "decisions.by.you" : a.by === "helper" ? "decisions.by.helper" : "decisions.by.orchestrator");
 
 /** An answer as one line: the option (or "none of the options") and the words in quotes. */
 function AnswerText({ a }: { a: DecisionAnswer }) {
@@ -78,6 +76,7 @@ export function DecisionList({ project, queue, step, decisions, material, readOn
   const { cards, round, answered, total } = decisions;
   const ids = (c: CardState) => draftId(project, queue.id, step, c.d, round);
   const folded = (c: CardState) => (c.state === "saved" || c.state === "fix" || readOnly) && !draftStore.get(ids(c));
+  const change = (c: CardState) => () => draftStore.set(ids(c), draftOf(c.current));
   if (!cards.length) {
     if (step.decision_list === "missing" && step.status === "review") return <p className="mb-4 rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-sm text-fg-2" data-decisions="missing">{t("decisions.missing")}</p>;
     if (step.decision_list === "none" && step.decisions.none && step.status === "review") return <p className="mb-4 text-sm text-fg-3" data-decisions="none">{t("decisions.none", { text: step.decisions.none.text })}</p>;
@@ -97,12 +96,12 @@ export function DecisionList({ project, queue, step, decisions, material, readOn
       )}
       {ordered.every(folded) ? (
         <div className="rounded-lg border border-line-strong bg-surface px-3">
-          {ordered.map((c) => <FoldedLine key={c.d.id} card={c} readOnly={readOnly} onChange={() => draftStore.set(ids(c), draftOf(c.current))} />)}
+          {ordered.map((c) => <FoldedLine key={c.d.id} card={c} readOnly={readOnly} onChange={change(c)} />)}
         </div>
       ) : (
         <div className="space-y-2.5">
           {ordered.map((c) => folded(c)
-            ? <div key={c.d.id} className="rounded-lg border border-line-strong bg-surface px-3"><FoldedLine card={c} readOnly={readOnly} onChange={() => draftStore.set(ids(c), draftOf(c.current))} /></div>
+            ? <div key={c.d.id} className="rounded-lg border border-line-strong bg-surface px-3"><FoldedLine card={c} readOnly={readOnly} onChange={change(c)} /></div>
             : <DecisionCard key={`${project}/${queue.id}/${step.id}/${c.d.id}`} project={project} queue={queue.id} step={step} card={c} round={round} draft={ids(c)} material={material} />)}
         </div>
       )}
@@ -124,7 +123,7 @@ function FoldedLine({ card: c, readOnly, onChange }: { card: CardState; readOnly
         {a ? <p><AnswerText a={a} /></p> : <p className="text-fg-3">{t("decisions.notAnswered")}</p>}
         {a && <p className="text-xs text-fg-3">
           {c.state === "fix" ? <span className="text-warn">{t("decisions.asksFix")} · </span> : <span className="text-ok">✓ {t("decisions.saved")} · </span>}
-          {who(a)}{a.provisional ? ` · ${t("decisions.provisional")}` : ""} · <TimeAgo at={a.at} />
+          {answererWord(a.by)}{a.provisional ? ` · ${t("decisions.provisional")}` : ""} · <TimeAgo at={a.at} />
         </p>}
       </div>
       {!readOnly && <button type="button" onClick={onChange} className="shrink-0 text-xs text-accent hover:underline max-lg:min-h-11" aria-label={t("decisions.changeLabel", { id: c.d.id })}>{t("decisions.change")}</button>}
@@ -184,7 +183,7 @@ function DecisionCard({ project, queue, step, card: c, round, draft: id, materia
       )}
       {c.earlier && !c.current && (
         <p className="mt-1.5 flex flex-wrap items-baseline gap-x-2 text-xs text-fg-2">
-          <span>{t("decisions.earlier", { round: c.earlier.round, who: who(c.earlier) })} <AnswerText a={c.earlier} /></span>
+          <span>{t("decisions.earlier", { round: c.earlier.round, who: answererWord(c.earlier.by) })} <AnswerText a={c.earlier} /></span>
           {c.earlier.choice && options.some((o) => o.label === c.earlier!.choice) && (
             <button type="button" disabled={busy} onClick={() => void save({ choice: c.earlier!.choice, text: c.earlier!.text })} className="font-medium text-accent hover:underline disabled:opacity-40 max-lg:min-h-11">
               {t("decisions.same", { round: c.earlier.round, option: c.earlier.choice })}

@@ -4,9 +4,8 @@
 // show the same open and unsaved decisions. Drafts live in memory only: a reload shows what was saved, never a choice
 // the user did not save; their key holds the decision's version, the review round and who holds the review, so a new
 // version, a send-back's new round, another project or a change of who reviews never shows an old choice.
-import { reviewRound } from "@nexus/protocol/checks";
 import { activeDecisions, asksFix, currentAnswer, openDecisions, type DecisionAnswer, type DecisionView } from "@nexus/protocol/review-decisions";
-import type { QueueView, StepView } from "./api.ts";
+import type { StepView } from "./api.ts";
 import { t } from "./i18n.ts";
 
 /** What one decision's card is in the user's review. */
@@ -22,8 +21,9 @@ export interface CardState {
   earlier?: DecisionAnswer;
 }
 
-/** The step's review round, as the server reads it (checks.ts reviewRound). */
-export const roundOf = (queue: Pick<QueueView, "check_runs">, step: Pick<StepView, "id" | "timeline">): number => reviewRound(queue, step);
+/** Who gave an answer, in words: you, the orchestrator, the review helper. */
+export const answererWord = (by: DecisionAnswer["by"]): string =>
+  t(by === "user" ? "decisions.by.you" : by === "helper" ? "decisions.by.helper" : "decisions.by.orchestrator");
 
 /** Each decision still on the list with its state for the user, in the list's order. */
 export function decisionCards(step: Pick<StepView, "decisions">, round: number): CardState[] {
