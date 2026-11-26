@@ -1,7 +1,7 @@
 # Required review decisions
 
 Part of [the design](../DESIGN.md). Queue RVD, step RVD1: the contract and the screens. **Status: a proposal for the
-user's review**; nothing here is built yet. RVD2 (protocol and server), RVD3 (CLI, review helper, orchestrator,
+user's review**; nothing here is built yet. The user decided D1–D4 on 2026-11-26, each as recommended (below). RVD2 (protocol and server), RVD3 (CLI, review helper, orchestrator,
 briefings) and RVD4 (dashboard) build what the user accepts here. The mockups are
 `docs/ux/mockups/27-review-decisions.html`, drawn over the data of `scripts/capture/seed-review-decisions.ts`.
 
@@ -52,7 +52,7 @@ must not hide behind a general "nothing to decide".
 
 **`nexus step done` refuses** a step whose current round has neither a list nor none ("Record the review's decisions
 first: nexus decide <step> … for each, or nexus decide <step> --none "<why>"."), for every step the new CLI ends
-(decision D3 below asks whether every step or only some). Rounds after the first keep the earlier round's list: the
+(the user's decision D3: every step, not only design and level-1 steps). Rounds after the first keep the earlier round's list: the
 worker may add decisions or change one (a new version) in the new round, and need not declare again.
 
 **The orchestrator** completes the list while it holds the review (level 2 or 3, `review_with: orchestrator`): it adds
@@ -163,7 +163,7 @@ user Confirms (the step and every answer with it) or asks Fix it; next to a deci
 "D1: I choose A instead of B (the orchestrator's choice)." written in, which the user can extend. The step's work stays,
 as with any Fix it of a provisional acceptance; the orchestrator drafts a revision that fixes it.
 
-**Confirm all** (decision D4) confirms every step listed, after a confirmation that lists each step's orchestrator
+**Confirm all** (the user's decision D4) confirms every step listed, after a confirmation that lists each step's orchestrator
 answers to `user` decisions. The request names each step and the provisional acceptance it saw; if any changed (a
 confirmation or Fix it elsewhere, a new provisional), nothing is written and the list is shown again.
 
@@ -209,19 +209,21 @@ Fix it and Reject stay available. RVD4 adds the viewer as `review-decisions-view
 - The helper may hand `user` decisions to the user at level 2.
 - Answers of accepted reviews go to the next steps' openings and fresh-session seeds.
 
-## For the user's decision (RVD1's review)
+## The user's decisions (RVD1)
 
-Asked with `nexus ask` at RVD1; each names its material.
+Asked with `nexus ask` at RVD1, each with its material; the user answered all four on 2026-11-26, each as recommended.
+The options not taken stay here as the record of what was weighed.
 
 - **D1 Layout**: (A) the decisions first, as cards above the summary (the mockups); (B) a short strip at the top
   ("3 decisions · 1 answered · Go to them") with the cards after the pictures, next to their material
   (`review-decisions-layout@1440` variant-a and variant-b). Recommended: A, because the complaint is that the user does
-  not see what to decide; B keeps the pictures first, as the review has them since UX proposal 13.
+  not see what to decide; B keeps the pictures first, as the review has them since UX proposal 13. **Decided: A.**
 - **D2 Saving**: (A) each card has its own Save (as the question cards of QA3); (B) choices are drafts and one "Save
   answers" saves all. Recommended: A: a partial save is natural, a stale tab is refused for one card only, and the
-  dashboard has one way of answering.
+  dashboard has one way of answering. **Decided: A.**
 - **D3 Which steps declare a list**: (A) every step ends with a list or an explicit none; (B) only design steps and
   level-1 steps must, the others may. Recommended: A: the cost is one command, and a code step's deviation or a
-  user's judgement shows up as a decision instead of in the summary's prose.
+  user's judgement shows up as a decision instead of in the summary's prose. **Decided: A.**
 - **D4 Group confirmation in the return batch**: (A) per step only; (B) Confirm all, after a confirmation listing the
   orchestrator's answers to `user` decisions; (C) Confirm all only for steps without such answers. Recommended: B.
+  **Decided: B.**

@@ -25,7 +25,7 @@ The design is split by topic, one file each in `docs/design/`. New text goes int
 - [Review](design/review.md): routine reviews by a helper, review material, review levels, provisional acceptances, away mode.
   Sections: Routine reviews by a helper (queue RH); Review material; Findings from review levels (queue RL1); Level 3: provisional acceptances (queue RL2); Away mode (queue RL3)
 - [Required review decisions](design/review-decisions.md): a step's review decisions (queue RVD): the list the worker declares, answers by version and round, Accept held until every decision is answered, who may answer what at each level, old data, the return batch, the screens.
-  Sections: The problem; Concepts; Who writes the list, and when; What counts, version by version and round by round; Accept and the other actions; Rights: who answers what; Missing lists and old data; The return batch and group confirmation; What the next worker gets; The screens (mockups); Decided in this design (technical; the designer's); For the user's decision (RVD1's review)
+  Sections: The problem; Concepts; Who writes the list, and when; What counts, version by version and round by round; Accept and the other actions; Rights: who answers what; Missing lists and old data; The return batch and group confirmation; What the next worker gets; The screens (mockups); Decided in this design (technical; the designer's); The user's decisions (RVD1)
 - [The plan and approvals](design/planning.md): the plan, approvals, the closing refactoring step kept by Nexus.
   Sections: The plan; Approvals; A closing refactoring step kept by Nexus
 - [Context and usage](design/usage.md): context management, usage limits, estimating and measuring token use, compacting a conversation.
