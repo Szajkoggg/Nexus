@@ -11,7 +11,7 @@ import YAML from "yaml";
 import type { z } from "zod";
 import type { ProjectState } from "./state.ts";
 import {
-  Activity, Applied, AwayFile, CapacityFile, ChecksFile, IdeaMatchesFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StaticAnalysisNote, PlanFile, StoredProject, TagsFile, TurnRecord, ServerSpeedRun, UsageFile,
+  Activity, Applied, AwayFile, CapacityFile, ChecksFile, IdeaMatchesFile, IdeaProposalsFile, ChatEntry, PinsFile, RecurringFile, Refusal, Delivery, Event, GlobalSettings, InboxEntry, MaxRunning, MetricsFile, NoteMeta, GitFile, ProjectFile, PushFile, QueueFile, type QueueInput, LegacyReviewPolicy, RegistryFile, RunFile, RuntimeFile, SessionFile, StartFile, StaticAnalysisNote, PlanFile, StoredProject, TagsFile, TurnRecord, ServerSpeedRun, UsageFile,
   type Note,
   IdeaStatusesFile, IdeaHandoffsFile,
 } from "./schemas.ts";
@@ -634,6 +634,14 @@ export class ProjectStore {
   }
   /** Written only by the server, from the user's action (actions.ts, decideIdeaMatches). */
   writeIdeaMatches(m: IdeaMatchesFile): void { writeYaml(join(this.dir, "idea-matches.yaml"), IdeaMatchesFile.parse(m)); }
+
+  /** The agents' idea-link proposals and the user's decisions on them (idea-proposals.ts); none when the file is missing. */
+  readIdeaProposals(): IdeaProposalsFile {
+    const f = join(this.dir, "idea-proposals.yaml");
+    return this.reader.has(f) ? this.yaml(f, IdeaProposalsFile) : IdeaProposalsFile.parse({ protocol: 1 });
+  }
+  /** Written only by the server: its intake of the agents' proposals, and the user's decisions (idea-proposals.ts). */
+  writeIdeaProposals(value: IdeaProposalsFile): void { writeYaml(join(this.dir, "idea-proposals.yaml"), IdeaProposalsFile.parse(value)); }
 
   readIdeaStatuses(): IdeaStatusesFile {
     const f = join(this.dir, "idea-statuses.yaml");

@@ -122,6 +122,46 @@ the writer is confirmed stopped; it is never stolen based on elapsed time. A com
 locking and again under the lock, before revision/target validation. Retrieving a committed result is read-only, so
 a retry can retrieve it even if the project subsequently changed or a crashed writer left its lock behind.
 
+**Agents' link proposals (IWS).** The orchestrator, a thinking partner and a worker of a maintenance queue (its queue's
+`maintenance` is `survey` or `fix_small`) may propose relationship changes; only the user's acceptance changes one.
+`nexus ideas propose add|remove|replace --queue <Q> --ref <note>.md#<date> [--to <note>.md#<date>] --reason …
+[--evidence …]…`, or `--file` with a batch, writes one `ideas.links_proposed` event to the proposer's own log
+([sessions.md](sessions.md#events-sessionsideventsjsonl)). A proposal names the edge (queue and dated entry), not an origin (decision D7):
+`add` a link, `remove` the queue's link to the entry, `replace` it by a link to `to`. The CLI checks what it can before
+it writes (the role; the queue; the note and date; an add not effective yet, a remove's or replace's edge effective, a
+replace's target not linked yet; the same proposal not waiting already) and refuses the whole batch with the reasons.
+
+The server takes the events in as one decision of its change pass ("idea link proposals", before the orchestrator's),
+outside the run-control code: every session's `ideas.links_proposed` whose event id `.nexus/idea-proposals.yaml` does
+not hold yet, so it is idempotent across restarts. It checks the role and each item again and records each item there:
+`pending`; `outdated` when the link's state no longer fits; `refused` for a proposer without the right, an unknown
+queue, note or date, or the same proposal already waiting. **A proposal writes neither `idea-matches.yaml` nor
+`idea-statuses.yaml`.** The file is server-only (lock `idea-proposals.lock`; absent: none): `protocol: 1` and
+`proposals`, each with `id` (`<event id>/<n>`, from 1), `event`, `by` (`session`, `role`: `orchestrator`,
+`conversation` or `worker`, `title?`, a worker's `queue` and `step?`), `at`, `batch_reason?`, `op`, `queue`, `ref`,
+`to?`, `reason`, `evidence?`, `state` (`pending|accepted|declined|outdated|refused`) and `decided?` (`at`, `request?`:
+the user's decision request, `action?`: the link action an acceptance wrote, `note?`: why outdated or refused, or the
+user's note on a decline).
+
+`GET /api/projects/:id/ideas/proposals` returns them with `revision` and, for each pending or outdated one, `valid`,
+`why?` and `mapping` (what accepting does to the edge's origins as they are now: "Adds a manual link.", "Removes the
+historical match.", "Removes the manual link.", "This is the queue's own source: ignores it (the queue file does not
+change).", "Changes the target.", "Corrects the queue's source: …"). `POST` the same path with `request_id`,
+`revision` and `decisions: [{id, accept, note?}]` is the user's decision, one item or a whole batch in one request.
+Each accepted item is checked again (D8: the queue, the note and dates exist; an add's edge is not effective yet, a
+remove's or replace's still is, a replace's target is not linked yet). The valid ones are written together in one
+write of `idea-matches.yaml`, under its lock, one link action each (so each undoes alone): `add`, `remove` or
+`ignore-source` (each effective origin of the edge), `replace` or `correct-source`; each action has `actor: user`, the
+proposer's `reason` (D10) and `proposal: {id, by}`. One that fails the check stays `outdated` with why; a decline
+needs no reason. The answer (`result`) lists `accepted` (`{id, action}`), `declined`, `outdated` (`{id, why}`) and a
+`message` ("2 accepted; 1 outdated: this link already exists (a manual link)"). The same `request_id` again answers
+what it did; another revision, or an item decided already, is 409. If a write of the links was not followed by the
+proposals' write, an acceptance again finds the action by its `proposal.id` and records it accepted. There is no CLI
+command and no event that accepts or declines: `nexus ideas accept|reject` stay refused for every role (D12).
+
+The orchestrator is told each decision request once, whoever proposed (D11): which items were accepted, declined or
+found outdated, with each proposer. A thinking partner or a survey worker is not told; it sees the links as they are.
+
 **User dispositions and implementation assessments (IC3).** The date remains the unit; there is no
 per-bullet identifier or migration. GET ideas now also returns `statuses` (the statuses endpoint's response),
 `entries[].content` (complete normalized dated content), `entries[].effective` (the matching status view), and each

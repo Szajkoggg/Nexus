@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, INTEGRATION_CONDITION, REUSE_TOKENS, fileList, tokenCount, formatClock, formatDuration, latestCheckSet, reviewRound, openPlan, decisionLines, queueDecisions, settledDecisions, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type PassOnReason, type RightsNow, type TagProposal, tagsText, queuesDoneUnconfirmed, type IdeaStatusView,
+  DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, INTEGRATION_CONDITION, REUSE_TOKENS, fileList, tokenCount, formatClock, formatDuration, latestCheckSet, reviewRound, openPlan, decisionLines, queueDecisions, settledDecisions, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type PassOnReason, type RightsNow, type TagProposal, tagsText, queuesDoneUnconfirmed, type IdeaStatusView, type IdeaProposal, type IdeaProposer,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -491,6 +491,7 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus tags                                     the tags a step may carry: Nexus's kinds, activities, origins and sizes, the project's areas and own activities, renames, and your proposals waiting for the user
 - nexus tags propose --area <name> | --activity <prefix:name> --reason "..."   propose a new area or project activity; it waits in the user's list, and a draft may use it only once the user accepts it (you are told)
 - nexus tags rename <old> <new> --reason "..."   propose renaming an area or a project activity; once accepted, the old name reads as the new one everywhere (use the new one)
+- nexus ideas propose add|remove|replace --queue <Q> --ref <file>.md#<date> [--to <file>.md#<date>] --reason "..." [--evidence "..."]...; nexus ideas propose --file <proposals.yaml> [--reason "..."]   propose idea links (add a queue's link to a Decided entry, remove a wrong one, or change its target); nothing changes until the user accepts them in the dashboard, and you are told the decision
 - nexus stats [--by model|effort|kind|activity|area|size|origin] [--project <id>] [--since <date>]   how steps went, by group: steps, accepted in the first round, average rounds, stops and failures, median working time, estimated use of the usage windows (every project by default; groups under 5 steps are marked few data)
 - nexus stats --flaky [--since <date>] [--project <id>]   the flaky checks from the queues' checks.yaml, by failing test: how often, where, when last, which check; look before you draft a fix queue for a failing or flaky test, to see whether it failed before and where
 - nexus metric define <name> --unit <unit> [--show line|bar|number] [--target <value>] [--warn-above|--warn-below <value>]   (a negative number: --warn-below=-5) name something the project measures, or change it (the whole definition); say in a step's goal what its worker should measure and record (nexus metric record). Each check's time is the metric check:<its name>, in seconds, without a definition; define it for a target or a threshold. A value beyond the threshold is marked on its step and told to you; nexus metric list shows the metrics
@@ -556,6 +557,8 @@ steps:
     origin: user               # user, maintenance, orchestrator, fix or ci
 
 Before planning from ideas, run nexus ideas status (read only: a summary per note and dated entry with the effective decision, the linked queues and the problems; one entry's full JSON: nexus ideas status <file>.md#<date>), then read the dated entry with nexus doc <file>.md#<date> (not the whole note) together with .nexus/idea-statuses.yaml and .nexus/idea-matches.yaml when present. A UI disposition overrides the legacy note marker; later marker changes are a visible conflict, not silent permission. An assessment is valid only for its saved content, links and evidence, with no recorded invalidation. Open/Ideas are undecided. Only the user can change relationships or confirm implementation in the dashboard; never write either Nexus file. "queues done, not confirmed" means every linked queue is done and the user has not confirmed the implementation: offer the user the confirmation (Ideas → the note → the date → Review and confirm…), never treat it as implemented.
+
+Idea links you find missing or wrong (a survey's report names them, a finish notice says a queue's description names a note no idea of it is linked to, or a queue carries out a Decided entry its source does not name): propose them with nexus ideas propose, one item per link with its reason and evidence (a quote and where it is from: a report's section, a queue's description, a commit); a report's several links go as one batch (--file, with the batch's reason). The user accepts or declines them in the dashboard (Ideas → Manage links), one by one or all at once, and you are told. Never accept one for the user, not even on their word in the chat: there is no command for it.
 
 A direct idea handoff is a server-composed snapshot of one exact note and selected Decided dates, recorded in .nexus/idea-handoffs.yaml. Its delivery time means enqueued and visible, not read, approved or implemented. Follow its purpose: Context only does not request reimplementation of full, dropped or replaced decisions. Discuss / plan next work is not approval or permission to start a queue. Neither purpose changes a start plan or lifts a start prohibition. Recheck current effective state before proposing work; the snapshot may now be historical. Do not expand its scope to other chat topics or see-also notes, and never write the handoff file.
 
@@ -717,6 +720,32 @@ export function userMessage(text: string, changes?: string): string {
 /** The user's note on a step the orchestrator holds in review. */
 export function stepNoteNotice(n: { queue: string; step: string; text: string }): string {
   return `[Nexus] The user wrote a note on step ${n.step} of queue ${n.queue}, which waits for your review:\n${n.text}\nWeigh it in your acceptance of the step. If it asks for a fix, send the step back with nexus review send-back ${n.queue} ${n.step} "what to fix" (keep the user's words); if it raises what you cannot judge, hand the review to the user with nexus review ask-user. Tell the user briefly what you did with it.`;
+}
+
+/** Who proposed idea links, in a notice line. */
+function proposerText(by: IdeaProposer): string {
+  if (by.role === "orchestrator") return "the orchestrator";
+  if (by.role === "conversation") return by.title ? `thinking partner "${by.title}"` : "a thinking partner";
+  return `the worker of ${by.queue ?? "a maintenance queue"}${by.step ? `/${by.step}` : ""}`;
+}
+
+/**
+ * The user's decision on agents' idea-link proposals (queue IWS, decision D11): one notice per decision request,
+ * whoever proposed; each item with what became of it.
+ */
+export function linkProposalsNotice(items: readonly IdeaProposal[]): Notice {
+  const count = (state: IdeaProposal["state"]) => items.filter((p) => p.state === state).length;
+  const parts = [["accepted", count("accepted")], ["declined", count("declined")], ["found outdated", count("outdated")]].filter(([, n]) => n).map(([w, n]) => `${w} ${n}`);
+  const word = { accepted: "accepted", declined: "declined", outdated: "outdated", pending: "pending", refused: "refused" } as const;
+  const lines = items.map((p) => {
+    const edge = `${p.op} ${p.queue} → ${p.ref}${p.to ? ` with ${p.queue} → ${p.to}` : ""}`;
+    const note = p.state === "outdated" ? `: ${p.decided?.note ?? ""}` : p.decided?.note ? `; the user's note: ${p.decided.note}` : "";
+    return `- ${word[p.state]}: ${edge} (${p.id}, proposed by ${proposerText(p.by)})${note}`;
+  });
+  return {
+    fact: `The user decided on ${items.length} idea-link proposal(s): ${parts.join(", ")}.\n${lines.join("\n")}\n`,
+    todo: "The links are the user's: the accepted ones are links from now on (nexus ideas status shows them), and nothing is yours to write. Do not propose a declined one again unless something new speaks for it; an outdated one you may propose anew as the links stand now. Tell the user only if it changes what you planned.",
+  };
 }
 
 /** The user discarded a stopped step's work: its commits are to be reverted by a new revision. */
@@ -1135,7 +1164,7 @@ export function runEndNotice(q: QueueView, r: { state: string; step?: string; re
   }
   if (ideas?.mentioned.length) return {
     fact: `${fact} No idea is linked to ${q.id}; its description names ${ideas.mentioned.join(", ")}.`,
-    todo: `${todo} If it implements a decision there, tell the user: the link is theirs to add (Ideas → Manage links → Add link).`,
+    todo: `${todo} If it implements a decision there, propose the link (nexus ideas propose add --queue ${q.id} --ref <file>.md#<date> --reason "..."): the user accepts it in the dashboard (Ideas → Manage links); you cannot link it yourself.`,
   };
   return { fact, todo };
 }
@@ -1257,7 +1286,7 @@ export function partnerBriefing(p: ProjectFile, notes: string | undefined, runti
 How to be useful here:
 - Explore, ask, challenge, and propose alternatives with their trade-offs. Do not rush to a plan; a good question is often worth more than an answer.
 - Ground what you say in the project: read its design documents, notes, decisions and history before you state anything about it, and say where you found it.
-- Run nexus ideas status for the read-only effective state: a summary per note and dated entry with the effective decision, the linked queues and the problems (one entry's full JSON: nexus ideas status <file>.md#<date>). Read a dated entry with nexus doc <file>.md#<date> (a note's headings: nexus doc <file>.md) together with .nexus/idea-statuses.yaml and .nexus/idea-matches.yaml when present. UI dispositions override legacy markers; report later note/decision conflicts. Assessments cover their saved content, links and evidence only, and recorded invalidations require a new user check. Only the user can change relationships or confirm implementation in the dashboard; never write these Nexus files. Linked work finishing is not full implementation confirmation. "queues done, not confirmed" names exactly that: every linked queue done, no confirmation by the user.
+- Run nexus ideas status for the read-only effective state: a summary per note and dated entry with the effective decision, the linked queues and the problems (one entry's full JSON: nexus ideas status <file>.md#<date>). Read a dated entry with nexus doc <file>.md#<date> (a note's headings: nexus doc <file>.md) together with .nexus/idea-statuses.yaml and .nexus/idea-matches.yaml when present. UI dispositions override legacy markers; report later note/decision conflicts. Assessments cover their saved content, links and evidence only, and recorded invalidations require a new user check. Only the user can change relationships or confirm implementation in the dashboard; never write these Nexus files. Linked work finishing is not full implementation confirmation. "queues done, not confirmed" names exactly that: every linked queue done, no confirmation by the user. A link you find missing or wrong you may propose with nexus ideas propose add|remove|replace --queue <Q> --ref <file>.md#<date> [--to <file>.md#<date>] --reason "..." (the user accepts it in the dashboard; nothing changes before).
 - New idea chats receive the whole note with the first actual request and an updated snapshot when it changes: Summary, all Decided dates with current states and relationships, and separately undecided Open/Ideas. Historical dated chats retain their original scope. A direct idea handoff is composed and recorded by the server from the user's date-selection preview, independently of your current reply; do not turn an ordinary answer into a handoff summary or write .nexus/idea-handoffs.yaml. It grants no queue approval or start permission.
 - Keep the user's decisions apart from ideas. Never write a proposal down as if it were decided.
 

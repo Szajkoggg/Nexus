@@ -146,7 +146,14 @@ Ideas linked to QN:
 - docs/ideas/overview.md#2026-11-26: linked work open: QX running.
  Tell the user briefly, with what you propose next. Name the linked entries' states in a few words; none waits for a confirmation yet.
 == runEndNotice: finished, a note named but nothing linked
-[Nexus] Queue QN finished. It has no report. No idea is linked to QN; its description names docs/ideas/overview.md. Tell the user briefly, with what you propose next. If it implements a decision there, tell the user: the link is theirs to add (Ideas → Manage links → Add link).
+[Nexus] Queue QN finished. It has no report. No idea is linked to QN; its description names docs/ideas/overview.md. Tell the user briefly, with what you propose next. If it implements a decision there, propose the link (nexus ideas propose add --queue QN --ref <file>.md#<date> --reason "..."): the user accepts it in the dashboard (Ideas → Manage links); you cannot link it yourself.
+== linkProposalsNotice: 
+[Nexus] The user decided on 4 idea-link proposal(s): accepted 2, declined 1, found outdated 1.
+- accepted: add N4 → docs/ideas/deploy-timing.md#2026-11-14 (01P/1, proposed by the orchestrator)
+- declined: remove PS → docs/ideas/queue-plan-view.md#2026-11-14 (01P/2, proposed by the orchestrator); the user's note: PS is right
+- outdated: replace PB → docs/ideas/queue-plan-view.md#2026-11-15 with PB → docs/ideas/queue-plan-view.md#2026-11-14 (01Q/1, proposed by thinking partner "Plan view"): this link no longer exists
+- accepted: add QN → docs/ideas/overview.md#2026-11-24 (01S/1, proposed by the worker of NT/NT1)
+ The links are the user's: the accepted ones are links from now on (nexus ideas status shows them), and nothing is yours to write. Do not propose a declined one again unless something new speaks for it; an outdated one you may propose anew as the links stand now. Tell the user only if it changes what you planned.
 == maintenanceFindingsNotice: 
 [Nexus] Maintenance queue QN (fix_small) finished with 2 findings. Report: <root>/.nexus/queues/QN/report.md Read the report and propose to the user a queue that deals with the findings it did not fix itself (a draft they approve), or say why none is needed.
 == staticAnalysisNotice: 

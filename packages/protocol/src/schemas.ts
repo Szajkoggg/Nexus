@@ -803,6 +803,16 @@ export type SessionFile = z.infer<typeof SessionFile>;
 // ---------------------------------------------------------------- events (sessions/<id>/events.jsonl)
 
 const base = { v: z.literal(1), id: Id, at: Time, session: Id };
+const NoteRefText = z.string().regex(NOTE_REF, "a note reference: <notes folder>/<file>.md#<YYYY-MM-DD>");
+/**
+ * One proposed idea link (`ideas.links_proposed`): `add` a link of the queue to the dated entry, `remove` the queue's
+ * link to it, or `replace` it by a link to `to`; the proposer's `reason` (shown to the user) and its evidence.
+ */
+export const IdeaLinkProposalItem = z.object({
+  op: z.enum(["add", "remove", "replace"]), queue: Id, ref: NoteRefText, to: NoteRefText.optional(),
+  reason: z.string().trim().min(1), evidence: z.array(z.string().min(1)).optional(),
+}).refine((x) => (x.op === "replace") === (x.to !== undefined), { message: "replace, and only replace, names --to" });
+export type IdeaLinkProposalItem = z.infer<typeof IdeaLinkProposalItem>;
 /** A review decision's id within its step: D1, D2, … (never reused). */
 const DecisionId = z.string().regex(/^D[1-9]\d*$/, "a decision id: D1, D2, …");
 /** One option of a review decision; `effect: fix` marks one that means the step's work must change. */
@@ -939,6 +949,12 @@ export const Event = z.discriminatedUnion("type", [
    * orchestrator, each a note reference. Conversations only; the ideas overview reads them as handed over (ideas.ts).
    */
   z.object({ ...base, type: z.literal("ideas.covered"), refs: z.array(z.string().regex(NOTE_REF, "a note reference: <notes folder>/<file>.md#<YYYY-MM-DD>")).min(1) }),
+  /**
+   * An agent's proposals of idea links (`nexus ideas propose`): the orchestrator's, a thinking partner's or a maintenance
+   * queue's worker's. Nothing changes: the server takes them into .nexus/idea-proposals.yaml, and only the user's
+   * acceptance in the dashboard writes a link (idea-proposals.ts). `reason`: the batch's, beside each item's own.
+   */
+  z.object({ ...base, type: z.literal("ideas.links_proposed"), reason: z.string().min(1).optional(), items: z.array(IdeaLinkProposalItem).min(1) }),
   /**
    * A worker records a value of one of the project's metrics (`nexus metric record`), for its step at work, with the
    * metric's unit as it was then and the HEAD of its checkout (`commit`; absent outside a git repository).
@@ -1788,6 +1804,12 @@ const IdeaMatch = z.object({
  * the notes' entries. Written only by the server, from the user's action in the dashboard; an accepted match counts
  * like the queue's source (ideas-read.ts). The closed queues themselves are never changed. Missing: none decided.
  */
+/** Who proposed idea links: the session, its role and title, and a worker's queue and step. */
+export const IdeaProposer = z.object({
+  session: z.string(), role: z.enum(["orchestrator", "conversation", "worker"]), title: z.string().optional(),
+  queue: z.string().optional(), step: z.string().optional(),
+});
+export type IdeaProposer = z.infer<typeof IdeaProposer>;
 /** An origin's last-known identity and evidence. Corrections never rewrite queue definitions. */
 export const IdeaLinkRecord = z.object({
   id: z.string(), queue: Id, ref: z.string().regex(NOTE_REF),
@@ -1803,6 +1825,8 @@ export const IdeaLinkAction = z.object({
   operation: z.enum(["add", "replace", "remove", "ignore-source", "correct-source", "decide", "undo"]),
   undo: z.string().optional(),
   changes: z.array(z.object({ before: IdeaLinkRecord.nullable(), after: IdeaLinkRecord })),
+  /** An action the user's acceptance of an agent's proposal wrote: the proposal and who proposed it (idea-proposals.ts). */
+  proposal: z.object({ id: z.string(), by: IdeaProposer }).optional(),
 });
 export type IdeaLinkAction = z.infer<typeof IdeaLinkAction>;
 export const IdeaMatchesFile = z.object({
@@ -1811,6 +1835,27 @@ export const IdeaMatchesFile = z.object({
   records: z.array(IdeaLinkRecord).optional(), history: z.array(IdeaLinkAction).optional(),
 });
 export type IdeaMatchesFile = z.infer<typeof IdeaMatchesFile>;
+
+/**
+ * One proposed idea link as the server took it in (idea-proposals.ts): the event's item with its id
+ * (`<event id>/<n>`), the proposer, the batch's reason, and its state: `pending` until the user decides; `accepted`
+ * (`decided.action`: the link action it wrote), `declined`, `outdated` (`decided.note`: why), or `refused` at intake
+ * (`decided.note`: why; never shown for a decision).
+ */
+export const IdeaProposal = z.object({
+  id: z.string(), event: z.string(), by: IdeaProposer, at: Time, batch_reason: z.string().optional(),
+  op: z.enum(["add", "remove", "replace"]), queue: z.string(), ref: z.string(), to: z.string().optional(),
+  reason: z.string(), evidence: z.array(z.string()).optional(),
+  state: z.enum(["pending", "accepted", "declined", "outdated", "refused"]),
+  decided: z.object({ at: Time, request: z.string().optional(), action: z.string().optional(), note: z.string().optional() }).optional(),
+});
+export type IdeaProposal = z.infer<typeof IdeaProposal>;
+/**
+ * .nexus/idea-proposals.yaml: the agents' idea-link proposals and the user's decisions on them. Written only by the
+ * server (its intake of `ideas.links_proposed` events, and the user's decisions); missing: none.
+ */
+export const IdeaProposalsFile = z.object({ protocol: z.literal(1), proposals: z.array(IdeaProposal).default([]) });
+export type IdeaProposalsFile = z.infer<typeof IdeaProposalsFile>;
 
 /** Server-owned user decisions; notes and queue records remain immutable inputs. */
 const IdeaMarker = z.object({ dropped: z.object({ date: z.string(), why: z.string() }).optional(), replaced_by: z.string().optional() });

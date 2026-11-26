@@ -19,6 +19,7 @@ import {
   noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, ideaStatuses, reportSourceHash,
   capacityLines, latestCheckSet, stepChecks, readCapacity, reviewStats, reviewStatsText, switchReport, switchReportText, helperAbout, helperText, NEXUS_PASS_ON, PassOnReason, isUnreadableFile,
   decisionRefusal, decisionsCount, gate, helperHandOverRefusal, reviewRound, type DecisionEventInput,
+  IdeaLinkProposalItem, PROPOSER_REFUSAL, proposalIssues, proposerOf,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -87,6 +88,14 @@ a review helper's session runs only nexus status, nexus help, nexus doc and its 
                                       conflict, unfinished work); with a reference: that entry's (or note's) full JSON;
                                       --full: everything as JSON (large: every entry's text and evidence). The notes
                                       folder may be left out; an entry's text: nexus doc <file>.md#<date>
+  nexus ideas propose add|remove|replace --queue <Q> --ref <file>.md#<date> [--to <file>.md#<date>] --reason <text>
+                    [--evidence <text>]...   (orchestrator, thinking partner, or a maintenance queue's worker)
+                                      propose an idea link: add a queue's link to a Decided entry, remove a wrong one,
+                                      or replace its target (--to); nothing changes until the user accepts it in the
+                                      dashboard (Ideas, Manage links); the notes folder may be left out
+  nexus ideas propose --file <proposals.yaml> [--reason <text>]   (orchestrator, thinking partner, or a maintenance
+                    queue's worker) the same, a batch in one: a list of {op, queue, ref, to, reason, evidence}, or
+                                      {reason, items: [...]}; --reason: the batch's
   nexus doc <file.md>[#<section>]     (any session; read only) a Markdown file's headings, with their levels and lines;
                                       with #<section>: that one section (to the next heading of its level or higher),
                                       named by its heading or its anchor, or a date (tags.md#2026-11-14: that dated
@@ -224,7 +233,7 @@ const parseLine = (argv: string[]) => commandLine(argv, {
     "use-session": { type: "string" }, model: { type: "string" }, effort: { type: "string" }, after: { type: "string", multiple: true }, next: { type: "boolean" }, at: { type: "string" }, deadline: { type: "string" },
     topics: { type: "string" }, files: { type: "string" }, file: { type: "string" }, level: { type: "string" },
     escalate: { type: "boolean" }, continue: { type: "boolean" }, wait: { type: "boolean" },
-    unrelated: { type: "boolean" }, evidence: { type: "string" },
+    unrelated: { type: "boolean" }, evidence: { type: "string", multiple: true }, to: { type: "string" },
     id: { type: "string" }, name: { type: "string" }, prefix: { type: "string" },
     "dry-run": { type: "boolean" }, replace: { type: "boolean" },
     role: { type: "string" }, runtime: { type: "string" }, title: { type: "string" }, from: { type: "string" },
@@ -396,7 +405,7 @@ function checkUnrelated(): void {
   const st = store(); const s = session(st);
   if (s.role !== "worker") throw new UsageError("only a worker disputes a failed check of its own step (the orchestrator decides a disputed one: nexus check decide)");
   const step = need(args()[1], "<step>"); const name = need(args()[2], "<name>");
-  const evidence = o().evidence?.trim();
+  const evidence = o().evidence?.join("\n").trim();
   if (!evidence) throw new UsageError("--evidence says what shows the failure is not your work's (for example: it fails on the base too)");
   const queue = queueFor(st, s, step);
   checkStep(st, queue, step);
@@ -1172,8 +1181,9 @@ const commands: Record<string, () => void | Promise<void>> = {
    */
   ideas() {
     const sub = args()[1] ?? "matches";
-    if (sub === "accept" || sub === "reject") throw new UsageError("accepting or rejecting a match of a queue to a note is the user's, in the dashboard (Ideas, Overview, To match)");
-    if (sub !== "matches" && sub !== "status") throw new UsageError("nexus ideas matches | status (user decisions are dashboard-only)");
+    if (sub === "accept" || sub === "reject") throw new UsageError("accepting or rejecting a match of a queue to a note, or an agent's link proposal, is the user's, in the dashboard (Ideas: To match, Manage links)");
+    if (sub === "propose") { ideasPropose(); return; }
+    if (sub !== "matches" && sub !== "status") throw new UsageError("nexus ideas matches | status | propose (user decisions are dashboard-only)");
     const st = store();
     if (sub === "status") { ideasStatus(st); return; }
     const items = ideaMatches(st, loadProjectState(st)).items;
@@ -1689,6 +1699,57 @@ function ideasStatus(st: ProjectStore): void {
     return;
   }
   say(o().full ? JSON.stringify(statuses, null, 2) : ideaStatusSummary(statuses));
+}
+
+/**
+ * `nexus ideas propose` (the orchestrator, a thinking partner, a maintenance queue's worker): idea-link proposals, one
+ * from the command line or a batch from a file, checked as far as the CLI can (the queue, the entries, the link's
+ * state, the same proposal waiting already) and written as one `ideas.links_proposed` event of the session's own. The
+ * server takes it in (idea-proposals.ts); nothing changes until the user accepts. Accepting is not a command.
+ */
+function ideasPropose(): void {
+  const st = store(); const s = session(st);
+  if (!proposerOf(st, s)) throw new UsageError(PROPOSER_REFUSAL);
+  const dir = st.readProject().conversations.notes_dir;
+  // A reference without the notes folder (tags.md#2026-11-14) gets it, as with nexus covers.
+  const inFolder = (r: unknown) => {
+    if (typeof r !== "string") return r;
+    const x = r.replaceAll("\\", "/");
+    return dir && !x.startsWith(`${dir}/`) && parseNoteRef(`${dir}/${x}`) ? `${dir}/${x}` : x;
+  };
+  let raw: unknown[];
+  let reason = o().reason?.trim() || undefined;
+  if (o().file !== undefined) {
+    noMore(2, "nexus ideas propose --file");
+    if (o().queue !== undefined || o().ref !== undefined || o().to !== undefined || o().evidence !== undefined) throw new UsageError("--file holds the items: give their queue, ref, to and evidence there");
+    const path = pathArg(o().file!);
+    if (!existsSync(path)) throw new UsageError(`no such file: ${path}`);
+    let doc: unknown;
+    try { doc = YAML.parse(readFileSync(path, "utf8")); } catch (e) { throw new UsageError(`${path} is not YAML: ${errorText(e)}`); }
+    const batch = Array.isArray(doc) ? { items: doc } : (doc ?? {}) as { reason?: unknown; items?: unknown };
+    if (!Array.isArray(batch.items) || !batch.items.length) throw new UsageError(`${path}: a list of proposals ({op, queue, ref, to, reason, evidence}), or {reason, items: [...]}`);
+    if (batch.reason !== undefined && reason !== undefined) throw new UsageError("the batch's reason is given twice: in the file and as --reason");
+    if (typeof batch.reason === "string" && batch.reason.trim()) reason = batch.reason.trim();
+    raw = batch.items;
+  } else {
+    const op = args()[2];
+    if (op !== "add" && op !== "remove" && op !== "replace") throw new UsageError("nexus ideas propose add|remove|replace --queue <Q> --ref <file>.md#<date> [--to <file>.md#<date>] --reason <text> [--evidence <text>]... | nexus ideas propose --file <proposals.yaml>");
+    noMore(3, `nexus ideas propose ${op}`);
+    raw = [{ op, queue: need(o().queue, "--queue <queue>"), ref: need(o().ref, "--ref <file>.md#<date>"), ...(o().to !== undefined ? { to: o().to } : {}),
+      reason: need(reason, "--reason (why, shown to the user)"), ...(o().evidence?.length ? { evidence: o().evidence } : {}) }];
+    reason = undefined;
+  }
+  const items = raw.map((x, i) => {
+    const item = x && typeof x === "object" ? { ...(x as Record<string, unknown>) } : x;
+    if (item && typeof item === "object") { const r = item as Record<string, unknown>; r.ref = inFolder(r.ref); if (r.to !== undefined) r.to = inFolder(r.to); }
+    const parsed = IdeaLinkProposalItem.safeParse(item);
+    if (!parsed.success) throw new UsageError(`proposal ${i + 1}: ${formatIssues(parsed.error, "proposal")}`);
+    return parsed.data;
+  });
+  const issues = proposalIssues(st, loadProjectState(st), items);
+  if (issues.length) throw new UsageError(`nothing proposed: ${issues.join("; ")}`);
+  const e = emit(st, s, { type: "ideas.links_proposed", ...(reason ? { reason } : {}), items });
+  say(`proposed: ${items.length} idea link(s), ${e.id}; nothing changes until the user accepts (Ideas → Manage links)`);
 }
 
 /**

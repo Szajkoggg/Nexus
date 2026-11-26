@@ -30,6 +30,7 @@ Part of [the protocol](../PROTOCOL.md).
   idea-matches.yaml                     server: the user's decisions on matching earlier queues to the notes' entries
   idea-statuses.yaml                    server: user dispositions, assessments, history and observed invalidations
   idea-handoffs.yaml                    server: immutable scoped payloads and delivery attempts/receipts
+  idea-proposals.yaml                   server: agents' idea-link proposals (from their ideas.links_proposed) and the user's decisions
   orchestrator/summary.md               server: the orchestrator's latest summary for a fresh session (its context care)
   drafts/<queue-id>.yaml                the orchestrator: its queue drafts (also `nexus queue draft --template`)
   recurring/<id>.yaml                   server: a recurring queue (template, values, schedule, standing approval)

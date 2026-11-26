@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, Effort, acceptedByNexus, ideaStatuses, contextLimit, acceptedOn, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView,
+  ActionError, DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, Effort, acceptedByNexus, ideaStatuses, contextLimit, acceptedOn, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView, proposalDecisions, type IdeaProposal,
 } from "@nexus/protocol";
 import { reachable, type AgentProcess } from "./agent.ts";
 import type { CodexPermissions } from "./codex.ts";
@@ -21,7 +21,7 @@ import type { CrashRecord } from "./crash.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
   acceptedNoteNotice, approvalNotice, orchestratorStopText, checkAcceptedNotice, checkDecisionNotice, checkNotCommandNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, tokenText, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, type QueueIdeas, maintenanceFindingsNotice, staticAnalysisNotice, serverCrashNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
+  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, tokenText, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, type QueueIdeas, maintenanceFindingsNotice, staticAnalysisNotice, serverCrashNotice, stepNoteNotice, tagDecisionNotice, linkProposalsNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
 import { ReviewHelpers, audited, type HelperOptions } from "./review-helper.ts";
@@ -335,6 +335,12 @@ export class Orchestrator {
         this.deliver(stepNoteNotice(n));
         continue;
       }
+      if (n.links) {
+        const notice = linkProposalsNotice(n.links);
+        this.store.appendChat(s.id, { at: now(), from: "nexus", text: notice.fact });
+        this.deliver(noticeText(notice));
+        continue;
+      }
       if (n.discard) {
         this.store.appendChat(s.id, { at: now(), from: "nexus", text: `You chose to discard the work of stopped step ${n.step} of queue ${n.queue} (${n.discard.length} commit${n.discard.length === 1 ? "" : "s"}). The stop stays until you approve a revision that reverts it.` });
         this.deliver(discardNotice(n, n.discard));
@@ -363,8 +369,8 @@ ${n.text}` });
    * Notes of the user's on an acceptance, for the orchestrator, that no orchestrator session has been told yet (each
    * is told once per project: a reset does not repeat it, and one made with no session starts one).
    */
-  private pendingNotes(state: ProjectState): { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean; fix?: boolean; discard?: string[]; note?: string }[] {
-    const out: { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean; fix?: boolean; discard?: string[]; note?: string }[] = [];
+  private pendingNotes(state: ProjectState): { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean; fix?: boolean; discard?: string[]; note?: string; links?: IdeaProposal[] }[] {
+    const out: { key: string; queue: string; step: string; text: string; last: boolean; rejected?: boolean; fix?: boolean; discard?: string[]; note?: string; links?: IdeaProposal[] }[] = [];
     // The user's notes on a step the orchestrator held in review (picture comments on it too): told like a chat message.
     for (const q of state.queues) for (const st of q.steps) for (const n of st.notes) {
       if (n.to !== "orchestrator" || n.from !== "user") continue;
@@ -375,6 +381,8 @@ ${n.text}` });
       if (c.kind !== "work" || c.to !== "discarded" || !c.step) return;
       out.push({ key: `notify:discard:${q.id}:${i}`, queue: q.id, step: c.step, text: "", last: false, discard: c.commits ?? [] });
     });
+    // The user's decisions on agents' idea-link proposals (idea-proposals.ts): one notice per request, whoever proposed.
+    for (const g of proposalDecisions(this.store)) out.push({ key: `notify:idea-links:${g.request}`, queue: "", step: "", text: "", last: false, links: g.items });
     for (const q of state.queues) for (const st of q.steps) for (const e of st.timeline) {
       if (e.type === "review.rejected") {
         out.push({ key: `notify:reject:${e.id}`, queue: q.id, step: st.id, text: e.text ?? "", last: q.steps.at(-1)?.id === st.id, rejected: true });

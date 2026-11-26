@@ -144,6 +144,7 @@ export function describe(e: Event): string {
     case "static_analysis.declined":
     // A partner's hand-over record is shown by the ideas overview (queue IO).
     case "ideas.covered":
+    case "ideas.links_proposed":
     case "note.read":
     case "plan.proposed":
     case "question.withdrawn":

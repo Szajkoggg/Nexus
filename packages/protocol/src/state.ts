@@ -1134,6 +1134,7 @@ function apply(
     case "recurring.set":
     case "static_analysis.declined":
     case "ideas.covered":
+    case "ideas.links_proposed":
     default:
       return;
   }

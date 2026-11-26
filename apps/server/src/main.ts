@@ -15,7 +15,7 @@ import {
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, reviewStats, type ReviewStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
   SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, queueWorkedOn, stepsWorkedOn, FileCache, useHomeReader, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
-  projectIdeas, ideaMatches, ideaLinks, changeIdeaLinks, decideIdeaMatches, ideaStatuses, changeIdeaStatus, reconcileIdeaStatuses, readNotes, type IdeasResponse, type IdeaMatchesResponse,
+  projectIdeas, ideaMatches, ideaLinks, changeIdeaLinks, decideIdeaMatches, ideaStatuses, changeIdeaStatus, reconcileIdeaStatuses, readNotes, takeInLinkProposals, ideaProposals, decideIdeaProposals, type IdeasResponse, type IdeaMatchesResponse,
   previewIdeaHandoff, sendIdeaHandoff, retryIdeaHandoff, shownState,
 } from "@nexus/protocol";
 import { digestInput, newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
@@ -212,6 +212,8 @@ function changed(id: string): void {
         ["merging back", (s) => e.merger.onChange(s)],
         // A planned deploy whose target is in starts its update (or is dropped): before the engine goes on.
         ["deploy plan", (s) => planner.check(id, s)],
+        // The agents' idea-link proposals into idea-proposals.yaml (never a link): before the orchestrator's notices.
+        ["idea link proposals", (s) => takeInLinkProposals(e.store, s)],
         ["orchestrator", (s) => e.orchestrator.onChange(s)],
         ["engine", (s) => e.engine.onChange(s)],
       ];
@@ -481,6 +483,13 @@ app.get("/api/projects/:id/ideas/statuses", (c) => {
   reconcileIdeaStatuses(e.store, s);
   return c.json(ideaStatuses(e.store, s));
 });
+// The agents' idea-link proposals, each checked against the links as they stand (idea-proposals.ts).
+app.get("/api/projects/:id/ideas/proposals", (c) => {
+  const e = c.get("entry");
+  const s = stateOf(e);
+  if (!s) return c.json({ error: e.error }, 500);
+  return c.json(ideaProposals(e.store, s));
+});
 
 // The queue templates in effect for the project (docs/protocol/planning.md, "Queue templates"), for "New queue from template".
 app.get("/api/projects/:id/templates", (c) => {
@@ -576,6 +585,9 @@ app.post("/api/projects/:id/ideas/handoffs/preview", act((st, b) => previewIdeaH
 app.post("/api/projects/:id/ideas/handoffs", act((st, b, _p, e) => sendIdeaHandoff(st, b, (id, text) => e.orchestrator.enqueueIdea(id, text))));
 app.post("/api/projects/:id/ideas/handoffs/:hid/retry", act((st, _b, p, e) => retryIdeaHandoff(st, p("hid"), (id, text) => e.orchestrator.enqueueIdea(id, text))));
 app.post("/api/projects/:id/ideas/links", act((st, b) => changeIdeaLinks(st, b)));
+// The user's acceptance or decline of agents' link proposals, one or a batch in one request (no agent may: no command
+// and no event leads here); the accepted ones go through the links' writer in one write.
+app.post("/api/projects/:id/ideas/proposals", act((st, b) => decideIdeaProposals(st, b)));
 // Withdrawing an approval and adding an allow rule are the user's too, like every write (see the guard above): an agent
 // must not take an approval back or widen its own permissions.
 app.post("/api/projects/:id/queues/:queue/withdraw", act((st, b, p) => withdrawApproval(st, p("queue"), b.reason)));

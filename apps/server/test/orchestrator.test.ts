@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectStore, applyDraft, approveQueue, loadProjectState, routeAnswers, withdrawApproval } from "@nexus/protocol";
+import { ProjectStore, applyDraft, approveQueue, decideIdeaProposals, ideaProposals, loadProjectState, newId, now, routeAnswers, takeInLinkProposals, withdrawApproval, type Event } from "@nexus/protocol";
 import { Engine } from "../src/engine.ts";
 import { Orchestrator, type UserNotice } from "../src/orchestrator.ts";
 import { longReply } from "./fake-behaviour.ts";
@@ -492,5 +492,33 @@ test("the orchestrator is told once that the user lifted a stop with Continue", 
     assert.equal(facts(x.orchestrator).filter((t) => /lifted the stop of queue K with Continue/.test(t)).length, 1, "in the chat once");
     const sent = (await delivered()).filter((t) => t.startsWith("[Nexus] The user lifted the stop of queue K with Continue (the stop was: fake condition: fake stop); its run goes on. Nothing to start"));
     assert.equal(sent.length, 1, "to the orchestrator once");
+  } finally { x.stop(); }
+});
+
+test("the user's decision on the orchestrator's idea-link proposals is told to it once, with each item", async () => {
+  const x = setup();
+  process.env.FAKE_LOG = join(x.root, "fake.log");
+  try {
+    mkdirSync(join(x.root, "notes"));
+    writeFileSync(join(x.root, "notes/a.md"), "# A\n## Decided\n### 2026-11-14\n- First.\n### 2026-11-15\n- Other.\n");
+    x.store.updateProject((p) => ({ ...p, conversations: { ...p.conversations, notes_dir: "notes" } }));
+    x.store.writeQueue({ protocol: 1, id: "B", title: "B", revision: 1, status: "done", steps: [{ id: "B1", title: "Work", goal: "g", acceptance: [], status: "done" }], approvals: [], history: [], checks: [], stop_conditions: [] });
+    x.orchestrator.say("Hello");
+    await x.until("the session", () => !!x.orchestrator.session());
+    const o = x.orchestrator.session()!.id;
+    x.store.appendEvent({ v: 1, id: newId(), at: now(), session: o, type: "ideas.links_proposed", reason: "From the report",
+      items: [{ op: "add", queue: "B", ref: "notes/a.md#2026-11-14", reason: "B does it" }, { op: "add", queue: "B", ref: "notes/a.md#2026-11-15", reason: "and this" }] } as Event);
+    assert.equal(takeInLinkProposals(x.store, x.state()), 1);
+    const view = ideaProposals(x.store, x.state());
+    const r = decideIdeaProposals(x.store, { request_id: "R1", revision: view.revision, decisions: [{ id: view.proposals[0]!.id, accept: true }, { id: view.proposals[1]!.id, accept: false }] });
+    assert.equal(r.message, "1 accepted; 1 declined");
+    const fact = (t: string) => t.startsWith("The user decided on 2 idea-link proposal(s): accepted 1, declined 1.");
+    await x.until("the decision told", () => facts(x.orchestrator).some(fact));
+    await untilAsync("its delivery", async () => (await delivered()).some((t) => t.startsWith("[Nexus] The user decided on 2 idea-link proposal(s)")), LONGER.step);
+    await settle();
+    assert.equal(facts(x.orchestrator).filter(fact).length, 1, "told once");
+    const sent = (await delivered()).filter((t) => t.startsWith("[Nexus] The user decided on 2"));
+    assert.equal(sent.length, 1);
+    assert.match(sent[0]!, /- accepted: add B → notes\/a.md#2026-11-14 \(\S+\/1, proposed by the orchestrator\)\n- declined: add B → notes\/a.md#2026-11-15/);
   } finally { x.stop(); }
 });

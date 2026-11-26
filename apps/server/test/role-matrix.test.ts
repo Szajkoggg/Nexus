@@ -36,6 +36,7 @@ function project() {
   writeFileSync(join(root, "doc.md"), "# Title\n\n## Part\n\nText.\n");
   writeFileSync(join(root, "report.md"), "# Report\n");
   writeFileSync(join(root, "queues.md"), "# Nothing\n");
+  writeFileSync(join(root, "proposals.yaml"), "- { op: add, queue: R, ref: note.md#2026-11-14, reason: r }\n");
   return { root, store };
 }
 
@@ -80,6 +81,8 @@ const CALLS: [string, (root: string) => string[], string?][] = [
   ["nexus covers", () => ["covers", "note.md#2026-11-14"]],
   ["nexus ideas matches", () => ["ideas", "matches"]],
   ["nexus ideas status", () => ["ideas", "status"]],
+  ["nexus ideas propose add", () => ["ideas", "propose", "add", "--queue", "R", "--ref", "note.md#2026-11-14", "--reason", "r"]],
+  ["nexus ideas propose --file", (root) => ["ideas", "propose", "--file", join(root, "proposals.yaml")]],
   ["nexus doc", () => ["doc", "doc.md"]],
   ["nexus log", () => ["log", "a line"]],
   ["nexus answer", () => ["answer", "01NOSUCHQUESTION", "An answer."]],
@@ -133,6 +136,8 @@ function usages(help: string): Usage[] {
 /** The roles a usage's block marks it for: "(worker only)", "(orchestrator, or the step's review helper …)"; none: every role. */
 function marked(block: string): Set<Who> | undefined {
   if (/\(orchestrator, or the step's review helper/.test(block)) return new Set(["orchestrator", "helper"]);
+  // A maintenance queue's worker may too; the matrix's worker works on an ordinary queue (Q), so it is refused.
+  if (/\(orchestrator, thinking partner, or a maintenance queue's worker\)/.test(block)) return new Set(["orchestrator", "conversation"]);
   const m = /\((?:the step's )?(worker|orchestrator|thinking partner|review helper) only\b/.exec(block);
   if (!m) return undefined;
   return new Set([({ worker: "worker", orchestrator: "orchestrator", "thinking partner": "conversation", "review helper": "helper" } as const)[m[1] as "worker"]]);

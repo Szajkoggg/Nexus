@@ -97,3 +97,12 @@ test("nexus --help prints what nexus help prints, the topics with it", () => {
   assert.match(help, /--template <id>.*\n.*\(orchestrator only\) write a draft from a template/);
   assert.match(help, /--unrelated --evidence <text> {3}\(worker only\)/);
 });
+
+test("nexus ideas accept and reject are refused for every role: accepting a link or a proposal is the user's, in the dashboard", async () => {
+  const x = setup();
+  for (const s of ["w", "o", "c"]) for (const sub of ["accept", "reject"]) {
+    refused(await x.nexus(s, "ideas", sub, "01NOSUCHPROPOSAL/1"), /is the user's, in the dashboard/);
+  }
+  assert.equal(existsSync(join(x.store.dir, "idea-proposals.yaml")), false, "nothing written");
+  assert.equal(existsSync(join(x.store.dir, "idea-matches.yaml")), false, "nothing written");
+});

@@ -600,6 +600,18 @@ test("every notice of prompts.ts, rendered from fixtures, matches the golden fil
       idea("docs/ideas/overview.md#2026-11-26", "unconfirmed", [["QN", "done"], ["QX", "running"]])] }));
     show("runEndNotice", "finished, a note named but nothing linked", prompts.runEndNotice(q, { state: "finished" }, { linked: [], mentioned: ["docs/ideas/overview.md"] }));
   }
+  {
+    // Queue IWS, part d: the user's decision on agents' idea-link proposals, one notice per request, whoever proposed.
+    const p = (id: string, state: string, by: object, more: object) => ({ id, event: id.split("/")[0], by, at: "2026-01-01T09:00:00Z", reason: "r", state,
+      decided: { at: "2026-01-01T10:00:00Z", request: "R1" }, ...more }) as never;
+    show("linkProposalsNotice", "", prompts.linkProposalsNotice([
+      p("01P/1", "accepted", { session: "o", role: "orchestrator" }, { op: "add", queue: "N4", ref: "docs/ideas/deploy-timing.md#2026-11-14" }),
+      p("01P/2", "declined", { session: "o", role: "orchestrator" }, { op: "remove", queue: "PS", ref: "docs/ideas/queue-plan-view.md#2026-11-14", decided: { at: "2026-01-01T10:00:00Z", request: "R1", note: "PS is right" } }),
+      p("01Q/1", "outdated", { session: "c", role: "conversation", title: "Plan view" }, { op: "replace", queue: "PB", ref: "docs/ideas/queue-plan-view.md#2026-11-15", to: "docs/ideas/queue-plan-view.md#2026-11-14",
+        decided: { at: "2026-01-01T10:00:00Z", request: "R1", note: "this link no longer exists" } }),
+      p("01S/1", "accepted", { session: "w", role: "worker", queue: "NT", step: "NT1" }, { op: "add", queue: "QN", ref: "docs/ideas/overview.md#2026-11-24" }),
+    ]));
+  }
   show("maintenanceFindingsNotice", "", prompts.maintenanceFindingsNotice({ ...q, maintenance: "fix_small", report: { path: "<root>/.nexus/queues/QN/report.md", summary: "Two outdated packages.", findings: 2 } } as never));
   show("staticAnalysisNotice", "", prompts.staticAnalysisNotice());
   show("serverCrashNotice", "", prompts.serverCrashNotice({ at: "2026-01-01 09:00", error: "TypeError: x is undefined" }));

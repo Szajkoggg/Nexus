@@ -5,11 +5,11 @@
 import { test } from "node:test";
 import { once } from "node:events";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectStore, approveQueue, writeRegistry, type Event, type IdeaLinksResponse, type IdeaMatchesResponse, type IdeasResponse, type IdeaStatusesResponse } from "@nexus/protocol";
+import { ProjectStore, approveQueue, writeRegistry, type Event, type IdeaLinksResponse, type IdeaMatchesResponse, type IdeaProposalsResponse, type IdeasResponse, type IdeaStatusesResponse } from "@nexus/protocol";
 import { spawnServer } from "./helpers.ts";
 import { serverUp, untilAsync } from "./wait.ts";
 
@@ -202,5 +202,48 @@ test("GET /api/projects/:id/ideas: the notes with their entries' statuses and hi
     assert.deepEqual([unknown.status, (unknown.body as { error: string }).error], [404, "unknown project"]);
   } finally {
     child.kill();
+  }
+});
+
+test("link proposals over the API: an agent's event is taken in by the change pass and writes no link; the user's POST accepts it, guarded like every write", async () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-ideas-proposals-api-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  const root = join(base, "p");
+  mkdirSync(join(root, "notes"), { recursive: true });
+  const store = ProjectStore.init(root, { id: "p", name: "P", root });
+  store.updateProject((p) => ({ ...p, conversations: { ...p.conversations, notes_dir: "notes" } }));
+  writeFileSync(join(root, "notes/a.md"), "# A\n## Decided\n### 2026-11-14\n- First.\n");
+  store.writeQueue({ protocol: 1, id: "B", title: "B", revision: 1, status: "done", steps: [{ id: "B1", title: "Work", goal: "g", acceptance: [], status: "done" }], approvals: [], history: [], checks: [], stop_conditions: [] });
+  store.writeSession({ protocol: 1, id: "c", project: "p", role: "conversation", runtime: "claude", cwd: root, launched_by: "nexus", created_at: new Date().toISOString() });
+  writeRegistry({ protocol: 1, projects: [{ id: "p", root }] });
+  const port = await freePort(), url = `http://127.0.0.1:${port}`;
+  // The decision is told to the orchestrator: its runtime is the fake.
+  const child = spawnServer({ NEXUS_PORT: String(port), NEXUS_LOG: "", NEXUS_CLAUDE: join(import.meta.dirname, "fake-claude.ts"), FAKE_LOG: join(base, "fake.log") });
+  const endpoint = url + "/api/projects/p/ideas/proposals";
+  const view = async () => await (await fetch(endpoint)).json() as IdeaProposalsResponse;
+  const save = (body: object, origin = url) => fetch(endpoint, { method: "POST",
+    headers: { "content-type": "application/json", origin, "sec-fetch-site": origin === url ? "same-origin" : "cross-site" }, body: JSON.stringify(body) });
+  try {
+    await serverUp(url + "/api/projects");
+    const matches = join(store.dir, "idea-matches.yaml");
+    store.appendEvent({ v: 1, id: "01PROPOSAL", at: new Date().toISOString(), session: "c", type: "ideas.links_proposed",
+      items: [{ op: "add", queue: "B", ref: "notes/a.md#2026-11-14", reason: "B carries it out" }] } as Event);
+    await untilAsync("the intake", async () => (await view()).proposals.length === 1);
+    const [p] = (await view()).proposals;
+    assert.equal(p!.state, "pending");
+    assert.deepEqual(p!.mapping, ["Adds a manual link."]);
+    assert.equal(existsSync(matches), false, "a proposal writes no link");
+    const request = { request_id: "accept-1", revision: (await view()).revision, decisions: [{ id: p!.id, accept: true }] };
+    assert.equal((await save(request, "http://evil.example")).status, 403);
+    assert.equal((await save({ ...request, revision: "old" })).status, 409);
+    const ok = await save(request);
+    assert.equal(ok.status, 200);
+    assert.equal(((await ok.json()) as { result: { message: string } }).result.message, "1 accepted");
+    const links = await (await fetch(url + "/api/projects/p/ideas/links")).json() as IdeaLinksResponse;
+    assert.ok(links.items.some((r) => r.queue === "B" && r.ref === "notes/a.md#2026-11-14" && r.effective));
+    assert.deepEqual(links.history.at(-1)!.proposal, { id: p!.id, by: { session: "c", role: "conversation" } });
+  } finally {
+    if (child.exitCode === null) { const ended = once(child, "exit"); child.kill(); await ended; }
+    rmSync(base, { recursive: true, force: true, maxRetries: 5 });
   }
 });
