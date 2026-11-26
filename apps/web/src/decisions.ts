@@ -56,7 +56,7 @@ export function materialFirst<T extends { d: Pick<DecisionView, "material"> }>(c
 export interface Draft { choice?: string; words: string }
 
 /** Who holds a review now, as a draft's key reads it: a change of level or of who reviews drops what was chosen before. */
-export const holder = (step: Pick<StepView, "level" | "review_with" | "status">): string => `${step.status}:${step.review_with ?? "user"}:${step.level}`;
+const holder = (step: Pick<StepView, "level" | "review_with" | "status">): string => `${step.status}:${step.review_with ?? "user"}:${step.level}`;
 
 /** A draft's key: the project, step, decision, its version, the review round and who holds the review. */
 export function draftId(project: string, queue: string, step: Pick<StepView, "id" | "level" | "review_with" | "status">, d: Pick<DecisionView, "id" | "version">, round: number): string {

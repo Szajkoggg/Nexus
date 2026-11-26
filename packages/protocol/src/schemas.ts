@@ -804,7 +804,7 @@ export type SessionFile = z.infer<typeof SessionFile>;
 
 const base = { v: z.literal(1), id: Id, at: Time, session: Id };
 /** A review decision's id within its step: D1, D2, … (never reused). */
-export const DecisionId = z.string().regex(/^D[1-9]\d*$/, "a decision id: D1, D2, …");
+const DecisionId = z.string().regex(/^D[1-9]\d*$/, "a decision id: D1, D2, …");
 /** One option of a review decision; `effect: fix` marks one that means the step's work must change. */
 export const DecisionOption = z.object({ label: z.string().min(1), effect: z.literal("fix").optional() });
 export type DecisionOption = z.infer<typeof DecisionOption>;

@@ -249,7 +249,7 @@ export interface RightsNow { level: number; away: boolean; toUser: boolean }
  * answers what"). A reviewer's decision: the review helper, the orchestrator, the user; a user's: the user, or at level 3
  * (2 while away) the orchestrator provisionally.
  */
-export function answerRights(d: Pick<DecisionView, "for">, r: RightsNow): string {
+function answerRights(d: Pick<DecisionView, "for">, r: RightsNow): string {
   if (r.toUser || r.level === 1) return "only the user answers it now";
   if (d.for === "reviewer") return "a reviewer's: the review helper or the orchestrator answers it (the user may answer it too)";
   return r.level === 3 || r.away
@@ -261,7 +261,7 @@ const answerText = (a: DecisionAnswer) =>
   `${a.choice ? `"${a.choice}"` : "none of the options"}${a.text ? `: ${a.text}` : ""} (${a.by === "helper" ? "the review helper" : `the ${a.by}`}${a.provisional ? ", provisional" : ""})`;
 
 /** One decision's state in round `round`, in words: its current answer, or why it is open. */
-export function decisionState(d: DecisionView, round: number): string {
+function decisionState(d: DecisionView, round: number): string {
   const a = currentAnswer(d, round);
   if (a) return `answered ${answerText(a)}${asksFix(d, a) ? "; it asks for a change" : ""}`;
   const older = d.answers.findLast((x) => x.round === round);

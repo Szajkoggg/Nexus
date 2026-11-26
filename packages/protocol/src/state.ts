@@ -615,7 +615,7 @@ function recurringAttention(recurring: RecurringView[], queues: Map<string, Queu
  * said to look at, and the answers its final review round settled (queue RVD), each with who gave it, when, and
  * whether the user was away then.
  */
-export interface BatchStep {
+interface BatchStep {
   queue: string; step: string; title: string; at: string; event: string; text?: string; summary?: string;
   decisions?: BatchAnswer[];
   /** Why the step has nothing to decide (its declared none). */
@@ -623,7 +623,7 @@ export interface BatchStep {
 }
 
 /** An answer of a provisionally accepted step's review, for the return batch (`options`: the decision's, for "Instead…"). */
-export interface BatchAnswer {
+interface BatchAnswer {
   id: string; text: string; options: string[]; for: "user" | "reviewer";
   by: "user" | "orchestrator" | "helper"; at: string; choice?: string; words?: string; provisional?: true; away?: true;
 }
