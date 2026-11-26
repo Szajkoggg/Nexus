@@ -16,8 +16,8 @@ The protocol is split by topic, one file each in `docs/protocol/`. New text goes
   Sections: Server-owned runtime files
 - [Settings](protocol/settings.md): the global settings, how a project follows them, and the languages.
   Sections: Global settings
-- [Queues](protocol/queues.md): `queue.yaml`: steps, revisions, stops and the closing refactoring step.
-  Sections: `queue.yaml`
+- [Queues](protocol/queues.md): `queue.yaml`: steps, revisions, stops and the closing refactoring step; a queue paused for long.
+  Sections: `queue.yaml`; A queue paused for long
 - [Worktrees, integration and merging](protocol/git.md): the integration step, merging back, the merge train, cleaning up worktrees, pushing, one queue per checkout.
   Sections: The integration step; Git on the dashboard; Merge back and clean up; Cleaning up a survey's worktree; Pushing what was accepted; One queue per checkout, and a limit
 - [Review](protocol/review.md): review levels, away mode, review decisions, sending a step back, the review helper, review pictures.

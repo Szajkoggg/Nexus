@@ -328,3 +328,31 @@ the step in the approval view like any other.
   own steps in `git.yaml` to the last `end` (the closing step's own rounds left out), with `git diff --stat` of it (at
   most 60 files and the summary line); the diff itself is not in the text, the worker reads it with git. Without git
   records it says so.
+
+## A queue paused for long
+
+A queue whose run is `paused` and waits for the user longer than the project's `defaults.paused_warning_days` (whole
+days, global with a project's own value, default 3, 0 off) comes up in the user's waiting list: the state's
+`attention` gets an item of kind `paused` (`@nexus/protocol` attention-snoozes.ts; queue IWS). The pauses that count
+are those that wait for the user, told by the run's `reason`: the user's Pause (`paused by the user…`), Stop now
+(`stopped by the user`), Stop at once (`stopped at once by the user…`) and the pause a server restart left (`the Nexus
+server restarted…`). A rejected step (`rejected`: it has its review item), a hold for an update or the merge train
+(`resume_after_restart`: it goes on by itself), the other run states and a queue that is stopped, done or cancelled do
+not. The pause starts at the run's `ended_at` (else `updated_at`); the item comes at that time plus the deadline, and
+that is its `at`, so it comes in at the top of the newest-first list. Its `paused`: `cause` (`pause`, `stop`,
+`stop_now`, `restart`), `since`, `key` (`paused:<queue>:<since>`: a new pause of the queue starts afresh), `days` (the
+deadline), `title` (the queue's), `step` and `step_title` (the step at work or waiting, else the next one to open with
+`before: true`), and `text` says it in a line (`paused by the user 4 days ago before step AD2; nothing runs until it is
+resumed`), which `nexus status` lists under "Waiting for the user" as of when it is run.
+
+The item goes when the run goes on (Resume, the run's own `POST …/queues/:queue/run` with `resume`), when the queue is
+cancelled, and when the user puts it off: **Remind me in N days** (`POST /api/projects/:id/attention/snooze` with the
+item's `key`) writes `.nexus/attention-snoozes.yaml` (`{protocol: 1, items: [{key, until, at}]}`; only the server
+writes it, at the user's request; a put-off whose pause is over is dropped at the next write), and the item comes
+back at `until`, with that as its `at`. Nothing re-derives by itself over time, so after each change of a project the
+server (`apps/server/src/pause-warning.ts`, one more decision of the change pass in `main.ts`) sets one timer for the
+next moment a warning comes due or a put-off ends; the timer runs the change pass again, and the push and the
+dashboard's notification come as for every other kind (`paused`, "Paused for long" in the notification settings). The
+orchestrator is told once per pause ("Queue AD has been paused by the user for 4 days; it now waits in the user's
+Waiting list. Mention it once; resume it only if the user asks."). No run-control file takes part: the run is only
+read.

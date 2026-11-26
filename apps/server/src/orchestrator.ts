@@ -20,7 +20,7 @@ import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { CrashRecord } from "./crash.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
-  acceptedNoteNotice, approvalNotice, orchestratorStopText, checkAcceptedNotice, checkDecisionNotice, checkNotCommandNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
+  acceptedNoteNotice, approvalNotice, orchestratorStopText, checkAcceptedNotice, checkDecisionNotice, checkNotCommandNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice, pausedLongNotice,
   carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, tokenText, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, type QueueIdeas, maintenanceFindingsNotice, staticAnalysisNotice, serverCrashNotice, stepNoteNotice, tagDecisionNotice, linkProposalsNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
@@ -1031,6 +1031,9 @@ ${n.text}` });
       }
       const merged = q.git?.merged;
       if (merged?.by === "nexus" && merged.at >= since) items.push({ key: `notify:merged:${q.id}:${merged.at}`, ...mergedNotice(q, merged) });
+      // A queue paused for long that came up in the user's Waiting list (attention-snoozes.ts): told once per pause.
+      const long = state.attention.find((a) => a.kind === "paused" && a.queue === q.id);
+      if (long?.paused && long.at && long.at >= since) items.push({ key: `notify:pausedlong:${long.paused.key}`, ...pausedLongNotice(q, long.paused) });
       if (!r) continue;
       // A pause someone asked for (the user, or you with nexus run pause), reached at a step's end. Not a stop, and
       // not the pauses of a server restart or an update, whose reasons differ.

@@ -11,6 +11,7 @@ import { PlanRow } from "./Plan.tsx";
 import { TagProposalRow } from "./Tags.tsx";
 import { RecurringRow } from "./Recurring.tsx";
 import { LinkProposalsRow } from "./IdeaProposals.tsx";
+import { PausedRow } from "./PausedRow.tsx";
 import { useMergeBack } from "./details/git.tsx";
 import { mergeCardActions, mergeWaitText } from "../waiting.ts";
 
@@ -28,6 +29,7 @@ const KIND: Record<AttentionItem["kind"], { key: Key; tone: string }> = {
   recurring: { key: "waiting.kind.recurring", tone: "text-info bg-info/15" },
   cleanup: { key: "waiting.kind.cleanup", tone: "text-warn bg-warn/15" },
   links: { key: "waiting.kind.links", tone: "text-review bg-review/15" },
+  paused: { key: "waiting.kind.paused", tone: "text-warn bg-warn/15" },
 };
 /** An item's kind in a word and its colour, in the interface language. */
 /** A waiting item's kind as a word, with its colour. */
@@ -40,7 +42,7 @@ const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/
  * others as the server words them.
  */
 export const textOf = (a: AttentionItem) =>
-  a.kind === "provisional" ? t("waiting.batchText", { count: a.provisional?.length ?? 0 }) : a.kind === "merge" ? mergeWaitText(plain(a.text), a.queue).text : plain(a.text);
+  a.paused ? a.paused.title : a.kind === "provisional" ? t("waiting.batchText", { count: a.provisional?.length ?? 0 }) : a.kind === "merge" ? mergeWaitText(plain(a.text), a.queue).text : plain(a.text);
 /**
  * How many lines a card's text may take: a "Merging back" item's reason in full, wrapped (what keeps the merge back or
  * its cleanup, and what to do, must not be cut off: queue LKF), the others `lines`.
@@ -167,6 +169,7 @@ export function AttentionPanel({ project, items, queues, pushAccepted, onOpen, o
               {a.kind === "tags" && <TagProposalRow project={project} a={a} onChanged={onChanged} />}
               {a.kind === "recurring" && <RecurringRow project={project} a={a} onChanged={onChanged} />}
               {a.kind === "links" && <LinkProposalsRow project={project} a={a} />}
+              {a.kind === "paused" && <PausedRow project={project} a={a} onOpen={() => onOpen(a)} onChanged={onChanged} />}
             </div>
           );
         })}
@@ -212,6 +215,7 @@ export function WaitingList({ projects, onOpen, onChoose }: {
             {a.kind === "tags" && <TagProposalRow project={a.project} a={a} />}
             {a.kind === "recurring" && <RecurringRow project={a.project} a={a} />}
             {a.kind === "links" && <LinkProposalsRow project={a.project} a={a} />}
+            {a.kind === "paused" && <PausedRow project={a.project} a={a} onOpen={() => onOpen(a)} />}
             {onChoose && a.kind === "question" && !!a.options?.length && (
               <div className="flex flex-wrap gap-2 px-3.5 pb-3">
                 {a.options.map((o, i) => (
@@ -258,6 +262,7 @@ export function WaitingCards({ projects, current, onOpen }: { projects: ProjectS
           {a.kind === "tags" && <TagProposalRow project={a.project} a={a} className="px-3 pb-2.5" />}
           {a.kind === "recurring" && <RecurringRow project={a.project} a={a} className="px-3 pb-2.5" />}
           {a.kind === "links" && <LinkProposalsRow project={a.project} a={a} className="px-3 pb-2.5" />}
+          {a.kind === "paused" && <PausedRow project={a.project} a={a} onOpen={() => onOpen(a)} className="px-3 pb-2.5" />}
         </li>
       ))}
     </ul>

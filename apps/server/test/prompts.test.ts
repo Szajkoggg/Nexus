@@ -583,6 +583,9 @@ test("every notice of prompts.ts, rendered from fixtures, matches the golden fil
   show("cleanupWaitNotice", "", prompts.cleanupWaitNotice(q, "a file is locked"));
   show("mergedNotice", "", prompts.mergedNotice(q, { into: "main", sha: "0123456789abcdef" }));
   show("pausedNotice", "", prompts.pausedNotice(q, { step: "N1" }));
+  const pause = { since: "2026-11-22T09:00:00.000Z", key: "paused:QN:2026-11-22T09:00:00.000Z", days: 3, title: "Q", step: "N2" };
+  show("pausedLongNotice", "paused by the user", prompts.pausedLongNotice(q, { ...pause, cause: "pause" }, Date.parse("2026-11-26T10:00:00.000Z")));
+  show("pausedLongNotice", "after a restart", prompts.pausedLongNotice(q, { ...pause, cause: "restart" }, Date.parse("2026-11-23T10:00:00.000Z")));
   show("runEndNotice", "halted", prompts.runEndNotice(q, { state: "halted", step: "N1", reason: "step N1 failed: no disk" }));
   show("runEndNotice", "finished", prompts.runEndNotice(q, { state: "finished" }));
   {

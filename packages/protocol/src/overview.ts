@@ -1,6 +1,7 @@
 // The orchestrator's view of a project's state, as text: what `nexus status` prints in an orchestrator's session, and
 // what a fresh orchestrator session starts from (apps/server/src/orchestrator.ts). Pure: it reads a derived state.
 import { stopPlace } from "./attention.ts";
+import { pausedText } from "./attention-snoozes.ts";
 import { openPlan } from "./plan.ts";
 import { reviewRound } from "./checks.ts";
 import { decisionsCount } from "./review-decisions.ts";
@@ -192,7 +193,8 @@ Waiting for the user`);
     for (const a of attention) {
       const where = a.lift ? `${a.queue}${a.lift.place}` : `${a.queue ?? ""}${a.step ? `/${a.step}` : ""}`;
       // A stop's waiting item has its reason as its text and its condition apart: the agent reads both, as before.
-      const text = a.condition ? `${a.condition}: ${a.text}` : a.text;
+      // A long pause says how long it has stood as of now (the state's text was made when it was derived).
+      const text = a.paused ? pausedText(a.paused, Date.now()) : a.condition ? `${a.condition}: ${a.text}` : a.text;
       out.push(`- ${a.kind} ${where}: ${text.replace(/\s+/g, " ").slice(0, 160)}`);
       if (!a.lift) continue;
       out.push(`  ${a.lift.continue ? "Continue lifts it" : `approving revision ${a.lift.revision} lifts it`}`);

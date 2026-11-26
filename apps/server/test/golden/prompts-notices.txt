@@ -127,6 +127,10 @@ Log: checks/N1-1/npm-test.log (in the queue's folder); it ends: not ok 1 - empty
 [Nexus] Queue QN is merged back: main moved forward to its integrated work (0123456), by a fast-forward. Nothing was pushed. Nothing to do unless the user asks; a queue that waited for it in the plan may start now.
 == pausedNotice: 
 [Nexus] Run of QN paused after step N1. If you paused it to free the checkout for another queue, start that one now; otherwise tell the user.
+== pausedLongNotice: paused by the user
+[Nexus] Queue QN has been paused by the user for 4 days; it now waits in the user's Waiting list. Mention it once; resume it only if the user asks.
+== pausedLongNotice: after a restart
+[Nexus] Queue QN has been paused for 1 day, since the Nexus server restarted; it now waits in the user's Waiting list. Mention it once; resume it only if the user asks.
 == runEndNotice: halted
 [Nexus] The run of queue QN halted at step N1: step N1 failed: no disk. Tell the user briefly, with what you propose.
 == runEndNotice: finished

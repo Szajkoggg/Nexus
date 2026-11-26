@@ -15,7 +15,7 @@ import {
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, reviewStats, type ReviewStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
   SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, queueWorkedOn, stepsWorkedOn, FileCache, useHomeReader, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
-  projectIdeas, ideaMatches, ideaLinks, changeIdeaLinks, decideIdeaMatches, ideaStatuses, changeIdeaStatus, reconcileIdeaStatuses, readNotes, takeInLinkProposals, ideaProposals, decideIdeaProposals, type IdeasResponse, type IdeaMatchesResponse,
+  projectIdeas, ideaMatches, ideaLinks, changeIdeaLinks, decideIdeaMatches, ideaStatuses, changeIdeaStatus, reconcileIdeaStatuses, readNotes, takeInLinkProposals, ideaProposals, decideIdeaProposals, snoozeAttention, type IdeasResponse, type IdeaMatchesResponse,
   previewIdeaHandoff, sendIdeaHandoff, retryIdeaHandoff, shownState,
 } from "@nexus/protocol";
 import { digestInput, newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
@@ -41,6 +41,7 @@ import { searchProject } from "./search.ts";
 import { perf } from "./perf.ts";
 import { watchHome, type ProjectWatch } from "./watchers.ts";
 import { ProjectRegistry, type Entry } from "./project-registry.ts";
+import { PauseWarnings } from "./pause-warning.ts";
 import { dashboardFiles, isPublicFile } from "./web-static.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
@@ -214,6 +215,8 @@ function changed(id: string): void {
         ["deploy plan", (s) => planner.check(id, s)],
         // The agents' idea-link proposals into idea-proposals.yaml (never a link): before the orchestrator's notices.
         ["idea link proposals", (s) => takeInLinkProposals(e.store, s)],
+        // The next moment a queue paused for long comes up in Waiting (or a put-off ends): one timer, no write.
+        ["paused warnings", (s) => pauseWarnings.arm(id, e.store, s)],
         ["orchestrator", (s) => e.orchestrator.onChange(s)],
         ["engine", (s) => e.engine.onChange(s)],
       ];
@@ -317,6 +320,8 @@ const planner = new DeployPlanner({
   },
 });
 const watch = new AttentionWatch();
+/** The next long pause's warning per project (pause-warning.ts): a timer that runs the project's change pass. */
+const pauseWarnings = new PauseWarnings(changed, () => !active);
 // The loaded projects: made, dropped, released for an update and dropped before a failed one's start over (queue LCF).
 const registry = new ProjectRegistry({
   projects, coordinator, pending, watchers, watchedNotes, live, watch, planner, lifecycle, changed, logChanged, push,
@@ -588,6 +593,14 @@ app.post("/api/projects/:id/ideas/links", act((st, b) => changeIdeaLinks(st, b))
 // The user's acceptance or decline of agents' link proposals, one or a batch in one request (no agent may: no command
 // and no event leads here); the accepted ones go through the links' writer in one write.
 app.post("/api/projects/:id/ideas/proposals", act((st, b) => decideIdeaProposals(st, b)));
+// The user's "Remind me in N days" on a waiting item ({ key }: a long pause's `paused:<queue>:<ended_at>`): put off by
+// the project's deadline once more, in .nexus/attention-snoozes.yaml (attention-snoozes.ts). Returns when it comes back.
+app.post("/api/projects/:id/attention/snooze", act((st, b, _p, e) => {
+  const s = stateOf(e);
+  if (!s) throw new ActionError(e.error ?? "the project cannot be read", 409);
+  if (typeof b.key !== "string" || !b.key) throw new ActionError("key: the waiting item's key is required");
+  return { until: snoozeAttention(st, s, b.key) };
+}));
 // Withdrawing an approval and adding an allow rule are the user's too, like every write (see the guard above): an agent
 // must not take an approval back or widen its own permissions.
 app.post("/api/projects/:id/queues/:queue/withdraw", act((st, b, p) => withdrawApproval(st, p("queue"), b.reason)));

@@ -6,9 +6,11 @@ export const STOPS = "defaults.stop_conditions";
 export const SEND_BACKS = "defaults.review_send_back_limit";
 /** How many check-fix rounds a step gets when the checks Nexus runs fail (queue EF). */
 export const FIX_LIMIT = "defaults.check_fix_limit";
+/** After how many days a paused queue comes up in Waiting (queue IWS); 0: never. */
+export const PAUSED_DAYS = "defaults.paused_warning_days";
 
 /** Why the form cannot be saved: the first empty stop condition (1-based), the send-back limit or the check-fix limit. */
-export type SettingsProblem = { kind: "emptyCondition"; n: number } | { kind: "badLimit" } | { kind: "badFixLimit" };
+export type SettingsProblem = { kind: "emptyCondition"; n: number } | { kind: "badLimit" } | { kind: "badFixLimit" } | { kind: "badPausedDays" };
 
 /** A stop condition list as the form holds it: the texts, whatever came (a missing list is none). */
 export const conditionList = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => (typeof x === "string" ? x : String(x))) : []);
@@ -30,5 +32,6 @@ export function settingsProblem(values: Record<string, unknown>, keys: readonly 
   }
   if (keys.includes(SEND_BACKS) && !wholeNumber(values[SEND_BACKS])) return { kind: "badLimit" };
   if (keys.includes(FIX_LIMIT) && !wholeNumber(values[FIX_LIMIT])) return { kind: "badFixLimit" };
+  if (keys.includes(PAUSED_DAYS) && !wholeNumber(values[PAUSED_DAYS])) return { kind: "badPausedDays" };
   return undefined;
 }

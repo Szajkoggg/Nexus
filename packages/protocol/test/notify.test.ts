@@ -83,7 +83,7 @@ test("what a device sends is checked, with every problem named", () => {
 test("every kind of the waiting list is a notification kind", () => {
   const kinds: Record<AttentionItem["kind"], true> = {
     question: true, stopped: true, approval: true, review: true, failed: true, start: true, provisional: true,
-    plan: true, merge: true, tags: true, recurring: true, cleanup: true, links: true,
+    plan: true, merge: true, tags: true, recurring: true, cleanup: true, links: true, paused: true,
   };
   for (const k of Object.keys(kinds)) assert.ok((NOTIFY_KINDS as readonly string[]).includes(k), k);
 });

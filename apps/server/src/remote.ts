@@ -239,7 +239,7 @@ type Notifier = (payload: PushPayload, o: { kind: NotifyKind }) => Promise<numbe
 
 const LABEL: Record<AttentionItem["kind"], string> = {
   question: "Question", stopped: "Stopped", approval: "Needs approval", review: "Review", failed: "Failed", start: "Did not start",
-  provisional: "To confirm", plan: "The plan", merge: "Merging back", tags: "Tags", recurring: "Recurring", cleanup: "Cleanup", links: "Link proposals",
+  provisional: "To confirm", plan: "The plan", merge: "Merging back", tags: "Tags", recurring: "Recurring", cleanup: "Cleanup", links: "Link proposals", paused: "Paused for long",
 };
 
 /**

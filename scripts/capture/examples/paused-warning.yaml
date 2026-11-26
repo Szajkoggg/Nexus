@@ -1,0 +1,24 @@
+# IWS3: the afters of the long-paused queue's warning (docs/ux/idea-work-signals.md part c), on the data of
+# seed-idea-work-signals.ts (queue AD paused by the user four days ago): the waiting list with its "Paused for long"
+# card (scrolled to it: below the link proposals it is under the fold), and Settings, Defaults with "Paused queue
+# warning". The befores and mockups are IWS1's (same keys).
+seed: scripts/capture/seed-idea-work-signals.ts
+views:
+  - key: waiting-paused@1440
+    route: "#/demo"
+    actions: [{ scroll: Paused for long }]
+  - key: settings-defaults@1440
+    route: "#/demo"
+    actions: [{ click: { selector: "button[title='Project settings']" } }, { scroll: Defaults }]
+  - key: waiting-paused@492
+    route: "#/demo"
+    actions: [{ click: Waiting }, { scroll: Paused for long }]
+  - key: settings-defaults@492
+    route: "#/demo"
+    actions: [{ click: { selector: "button[title='Project settings']" } }, { scroll: Defaults }]
+  - key: waiting-paused@390
+    route: "#/demo"
+    actions: [{ click: Waiting }, { scroll: Paused for long }]
+  - key: settings-defaults@390
+    route: "#/demo"
+    actions: [{ click: { selector: "button[title='Project settings']" } }, { scroll: Defaults }]

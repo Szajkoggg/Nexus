@@ -12,7 +12,7 @@ const KIND_LABEL: Record<NotifyKind, Key> = {
   review: "notifySettings.kind.review", failed: "notifySettings.kind.failed", start: "notifySettings.kind.start",
   provisional: "notifySettings.kind.provisional", plan: "notifySettings.kind.plan", merge: "notifySettings.kind.merge",
   tags: "notifySettings.kind.tags", recurring: "notifySettings.kind.recurring", cleanup: "notifySettings.kind.cleanup", update_failed: "notifySettings.kind.updateFailed",
-  deploy: "notifySettings.kind.deploy", cancelled: "notifySettings.kind.cancelled", links: "notifySettings.kind.links",
+  deploy: "notifySettings.kind.deploy", cancelled: "notifySettings.kind.cancelled", links: "notifySettings.kind.links", paused: "notifySettings.kind.paused",
 };
 
 const time = "rounded-md border border-line-strong bg-canvas px-2 py-1 text-sm text-fg disabled:opacity-50";

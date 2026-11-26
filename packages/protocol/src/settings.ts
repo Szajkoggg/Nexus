@@ -9,7 +9,7 @@ import { TAG_KINDS } from "./tags.ts";
  */
 export const OVERRIDABLE: readonly { path: readonly string[]; none?: true }[] = [
   ...["stop_conditions", "review_level", "review_send_back_limit", "context_reuse_tokens", "context_care",
-    "protect_nexus", "push_accepted", "provisional_counts", "merge_back", "resolve_conflicts", "usage_pause_threshold", "max_running", "check_fix_limit"].map((k) => ({ path: ["defaults", k] })),
+    "protect_nexus", "push_accepted", "provisional_counts", "merge_back", "resolve_conflicts", "usage_pause_threshold", "max_running", "check_fix_limit", "paused_warning_days"].map((k) => ({ path: ["defaults", k] })),
   { path: ["runtimes", "default"] },
   { path: ["runtimes", "claude", "model"], none: true },
   { path: ["runtimes", "claude", "effort"], none: true },

@@ -3,7 +3,7 @@
 import { errorText } from "./errors.ts";
 import { applyCheckSets, enterAcceptedReview, lastDone, reviewRound, verdictBeforeReview } from "./checks.ts";
 import { activeDecisions, applyAnswer, applyDecision, applyMaterial, applyNone, currentAnswer, decisionGate, emptyDecisions, helperHandOverRefusal, listState, settledDecisions, type Acceptor, type DecisionContext, type DecisionsView, type ListState } from "./review-decisions.ts";
-import { CONVERSATION_ONLY, DECISION_LIST, HELPER_EVENTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile, type IdeaProposal, type IdeaProposer } from "./schemas.ts";
+import { CONVERSATION_ONLY, DECISION_LIST, HELPER_EVENTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile, type IdeaProposal, type IdeaProposer, type AttentionSnooze } from "./schemas.ts";
 import { ProjectStore, chainPlan, countRebuild, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
@@ -19,6 +19,7 @@ import { recurringViews, scheduleText, type RecurringView } from "./recurring.ts
 import { readTemplates, templateDirs } from "./templates.ts";
 
 import type { CheckView } from "./steps.ts";
+import { pausedAttention, type PausedWarning } from "./attention-snoozes.ts";
 interface AnswerView { id: string; text: string; at: string; escalate?: boolean; continue?: boolean; session: string; by: "orchestrator" | "user" }
 export interface QuestionView {
   qid: string; session: string; queue?: string; step?: string; text: string; options?: string[];
@@ -45,8 +46,10 @@ export interface AttentionItem {
    * standing approval, or a time passed without a run (its previous run had not closed, its template cannot be used,
    * making the queue failed); one item per recurring. `cleanup`: Nexus could not remove a done survey run's worktree
    * (git.yaml `cleanup.waiting`: untracked files left in it, and the like); the user looks, then cleans up.
+   * `paused`: a queue whose run has waited paused for the user beyond the project's `defaults.paused_warning_days`
+   * (attention-snoozes.ts), until it is resumed, cancelled or put off; its time is the moment it came due.
    */
-  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan" | "merge" | "tags" | "recurring" | "cleanup" | "links";
+  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan" | "merge" | "tags" | "recurring" | "cleanup" | "links" | "paused";
   queue?: string;
   /** Kind `recurring`: the recurring queue it is about (its standing approval waits, or a time passed without a run). */
   recurring?: string;
@@ -76,6 +79,8 @@ export interface AttentionItem {
    * idea-proposals.ts), one item per batch: its event, the proposer, the batch's reason, and its pending items.
    */
   links?: LinkProposalBatch;
+  /** Kind `paused`: why and since when the run is paused, where it stands, and the deadline (attention-snoozes.ts). */
+  paused?: PausedWarning;
   /**
    * Kind `merge`: what the user's Merge back moves (the waiting card asks it where no queue is at hand): the queue's
    * branch (absent: unnamed) into its base branch. Absent when the base is no branch (nothing to merge into), and
@@ -336,6 +341,8 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
   try { tags = store.readTags(); } catch (e) { warnings.push(errorText(e)); tags = { protocol: 1, areas: [], activities: [], renames: [], proposals: [], decisions: [] }; }
   let proposals: IdeaProposal[];
   try { proposals = store.readIdeaProposals().proposals; } catch (e) { warnings.push(errorText(e)); proposals = []; }
+  let snoozes: AttentionSnooze[];
+  try { snoozes = store.readAttentionSnoozes().items; } catch (e) { warnings.push(errorText(e)); snoozes = []; }
   let metrics: MetricsFile;
   try { metrics = store.readMetrics(); } catch (e) { warnings.push(errorText(e)); metrics = { protocol: 1, metrics: [] }; }
 
@@ -556,7 +563,8 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
     questions: [...questions.values()],
     tags,
     metrics,
-    attention: [...recurringAttention(recurring, queues), ...linksAttention(proposals), ...attentionOf([...queues.values()], [...questions.values()], tags, away)]
+    attention: [...recurringAttention(recurring, queues), ...linksAttention(proposals),
+      ...pausedAttention([...queues.values()], project.defaults.paused_warning_days, snoozes, Date.now()), ...attentionOf([...queues.values()], [...questions.values()], tags, away)]
       .sort((a, b) => (b.at ?? "").localeCompare(a.at ?? "")),
     warnings,
     away: awayNow(away),

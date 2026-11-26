@@ -14,7 +14,7 @@ export interface WaitingItem extends AttentionItem { project: string; project_na
  */
 export const attentionKey = (a: AttentionItem): string => [
   a.kind, a.queue, a.lift ? undefined : a.step, a.qid, a.plan?.predecessor ?? (a.plan?.proposal ? a.at : undefined), a.tags?.id,
-  a.recurring, a.recurring ? a.at : undefined, a.links?.event,
+  a.recurring, a.recurring ? a.at : undefined, a.links?.event, a.paused?.key,
 ].join("/");
 
 /**

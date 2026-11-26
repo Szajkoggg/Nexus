@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, INTEGRATION_CONDITION, REUSE_TOKENS, fileList, tokenCount, formatClock, formatDuration, latestCheckSet, reviewRound, openPlan, decisionLines, queueDecisions, settledDecisions, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type PassOnReason, type RightsNow, type TagProposal, tagsText, queuesDoneUnconfirmed, type IdeaStatusView, type IdeaProposal, type IdeaProposer,
+  DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, INTEGRATION_CONDITION, REUSE_TOKENS, fileList, tokenCount, formatClock, formatDuration, latestCheckSet, reviewRound, openPlan, decisionLines, queueDecisions, settledDecisions, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type PassOnReason, type RightsNow, type TagProposal, tagsText, queuesDoneUnconfirmed, type IdeaStatusView, type IdeaProposal, type IdeaProposer, DAY_MS, type PausedWarning,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -1139,6 +1139,16 @@ export function pausedNotice(q: QueueView, r: { step?: string }): Notice {
   return {
     fact: `Run of ${q.id} paused after step ${r.step ?? "?"}.`,
     todo: "If you paused it to free the checkout for another queue, start that one now; otherwise tell the user.",
+  };
+}
+
+/** A queue paused for long came up in the user's Waiting list (queue IWS, attention kind `paused`): mention it once. */
+export function pausedLongNotice(q: QueueView, w: PausedWarning, now = Date.now()): Notice {
+  const days = Math.max(1, Math.floor((now - Date.parse(w.since)) / DAY_MS));
+  const how = w.cause === "restart" ? "paused" : w.cause === "pause" ? "paused by the user" : "stopped by the user";
+  return {
+    fact: `Queue ${q.id} has been ${how} for ${days} day${days === 1 ? "" : "s"}${w.cause === "restart" ? ", since the Nexus server restarted" : ""}; it now waits in the user's Waiting list.`,
+    todo: "Mention it once; resume it only if the user asks.",
   };
 }
 

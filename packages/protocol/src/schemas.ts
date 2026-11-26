@@ -194,6 +194,11 @@ const DefaultsShape = z.object({
    * them the run halts for the orchestrator. Counted apart from the send-backs.
    */
   check_fix_limit: z.number().int().min(0).default(3),
+  /**
+   * After how many whole days a queue whose run is paused and waits for the user comes up in the user's Waiting list
+   * (attention kind `paused`); "Remind me" puts it off by as many days again. 0: never.
+   */
+  paused_warning_days: z.number().int().min(0).default(3),
 });
 /** `defaults` as read: an old `review_policy` becomes its `review_level`. */
 const legacyDefaults = (x: unknown) => withLevel(x, "review_policy", "review_level");
@@ -463,6 +468,7 @@ export const StoredProject = z.object({
     usage_pause_threshold: own(Fraction),
     max_running: own(MaxRunning),
     check_fix_limit: own(z.number().int().min(0)),
+    paused_warning_days: own(z.number().int().min(0)),
     worktree_dir: z.string().optional(),
     worktree_setup: z.string().optional(),
     worktree_setup_inputs: z.array(z.string()).optional(),
@@ -1856,6 +1862,16 @@ export type IdeaProposal = z.infer<typeof IdeaProposal>;
  */
 export const IdeaProposalsFile = z.object({ protocol: z.literal(1), proposals: z.array(IdeaProposal).default([]) });
 export type IdeaProposalsFile = z.infer<typeof IdeaProposalsFile>;
+
+/**
+ * .nexus/attention-snoozes.yaml: the waiting items the user put off ("Remind me in N days"), by the item's own key
+ * (a long pause's `paused:<queue>:<ended_at>`), until when, and when it was put off. Written only by the server, at the
+ * user's request (attention-snoozes.ts); a put-off of an item that is gone is dropped at the next write.
+ */
+export const AttentionSnooze = z.object({ key: z.string().min(1), until: Time, at: Time });
+export type AttentionSnooze = z.infer<typeof AttentionSnooze>;
+export const AttentionSnoozesFile = z.object({ protocol: z.literal(1), items: z.array(AttentionSnooze).default([]) });
+export type AttentionSnoozesFile = z.infer<typeof AttentionSnoozesFile>;
 
 /** Server-owned user decisions; notes and queue records remain immutable inputs. */
 const IdeaMarker = z.object({ dropped: z.object({ date: z.string(), why: z.string() }).optional(), replaced_by: z.string().optional() });

@@ -375,6 +375,14 @@ the step's timeline and leaves all uncommitted changes in the checkout or worktr
 the same session after the process has exited. Stop at once is also available while a worker is still working after
 Stop now.
 
+**A queue paused for long.** A queue you paused (Pause, Stop now, Stop at once, or the pause a server restart left)
+is not forgotten: after 3 days it comes up under "Waiting for you" as **Paused for long**, saying why and since when
+("Paused by you 4 days ago, before step AD2 (Summarize). Nothing runs until you resume it."), with **Resume**,
+**Open** and **Remind me in 3 days**, which puts it off by as many days again. It is pushed like the other waiting
+items (the kind "A queue stays paused for long" in the notification settings), and the orchestrator mentions it once.
+The number of days is **Paused queue warning** in the settings' Defaults, global with a project's own value; 0 turns
+the warning off. A rejected step, a hold for an update and a usage wait go on by themselves and never count.
+
 On Windows, Nexus removes a worker's remaining child processes when its step ends, including while the step waits
 for review. The runtime stays for the next step; ending the session or using Stop at once removes its whole process
 tree. Finish commands and collect their results within the step: a worker cannot leave a development server or a
