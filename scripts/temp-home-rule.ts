@@ -9,7 +9,7 @@
 // that comes before a write. A write the rule leaves out on purpose is an exception, by file and call, with why.
 
 /** The protocol's functions that write NEXUS_HOME's files (packages/protocol/src/store.ts, actions.ts), and nexusHome(). */
-export const HOME_WRITERS = [
+const HOME_WRITERS = [
   "writeRegistry", "updateGlobalSettings", "writeGlobalSettings", "ensureGlobalSettings", "writeAway", "appendTurn",
   "writeCapacity", "writeUsage", "appendServerSpeed", "nexusHome",
 ] as const;

@@ -12,10 +12,15 @@ import { join, resolve } from "node:path";
 
 const key = (p: string) => resolve(p).replaceAll("\\", "/").toLowerCase().replace(/\/+$/, "");
 
+/** Whether `path` lies inside the system's temporary folder (os.tmpdir()), compared as Windows does: case and slashes aside. */
+export function inTempDir(path: string | undefined): boolean {
+  return !!path && key(path).startsWith(key(tmpdir()) + "/");
+}
+
 /** What is wrong with `home` as a script's or a test's NEXUS_HOME under `env`; undefined when it is a temporary one. */
 export function tempHomeProblem(home: string | undefined, env: NodeJS.ProcessEnv = process.env): string | undefined {
   if (!home) return "NEXUS_HOME is not set, so the real one (%APPDATA%\\Nexus) would be written";
-  if (!key(home).startsWith(key(tmpdir()) + "/")) return `NEXUS_HOME must lie inside ${tmpdir()}: ${home}`;
+  if (!inTempDir(home)) return `NEXUS_HOME must lie inside ${tmpdir()}: ${home}`;
   const real = join(env.APPDATA ?? join(homedir(), ".config"), "Nexus");
   if (key(home) === key(real)) return `NEXUS_HOME is the folder Nexus uses without it (${real}): ${home}`;
   return undefined;

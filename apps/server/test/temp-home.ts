@@ -18,11 +18,8 @@
 //   without APPDATA, which is always set here.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { tempHomeProblem } from "../../../scripts/temp-home.ts";
-
-const key = (p: string) => resolve(p).replaceAll("\\", "/").toLowerCase().replace(/\/+$/, "");
-const inTemp = (p: string | undefined) => !!p && key(p).startsWith(key(tmpdir()) + "/");
+import { join } from "node:path";
+import { inTempDir, tempHomeProblem } from "../../../scripts/temp-home.ts";
 
 /** The test runner's own process: `node --test` without a test context (its files run in processes of their own). */
 const runner = process.execArgv.includes("--test") && !process.env.NODE_TEST_CONTEXT;
@@ -31,12 +28,12 @@ if (!runner) {
   const env = process.env;
   let base: string | undefined;
   const folder = (name: string) => join(base ??= mkdtempSync(join(tmpdir(), "nexus-test-env-")), name);
-  if (!inTemp(env.APPDATA)) env.APPDATA = folder("appdata");
-  if (!inTemp(env.LOCALAPPDATA)) env.LOCALAPPDATA = folder("localappdata");
+  if (!inTempDir(env.APPDATA)) env.APPDATA = folder("appdata");
+  if (!inTempDir(env.LOCALAPPDATA)) env.LOCALAPPDATA = folder("localappdata");
   if (tempHomeProblem(env.NEXUS_HOME, env)) env.NEXUS_HOME = folder("home");
   env.NEXUS_JOB_CACHE ??= join(tmpdir(), "nexus-job-host");
-  if (!inTemp(env.NEXUS_DIR)) { delete env.NEXUS_DIR; delete env.NEXUS_SESSION; }
-  if (env.NEXUS_HANDOVER && !inTemp(env.NEXUS_HANDOVER)) delete env.NEXUS_HANDOVER;
+  if (!inTempDir(env.NEXUS_DIR)) { delete env.NEXUS_DIR; delete env.NEXUS_SESSION; }
+  if (env.NEXUS_HANDOVER && !inTempDir(env.NEXUS_HANDOVER)) delete env.NEXUS_HANDOVER;
   if (base) {
     const made = base;
     process.on("exit", () => { try { rmSync(made, { recursive: true, force: true, maxRetries: 3 }); } catch { /* a child still holds a file: the system's temporary folder keeps it */ } });
