@@ -1004,6 +1004,11 @@ export class Engine implements Member {
     if (issue) return this.halt(queueId, `step ${next.id} on its fallback: ${issue}`);
     const routedRun = this.recordRoute(queueId, run, next.id, routed, choice);
     if (this.prepareStep(queueId, routedRun, state, q, current, next, want, live)) return;
+    // No switch after all (a Stop at once ended the wait for one, and the threshold or the runtime changed meanwhile):
+    // what a late turn Nexus ended had taken in was kept for a fresh session (lateTurn), which none is now. It was
+    // delivered to this session, whose conversation goes on; kept, it would go to a later, unrelated switch's fresh
+    // session (queue LCF; LC2 finding 3).
+    if (routedRun.carry) this.writeRun(queueId, { ...routedRun, carry: undefined });
     this.openStep(queueId, next, q, "start");
   }
 
@@ -1954,6 +1959,10 @@ export class Engine implements Member {
         // Ended by Nexus (shutdown, the hand-over of an update, an update's drain with `now`, a finished run): no
         // failure. Any other exit is a crash, and the turn is tried again on a new process that resumes the session.
         const byNexus = this.stopped || this.ending.delete(session.id);
+        // A switch that waited for this process's settling waits no more: an ended process starts no late turn. Kept,
+        // the wait would hold the session's inbox back and take the next process's first turn for a late one, ending
+        // it (a Stop at once in that moment, then no switch: queue LCF; LC2 finding 3).
+        if (this.switchWaits.delete(session.id)) this.lastInjected.delete(session.id);
         this.store.appendActivity(session.id, { at: now(), kind: code === 0 || byNexus ? "exit" : "error", text: `process exited (${code ?? "signal"})${byNexus ? ", ended by Nexus" : ""}`, ...tag() });
         if (this.restarting.delete(session.id)) {
           this.clearRestartKill(session.id);

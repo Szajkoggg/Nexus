@@ -284,6 +284,68 @@ test("claude: a server that ends after Nexus ended a late turn, before the switc
   } finally { unhook(); x.done(); delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_GATE; }
 });
 
+/**
+ * Stop at once while a switch waits for the old session's settling (queue LCF, LC2 finding 3), then the project's
+ * threshold rises past the session's context, so no switch follows the Resume. `carry`: the run's file carries a
+ * message, as a late turn Nexus ended leaves it (lateTurn), when the stop comes. Returns the old session and its runs.
+ */
+async function stopWhileSwitchWaits(carry: boolean) {
+  process.env.FAKE_LATE_NEXT = "1";
+  const work = holdWork();
+  const x = setup(["summary", "slow"], { fill: 0.8, lateTurnMs: 4 * LONGER.run });
+  // Never opened: the runtime starts no late turn; the stop ends the process while the switch waits for that moment.
+  process.env.FAKE_LATE_GATE = join(dirname(process.env.FAKE_LOG!), "late-gate");
+  const end = () => { x.done(); work.done(); delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_GATE; };
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("Q1 in review in its turn", () => x.queue().steps[0]!.status === "review" && loadProjectState(x.store).sessions.find((s) => s.id === x.queue().run!.session)?.live?.state === "working", LONGER.step);
+    x.accept();
+    delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_GATE; // for the process Resume starts
+    const old = x.queue().run!.session;
+    sendMessage(x.store, old, "Use the grassland settings.", { queue: "Q", step: "Q1" });
+    x.engine.onChange(loadProjectState(x.store));
+    await x.until("the message sent into the turn", () => x.received().some((m) => m.session === old && m.text.includes("grassland") && m.priority === "next"));
+    await x.until("the switch to wait", () => x.store.readActivity(old).entries.some((e) => /^Nexus waits a moment before step Q2/.test(e.text)), LONGER.step);
+    await x.engine.stopAtOnce("Q");
+    assert.equal(x.queue().run!.state, "paused");
+    if (carry) {
+      const id = loadProjectState(x.store).sessions.find((s) => s.id === old)!.inbox.find((m) => m.text?.includes("grassland"))!.id;
+      x.store.writeRun("Q", { ...x.store.readRun("Q")!, carry: [id] });
+    }
+    // The threshold rises past the session's 800k tokens (at most 80 % of the 1M window: 800k, not beyond).
+    const p = x.store.readProject();
+    x.store.writeProject({ ...p, defaults: { ...p.defaults, context_reuse_tokens: 2_000_000 } });
+    x.engine.resume("Q");
+    await x.until("step Q2 to open", () => x.received().some((m) => /step Q2 \(2 of 2\)/.test(m.text)), LONGER.step);
+    return { x, old, work, end };
+  } catch (e) { end(); throw e; }
+}
+
+test("claude: Stop at once while a switch waits, and no switch after the Resume: the next step opens in the old session, and a message to it arrives (queue LCF, LC2 finding 3)", async () => {
+  const { x, old, work, end } = await stopWhileSwitchWaits(false);
+  try {
+    assert.equal(x.queue().run!.session, old, "no switch: the run goes on in the old session");
+    assert.equal(x.received().find((m) => /step Q2 \(2 of 2\)/.test(m.text))!.session, old, "step Q2 opened in the old session");
+    sendMessage(x.store, old, "Also keep the river.", { queue: "Q", step: "Q2" });
+    x.engine.onChange(loadProjectState(x.store));
+    await x.until("the message to reach the old session", () => x.received().some((m) => m.session === old && m.text.includes("river")), LONGER.step);
+    work.release();
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+    assert.equal(x.queue().run!.switches, undefined);
+    assert.ok(!x.store.readActivity(old).entries.some((e) => e.text.startsWith("Nexus ends the turn the runtime started by itself")), "the resumed process's turn was not taken for a late turn");
+  } finally { end(); }
+});
+
+test("claude: Stop at once while a switch waits with a carried message, and no switch after the Resume: the run's carry is dropped (queue LCF, LC2 finding 3)", async () => {
+  const { x, old, work, end } = await stopWhileSwitchWaits(true);
+  try {
+    assert.equal(x.queue().run!.session, old, "no switch: the run goes on in the old session");
+    assert.equal(x.queue().run!.carry, undefined, "no switch takes the carried message: the run carries it no more");
+    work.release();
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+  } finally { end(); }
+});
+
 const HOUR = 60 * 60_000;
 
 for (const runtime of ["claude", "codex"] as const) {

@@ -36,6 +36,12 @@ the natural cut, and the worker's own summary is a better hand-over than an auto
   older one would miss the step's own work. A missing summary is asked for once; if the worker still writes none,
   the seed is the queue's description and the finished steps' summaries, which every worker writes anyway.
 - No known context window (a runtime that has not reported one yet) means no switch: Nexus does not guess.
+- A switch waits while the old process settles after a step's last turn with a message sent into it (a late turn of
+  its own may still come; queue LF). The wait ends with the process: one that exited (a Stop at once in that moment)
+  starts no late turn, and kept, the wait held the session's inbox back and took the resumed process's first turn for
+  a late one (queue LCF; LC2 finding 3). When the step after a Resume opens in the old session after all (the
+  threshold or the runtime changed meanwhile), the run's `carry` (what a late turn Nexus ended had taken in, kept for
+  the fresh session) is dropped: it was delivered to that session, and kept it went to a later switch's fresh session.
 - After an idle hour (docs/ideas/token-costs.md, 2026-11-17; queue FI) the prompt cache is gone, so the next turn in
   the old session writes its whole context again. A fresh session from the summary is cheaper, below the threshold
   too, but only with a summary already there: asking for one is itself a turn that rewrites the cache. Fresh here
