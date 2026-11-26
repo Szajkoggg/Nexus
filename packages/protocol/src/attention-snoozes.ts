@@ -62,7 +62,7 @@ function pausedStep(q: QueueView): Pick<PausedWarning, "step" | "step_title" | "
  * Every queue whose run waits paused for the user, with the moment its warning shows (`due`, ms): the pause's start
  * plus the deadline, or the end of the user's put-off when later. None when the deadline is 0 (off).
  */
-export function pauseWarnings(queues: readonly QueueView[], days: number, snoozes: readonly AttentionSnooze[]): { queue: QueueView; warning: PausedWarning; due: number }[] {
+function pauseWarnings(queues: readonly QueueView[], days: number, snoozes: readonly AttentionSnooze[]): { queue: QueueView; warning: PausedWarning; due: number }[] {
   if (!(days > 0)) return [];
   const until = new Map(snoozes.map((s) => [s.key, Date.parse(s.until)]));
   const out: { queue: QueueView; warning: PausedWarning; due: number }[] = [];

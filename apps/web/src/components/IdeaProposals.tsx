@@ -19,7 +19,7 @@ function OpBadge({ op, short }: { op: Op; short?: boolean }) {
 }
 
 /** Who proposes, as the box's group head and the entry card name them. */
-export function proposerText(by: IdeaProposalView["by"], queueTitle?: (id: string) => string | undefined): string {
+function proposerText(by: IdeaProposalView["by"], queueTitle?: (id: string) => string | undefined): string {
   if (by.role === "orchestrator") return t("ideas.proposals.by.orchestrator");
   if (by.role === "conversation") return by.title ? t("ideas.proposals.by.partnerNamed", { title: by.title }) : t("ideas.proposals.by.partner");
   const title = by.queue ? queueTitle?.(by.queue) : undefined;
@@ -30,7 +30,7 @@ export function proposerText(by: IdeaProposalView["by"], queueTitle?: (id: strin
  * The user's decision on proposals: one request (its revision from a fresh read when none is given, as in a waiting
  * card), then the page's reads again. `message`: the server's answer ("2 accepted; 1 outdated: …").
  */
-export function useProposalDecision(project: string, onDone?: () => void) {
+function useProposalDecision(project: string, onDone?: () => void) {
   const { reloaded } = usePage();
   const { busy, error, run } = useAction();
   const [message, setMessage] = useState<string>();
@@ -52,7 +52,7 @@ const applies = (p: IdeaProposalView) => p.state === "pending" && p.valid;
 const why = (p: IdeaProposalView) => p.why ?? p.decided?.note ?? "";
 
 /** One proposal: what it does, the queue and the date(s), the proposer's reason, the mapping, Evidence; Accept / Decline. */
-export function ProposalItem({ p, title, d, revision, head }: {
+function ProposalItem({ p, title, d, revision, head }: {
   p: IdeaProposalView; title?: string; d: ReturnType<typeof useProposalDecision>; revision: string;
   /** Above it, on an entry's card: "Proposed link" and who proposed it when. */
   head?: string;

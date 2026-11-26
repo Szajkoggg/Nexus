@@ -33,7 +33,7 @@ export function proposerOf(store: ProjectStore, s: SessionFile, step?: string): 
 }
 
 /** An item checked against the relationships as they stand: whether it applies, why not, and what it would do. */
-export interface ProposalCheck {
+interface ProposalCheck {
   /** Applies now. */
   ok: boolean;
   /** Why it does not: an unknown queue or reference (`refused` at intake) or a link state that no longer fits. */

@@ -658,13 +658,13 @@ function batchAnswers(q: QueueView, st: StepView, away: Pick<AwayFile, "current"
 }
 
 /** A batch of idea-link proposals waiting for the user, as its waiting item carries it (kind `links`). */
-export interface LinkProposalBatch {
+interface LinkProposalBatch {
   event: string; by: IdeaProposer; reason?: string;
   items: Pick<IdeaProposal, "id" | "op" | "queue" | "ref" | "to">[];
 }
 
 /** Who proposes, in a few words ("The orchestrator", "Thinking partner “Plan view”", "The worker of NT"). */
-export function proposerName(by: IdeaProposer): string {
+function proposerName(by: IdeaProposer): string {
   if (by.role === "orchestrator") return "The orchestrator";
   if (by.role === "conversation") return by.title ? `Thinking partner “${by.title}”` : "A thinking partner";
   return `The worker of ${by.queue ?? "a maintenance queue"}`;
