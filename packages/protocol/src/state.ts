@@ -883,11 +883,7 @@ function apply(
     case "review.decided": {
       const q = queueOf(e.queue); const st = stepOf(q, e.step);
       if (!q || !st) return;
-      const c: DecisionContext = {
-        role: s?.role, reviewRound: reviewRound(q, st), away, reviewedByOrchestrator: reviewedByOrchestrator(st),
-        helperRefusal: s?.role === "helper" ? helperRefusal(s, q, st) : undefined,
-      };
-      const why = e.type === "review.decision" ? applyDecision(st, e, c) : e.type === "review.decisions_none" ? applyNone(st, e, c) : applyAnswer(st, e, c);
+      const why = applyDecisionEvent(q, st, e, s, away);
       if (why) warnings.push(why.startsWith("event ") ? why : `event ${e.id} (${e.type}): ${why}; ignored`);
       return;
     }
@@ -1213,14 +1209,24 @@ export function decisionRefusal(state: Pick<ProjectState, "queues" | "away">, s:
   if (input.type === "review.decided" && s.role !== "orchestrator" && s.role !== "helper" && s.role !== "user") return `a ${s.role}'s session does not answer review decisions: the reviewer (the review helper, the orchestrator) or the user does`;
   if (input.type !== "review.decided" && s.role !== "worker" && s.role !== "orchestrator") return `a ${s.role === "helper" ? "review helper" : `${s.role}'s session`} does not change a decision list: pass the step on (--why decision) when the list is incomplete or wrong`;
   const copy: StepView = { ...st, decisions: structuredClone(st.decisions) };
-  const e = { v: 1, id: "decision-check", at, session: s.id, ...input } as Event;
+  const e = { v: 1, id: "decision-check", at, session: s.id, ...input } as DecisionEvent;
   const away = state.away.on && state.away.since && state.away.until ? { current: { since: state.away.since, until: state.away.until }, past: [] } : { past: [] };
+  return applyDecisionEvent(q, copy, e, s, away)?.replace(/^event decision-check: /, "");
+}
+
+type DecisionEvent = Extract<Event, { type: "review.decision" | "review.decisions_none" | "review.decided" }>;
+
+/**
+ * Applies a review decision event of session `s` to step `st` (review-decisions.ts), in the context the step gives it
+ * now: a warning when it does not count. The derivation's and decisionRefusal's one way to apply them.
+ */
+function applyDecisionEvent(q: QueueView, st: StepView, e: DecisionEvent, s: Pick<SessionFile, "role" | "about"> | undefined, away: Pick<AwayFile, "current" | "past">): string | undefined {
   const c: DecisionContext = {
-    role: s.role, reviewRound: reviewRound(q, st), away, reviewedByOrchestrator: reviewedByOrchestrator(st),
-    helperRefusal: s.role === "helper" ? helperRefusal(s, q, st) : undefined,
+    role: s?.role, reviewRound: reviewRound(q, st), away, reviewedByOrchestrator: reviewedByOrchestrator(st),
+    helperRefusal: s?.role === "helper" ? helperRefusal(s, q, st) : undefined,
   };
-  const why = e.type === "review.decision" ? applyDecision(copy, e, c) : e.type === "review.decisions_none" ? applyNone(copy, e, c) : e.type === "review.decided" ? applyAnswer(copy, e, c) : undefined;
-  return why?.replace(/^event decision-check: /, "");
+  if (e.type === "review.decision") return applyDecision(st, e, c);
+  return e.type === "review.decisions_none" ? applyNone(st, e, c) : applyAnswer(st, e, c);
 }
 
 /**

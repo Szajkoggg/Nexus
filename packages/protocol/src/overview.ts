@@ -80,17 +80,17 @@ export function acceptedOn(a: { runtime?: string; model?: string; effort?: strin
   return [a.runtime === "codex" ? "Codex" : "Claude Code", a.model, a.effort].filter(Boolean).join(", ");
 }
 
-/**
- * A review helper on the step (queue RH, H17): it reviews it now, or it accepted it (on which runtime, model and
- * effort). Empty otherwise, so what the orchestrator and the user saw before helpers stays as it was.
- */
-/** A step in review: its decisions (queue RVD), " (review decisions: 3, 1 open (D2))", or a list nobody declared. */
+/** A step in review: its decisions (queue RVD), " (review decisions: 3 decisions, 1 open (D2))", or a list nobody declared. */
 function reviewDecisionsText(q: QueueView, x: StepView): string {
   const count = decisionsCount(x.decisions, reviewRound(q, x));
   if (count) return ` (review decisions: ${count})`;
   return x.decision_list === "missing" ? " (no review decision list declared)" : "";
 }
 
+/**
+ * A review helper on the step (queue RH, H17): it reviews it now, or it accepted it (on which runtime, model and
+ * effort). Empty otherwise, so what the orchestrator and the user saw before helpers stays as it was.
+ */
 export function helperText(x: Pick<StepView, "status" | "helper" | "accepted">): string {
   if (x.status === "review" && x.helper?.state === "running") return " (the review helper reviews it)";
   const a = x.accepted;
