@@ -196,6 +196,8 @@ export const ABSENT_ON_PURPOSE = new Map<string, string>([
   ["docs/ideas", "the user's own notes, kept beside the repository but not in it"],
   ["docs/QUEUE.md", "a file of another project (Honeycomb)"],
   ["docs/protocol/README.md", "the layout the split plan weighed and did not take"],
+  ["nexus decide", "the worker's command proposed in docs/design/review-decisions.md (queue RVD); RVD3 builds it"],
+  ["nexus review decide", "the reviewers' command proposed in docs/design/review-decisions.md (queue RVD); RVD3 builds it"],
 ]);
 
 const onPurpose = (name: string): boolean => [...ABSENT_ON_PURPOSE.keys()].some((k) => name === k || name.startsWith(`${k}/`));

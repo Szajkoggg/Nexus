@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>27 Required review decisions</title>
+<link rel="stylesheet" href="dash-mock.css">
+<!-- Queue RVD (RVD1). The step panel of WT1 from scripts/capture/seed-review-decisions.ts, compared with today's panel
+     captured as review-decisions@1440, @492 and @390 (the same project, step, summary and pictures). New here, marked
+     with a dashed outline: the step's decision list. Views by the address: ?v=partial|complete|return|layout-b and
+     &w=1440|492|390 (the window's width; 492 and 390 draw the phone layout). docs/design/review-decisions.md says what
+     each part does. The phone's first line names the step without its title (the title is below it): the dashboard
+     cuts the title there with an ellipsis, which layout-faults counts; that line is not part of this design. -->
+<style>
+  body { overflow: hidden; }
+  .desk { height: 100vh; }
+  .phone-shell { width: 100%; height: 100vh; position: relative; overflow: hidden; background: var(--canvas); display: flex; flex-direction: column; }
+  .chat-empty { text-align: center; color: var(--fg-2); margin-top: 64px; font-size: 14px; line-height: 1.75; }
+  .composer { margin: auto 28px 20px; height: 78px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); padding: 18px 54px; color: var(--fg-3); position: relative; }
+  .composer .send { position: absolute; right: 9px; bottom: 9px; background: color-mix(in srgb, var(--accent-strong) 45%, var(--surface)); color: var(--fg-3); }
+  .right { position: relative; }
+  .scroll { flex: 1; min-height: 0; overflow: hidden; }
+  .head { padding: 14px 24px 14px; border-bottom: 1px solid var(--line); }
+  .phone-shell .head { padding: 12px 16px 12px; }
+  .where { font-size: 12px; color: var(--fg-2); }
+  h2.title { margin: 6px 0 0; font-size: 20px; font-weight: 600; line-height: 1.4; }
+  .phone-shell h2.title { font-size: 18px; margin-top: 10px; }
+  .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; font-size: 12px; color: var(--fg-3); }
+  .rv { color: var(--review); font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+  .rv::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--review); }
+  .lv { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; }
+  .lv span { padding: 2px 9px; color: var(--fg-2); border-left: 1px solid var(--line-strong); }
+  .lv span:first-child { border-left: 0; background: var(--surface-3); color: var(--fg); font-weight: 600; }
+  .body { padding: 16px 24px 24px; display: flex; flex-direction: column; gap: 16px; }
+  .phone-shell .body { padding: 14px 16px 24px; }
+  .summary { background: var(--surface-2); border-radius: 8px; padding: 12px; font-size: 14px; }
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tile { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--surface); }
+  .tile .img { height: 92px; background: #f8fafc; border-top: 6px solid #2563eb; position: relative; }
+  .tile .img i { position: absolute; left: 10px; height: 3px; background: #0f172a; width: 32%; }
+  .tile .cap { font-size: 12px; padding: 6px 8px; line-height: 1.35; }
+
+  /* the decisions */
+  .dhead { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+  .count { font-size: 12px; font-weight: 600; padding: 1px 7px; border-radius: 6px; color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); white-space: nowrap; }
+  .count.all { color: var(--ok); background: color-mix(in srgb, var(--ok) 15%, transparent); }
+  .dcards { display: flex; flex-direction: column; gap: 10px; }
+  .dcard { border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px 12px; background: var(--surface); }
+  .dcard.saved { border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+  .dq { font-size: 14px; font-weight: 600; line-height: 1.4; }
+  .dq .id { font-family: var(--mono); color: var(--fg-3); font-weight: 500; margin-right: 6px; }
+  .dwhy { font-size: 12px; color: var(--fg-2); margin-top: 2px; }
+  .opts { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .opt { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line-strong); border-radius: 6px; padding: 6px 10px; font-size: 14px; background: var(--surface-2); }
+  .opt .r { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--fg-3); flex: none; }
+  .opt.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); }
+  .opt.on .r { border-color: var(--accent); box-shadow: inset 0 0 0 3px var(--surface-2); background: var(--accent); }
+  .rec { margin-left: auto; font-size: 11px; color: var(--accent); white-space: nowrap; }
+  .words { margin-top: 8px; border: 1px solid var(--line-strong); border-radius: 6px; padding: 5px 10px; font-size: 13px; color: var(--fg-3); background: var(--canvas); }
+  .dfoot { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--fg-3); }
+  .btn.sm { padding: 3px 10px; font-size: 13px; }
+  .btn.dim { opacity: .4; }
+  .mat { color: var(--accent); font-size: 12px; }
+  .ans { font-size: 13px; margin-top: 4px; }
+  .ans b { font-weight: 600; color: var(--fg); }
+  .unsaved { color: var(--warn); }
+  .line1 { display: flex; align-items: baseline; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .line1:first-child { border-top: 0; }
+  .line1 .q { color: var(--fg-2); flex: none; }
+  .strip { display: flex; align-items: center; gap: 10px; border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 6%, transparent); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+
+  /* the action bar */
+  .bar { border-top: 1px solid var(--line); padding: 10px 20px 12px; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; background: var(--surface); }
+  .phone-shell .bar { padding: 12px 16px 14px; }
+  .bar .hint { flex-basis: 100%; text-align: right; font-size: 12px; color: var(--warn); line-height: 1.35; }
+  .bar .hint.okh { color: var(--fg-2); }
+  .bar .btn { padding: 8px 14px; font-weight: 600; }
+  .phone-shell .bar .btn { padding: 12px 16px; }
+  .btn.more { background: transparent; border: 1px solid var(--line-strong); }
+  .btn.primary.off { background: color-mix(in srgb, var(--accent-strong) 35%, var(--surface-2)); color: color-mix(in srgb, var(--on-accent) 55%, transparent); }
+
+  /* the return batch */
+  .wlabel { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--warn); }
+  .wcard { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 12px 14px; }
+  .kind.conf { color: var(--review); background: color-mix(in srgb, var(--review) 15%, transparent); }
+  .brow { border: 1px solid var(--line); border-radius: 6px; background: color-mix(in srgb, var(--canvas) 50%, transparent); padding: 8px 12px; margin-top: 8px; }
+  .oa { font-size: 13px; padding: 6px 0; border-top: 1px solid var(--line); }
+  .oa .who { font-size: 12px; color: var(--fg-3); }
+  .oa .inst { color: var(--accent); font-size: 12px; white-space: nowrap; margin-left: auto; }
+  .tabs { height: 56px; display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--line); background: var(--surface); flex: none; }
+  .tabs div { display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 11.5px; color: var(--fg-3); }
+  .tabs div.on { color: var(--fg); font-weight: 600; }
+  .ptop { height: 53px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--line); flex: none; }
+  .pproj { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 8px; background: var(--surface-2); font-weight: 500; }
+</style></head>
+<body>
+<div id="root"></div>
+<script>
+const q = new URLSearchParams(location.search);
+const v = q.get("v") || "partial";
+const w = Number(q.get("w") || 1440);
+const phone = w < 1024;
+
+const DECISIONS = [
+  { id: "D1", q: "Which layout for the waiting list on the desktop?", why: "WT2 builds it; the other one is dropped.",
+    opts: ["A: one list, oldest first", "B: grouped by queue"], rec: 1, mat: "View A and B ›", chosen: 1, saved: "you · 04:58", words: "" },
+  { id: "D2", q: "What does Snooze do?", why: "When a snoozed item comes back to the list.",
+    opts: ["Hide it for an hour", "Hide it until it changes"], rec: 1, mat: "Snooze in the summary ›", chosen: 1, saved: v === "partial" ? "" : "you · 05:01" },
+  { id: "D3", q: "Does the phone's Waiting tab change in this queue?", why: "Yes adds a step to WT; later leaves the phone as it is.",
+    opts: ["Yes, in WT2", "Later, in a queue of its own"], rec: 1, mat: "View the phone mockup ›", chosen: v === "partial" ? -1 : 1, saved: v === "partial" ? "" : "you · 05:02",
+    words: v === "partial" ? "" : "After WT ships" },
+];
+
+const tile = (cap, cols) => `<div class="tile"><div class="img">${[0,1,2,3].map((i) => `<i style="top:${10 + i * 18}px;width:${cols ? 22 : 32}%"></i>${cols ? `<i style="top:${10 + i * 18}px;left:38%;width:22%"></i>` : ""}`).join("")}</div><div class="cap">${cap}</div></div>`;
+const summary = `<div class="summary"><span class="fg3">Summary:</span> Two layouts for the waiting list, A (one list, oldest first) and B (grouped by queue), at 1440 and 390 px. For your decision: which layout (I recommend B); whether Snooze hides an item for an hour or until it changes (I recommend until it changes); and whether the phone changes in this queue or later (I recommend later).</div>`;
+const pictures = `<div><div class="row" style="justify-content:space-between;margin-bottom:8px"><span class="label">Pictures · 3</span><span class="xs fg3">none marked yet</span></div>
+  <div class="tiles">${tile("A: one list, oldest first · round 1")}${tile("⇄ B: grouped by queue · round 1", true)}${tile("Phone: one list · round 1")}</div></div>`;
+
+function card(d) {
+  if (d.saved && v === "partial") return `<div class="dcard saved">
+    <div class="dq"><span class="id">${d.id}</span>${d.q}</div>
+    <p class="ans"><span class="fg3">Your answer:</span> <b>${d.opts[d.chosen]}</b></p>
+    <div class="dfoot"><span class="ok">✓ Saved</span><span>${d.saved}</span><span class="grow"></span><span class="mat">Change</span></div></div>`;
+  const opts = d.opts.map((o, i) => `<div class="opt ${i === d.chosen ? "on" : ""}"><span class="r"></span><span>${o}</span>${i === d.rec ? `<span class="rec">recommended</span>` : ""}</div>`).join("");
+  const pending = d.chosen >= 0;
+  return `<div class="dcard">
+    <div class="dq"><span class="id">${d.id}</span>${d.q}</div>
+    <p class="dwhy">${d.why} <span class="mat">${d.mat}</span></p>
+    <div class="opts" role="radiogroup">${opts}</div>
+    <div class="words">Why, or another answer (optional)…</div>
+    <div class="dfoot">${pending ? `<span class="unsaved">● Chosen, not saved</span>` : `<span>Not answered</span>`}<span class="grow"></span><span class="btn sm ${pending ? "primary" : "dim"}">Save</span></div></div>`;
+}
+
+function decisions() {
+  if (v === "complete") return `<section class="new"><div class="dhead"><span class="label">Your decisions</span><span class="count all">all 3 answered</span></div>
+    <div class="dcard">${DECISIONS.map((d) => `<div class="line1"><span class="id mono fg3">${d.id}</span><div class="grow"><p class="q">${d.q}</p><p><b class="semi">${d.opts[d.chosen]}</b>${d.words ? ` <span class="fg2">· “${d.words}”</span>` : ""}</p><p class="xs fg3">${d.saved}</p></div><span class="mat">Change</span></div>`).join("")}</div></section>`;
+  return `<section class="new"><div class="dhead"><span class="label">Your decisions</span><span class="count">1 of 3 answered</span></div>
+    <div class="dcards">${DECISIONS.map(card).join("")}</div></section>`;
+}
+
+const header = phone
+  ? `<div class="head"><div class="row where"><span class="fg2">‹</span><span class="grow nowrap">Demo app · WT · <b class="fg">WT1</b></span><span class="fg3 nowrap">1 of 1 waiting</span><span class="fg2" style="font-size:18px">×</span></div>
+    <h2 class="title"><span class="mono fg3" style="margin-right:8px">WT1</span>Design: the waiting list's layout</h2>
+    <div class="meta"><span class="rv">review: you</span><span>Review</span><span class="lv"><span>1</span><span>2</span><span>3</span></span><span>You review</span><span>started 04:19</span><span>finished 04:54</span><span>took 35 min</span></div></div>`
+  : `<div class="head"><div class="row where" style="justify-content:space-between"><span><span class="mono">WT</span> · Waiting tab redesign ›</span><span class="fg3" style="font-size:18px">×</span></div>
+    <h2 class="title"><span class="mono fg3" style="margin-right:8px">WT1</span>Design: the waiting list's layout</h2>
+    <div class="meta"><span class="rv">review: you</span><span>Review</span><span class="lv"><span>1</span><span>2</span><span>3</span></span><span>You review</span></div>
+    <div class="meta" style="margin-top:4px"><span>started 04:19</span><span>finished 04:54</span><span>took 35 min</span></div></div>`;
+
+function bar() {
+  const open = v === "partial" || v === "layout-b";
+  return `<div class="bar">${open
+    ? `<span class="hint"><span class="new">2 decisions open (D2, D3): answer them to accept</span></span>`
+    : `<span class="hint okh">All decisions answered</span>`}
+    <span class="btn more">⋯</span><span class="btn line">Fix it…</span><span class="btn primary ${open ? "off" : ""}" ${open ? 'aria-disabled="true" title="2 decisions open: D2, D3"' : ""}>Accept and go on</span></div>`;
+}
+
+function stepPanel() {
+  const strip = `<div class="strip new"><span class="count">1 of 3 answered</span><span class="grow">3 decisions for you</span><span class="mat">Go to them ↓</span></div>`;
+  const body = v === "layout-b"
+    ? `${strip}${summary}${pictures}<section class="new"><div class="dhead"><span class="label">Your decisions</span></div><div class="dcards">${card(DECISIONS[0])}</div></section>`
+    : `${decisions()}${summary}${pictures}`;
+  return `${header}<div class="scroll" data-scroll><div class="body">${body}</div></div>${bar()}`;
+}
+
+const answers = [
+  { id: "D1", q: "Layout", a: "B: grouped by queue", why: "Many queues read better grouped; matches the goal.", at: "02:10" },
+  { id: "D2", q: "Snooze", a: "Hide it until it changes", why: "An hour hides real changes.", at: "02:11" },
+  { id: "D3", q: "Phone in this queue", a: "Later, in a queue of its own", why: "", at: "02:11" },
+];
+function batch() {
+  const rows = `<div class="brow new"><p><span class="mono xs fg3">WT/WT1</span> <span class="medium">Design: the waiting list's layout</span></p>
+      <p class="xs fg2" style="margin:2px 0 6px"><span class="fg3">Look at:</span> the layout is yours to judge.</p>
+      ${answers.map((x) => `<div class="oa"><div class="row" style="align-items:baseline"><span class="mono xs fg3">${x.id}</span><span class="grow"><span class="fg2">${x.q}:</span> <b class="semi">${x.a}</b></span><span class="inst">Instead…</span></div>
+        <p class="who">orchestrator · ${x.at} · while you were away · provisional${x.why ? ` · “${x.why}”` : ""}</p></div>`).join("")}
+      <div class="row" style="margin-top:8px"><span class="btn">Confirm</span><span class="btn open">Fix it…</span></div></div>
+    <div class="brow"><p><span class="mono xs fg3">WT/WT2</span> <span class="medium">Build the chosen layout</span></p>
+      <p class="xs fg3" style="margin:2px 0 6px">No decisions: “builds what WT1 chose”</p>
+      <div class="row"><span class="btn">Confirm</span><span class="btn open">Fix it…</span></div></div>`;
+  return `<div class="wcard"><div class="row"><span class="kind conf">To confirm</span><span class="xs fg3">WT</span><span class="grow"></span><span class="xs fg3">just now</span></div>
+    <p style="margin-top:6px" class="medium">2 provisional acceptances wait for your confirmation</p>
+    <div class="row new" style="margin-top:8px"><span class="btn line">Confirm all 2…</span><span class="xs fg3">lists the orchestrator's answers first</span></div>
+    ${rows}</div>`;
+}
+
+const side = `<aside class="side"><div class="brand">Nexus<span class="grow"></span><span class="xs fg3">live <span class="ok">●</span></span></div>
+  <div class="label" style="padding: 0 10px 6px">Projects</div>
+  <div class="proj"><span class="av">DA</span>Demo app<span class="grow"></span><span class="badge">1</span></div>
+  <div class="row" style="padding: 18px 12px; color: var(--fg-2)"><span>⫼</span><span class="fg">Stats</span><span class="grow"></span><span class="xs fg3">all projects</span></div>
+  <div class="grow"></div><div class="xs fg3" style="padding: 8px 10px">☾ Away…</div><div class="row xs fg3" style="padding: 8px 10px">notify off<span class="grow"></span>⚙ ▯</div></aside>`;
+const mid = `<main class="mid"><div class="deskhead"><span class="seg"><span class="on">● Orchestrator</span><span>Ideas</span><span>Stats</span></span>
+  <span class="xs fg2">starts with your first message</span><span class="xs fg">Tool calls</span>
+  <span class="search">⌕ Search history…<span class="grow"></span><span class="xs fg3" style="border:1px solid var(--line-strong); border-radius:4px; padding:0 4px">Ctrl K</span></span></div>
+  <p class="chat-empty">Plan queues with the orchestrator, ask where things stand, or have it start a run.<br>It reads the project and works through <span class="mono fg">nexus</span>; it never edits files or approves queues.</p>
+  <div class="composer">Message the orchestrator…<span class="btn primary send">Send</span></div></main>`;
+
+const root = document.getElementById("root");
+if (v === "return") {
+  const list = `<div class="body"><div class="row" style="justify-content:space-between"><span class="wlabel">Waiting for you · 1</span><span class="xs fg3">all projects</span></div>${batch()}</div>`;
+  root.innerHTML = phone
+    ? `<div class="phone-shell"><div class="ptop"><span class="pproj">Demo app <span class="badge">1</span> ⌄</span><span class="grow"></span><span class="fg2">⌕</span><span class="fg2">⚙</span></div>
+       <div class="scroll" data-scroll>${list}</div><div class="tabs"><div>Orchestrator</div><div class="on">Waiting</div><div>Queues</div><div>Ideas</div><div>Stats</div></div></div>`
+    : `<div class="desk">${side}${mid}<aside class="right" style="display:flex;flex-direction:column">${list}</aside></div>`;
+} else {
+  root.innerHTML = phone
+    ? `<div class="phone-shell">${stepPanel()}</div>`
+    : `<div class="desk">${side}${mid}<aside class="right" style="display:flex;flex-direction:column;overflow:hidden">${stepPanel()}</aside></div>`;
+}
+</script>
+</body></html>
