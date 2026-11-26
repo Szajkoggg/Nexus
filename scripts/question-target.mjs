@@ -8,11 +8,13 @@ import { join, resolve } from 'node:path';
 import { ProjectStore, newId, writeRegistry, loadProjectState, approveQueue } from '../packages/protocol/src/index.ts';
 import { EdgeBrowser } from './capture/edge.ts';
 import { freePort, startInstance } from './capture/run.ts';
+import { requireTempHome } from './temp-home.ts';
 const root = resolve(import.meta.dirname, '..');
 const out = resolve(process.argv[2] ?? mkdtempSync(join(tmpdir(), 'nexus-question-target-')));
 const temp = join(out, 'run-' + Date.now()), home = join(temp, 'home');
 mkdirSync(home, { recursive: true });
 process.env.NEXUS_HOME = home;
+requireTempHome();
 const fixtures = ['qa-repro', 'qa-other'].map(id => {
   const data = join(temp, id);
   mkdirSync(data, { recursive: true });

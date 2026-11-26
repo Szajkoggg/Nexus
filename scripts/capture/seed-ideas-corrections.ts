@@ -4,6 +4,9 @@ import "./seed-ideas.ts";
 import { join } from "node:path";
 import { ProjectStore, loadProjectState } from "@nexus/protocol";
 import { ideaMatches } from "../../packages/protocol/src/ideas-read.ts";
+import { requireTempHome } from "../temp-home.ts";
+
+requireTempHome();
 
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-ideas-corrections.ts <data dir>");

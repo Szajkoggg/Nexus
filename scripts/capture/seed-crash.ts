@@ -7,6 +7,9 @@ import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nexusHome } from "@nexus/protocol";
+import { requireTempHome } from "../temp-home.ts";
+
+requireTempHome();
 
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-crash.ts <data dir>");

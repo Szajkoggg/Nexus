@@ -6,6 +6,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
 import { ProjectStore, approveQueue, newId, writeRegistry, type Event, type SessionFile } from "@nexus/protocol";
+import { requireTempHome } from "../temp-home.ts";
+
+requireTempHome();
 
 /** The user reviews: written the old way, which code since review levels reads as level 1 and older code as `wait`. */
 const LEVEL_1 = { review_policy: "wait" } as object;

@@ -14,6 +14,9 @@ import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { ProjectStore, appendTurn, approveQueue, newId, writeRegistry, type Event, type SessionFile, type TurnRecord } from "@nexus/protocol";
+import { requireTempHome } from "../temp-home.ts";
+
+requireTempHome();
 
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-rail-digest.ts <data dir>");

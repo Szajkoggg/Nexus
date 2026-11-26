@@ -11,6 +11,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectStore, newId, writeRegistry, type ChatEntry, type SessionFile } from "@nexus/protocol";
+import { requireTempHome } from "../temp-home.ts";
+
+requireTempHome();
 
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-conversation-settings.ts <data dir>");

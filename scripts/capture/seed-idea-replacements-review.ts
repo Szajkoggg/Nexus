@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { ProjectStore, loadProjectState } from "@nexus/protocol";
 import { ideaStatuses } from "../../packages/protocol/src/ideas-read.ts";
 import { changeIdeaStatus } from "../../packages/protocol/src/idea-status-actions.ts";
+import { requireTempHome } from "../temp-home.ts";
+
+requireTempHome();
 
 const store = new ProjectStore(join(process.argv[2]!, "demo/.nexus"));
 for (const [date, operation] of [["11", "reopen"], ["12", "replace"], ["13", "replace"]]) {

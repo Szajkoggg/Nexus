@@ -8,6 +8,9 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectStore, approveQueue, newId, updateSettings, writeRegistry, type Event, type SessionFile, type StepDef } from "@nexus/protocol";
+import { requireTempHome } from "../temp-home.ts";
+
+requireTempHome();
 
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-merge.ts <data dir>");

@@ -28,6 +28,7 @@ import {
 } from "@nexus/protocol";
 import { generateNexus } from "../packages/protocol/test/synthetic.ts";
 import { startInstance } from "./capture/run.ts";
+import { requireTempHome } from "./temp-home.ts";
 
 const { values: o } = parseArgs({ options: {
   scales: { type: "string", default: "1,4" }, tests: { type: "string", default: "both" }, rounds: { type: "string", default: "10" },
@@ -42,7 +43,9 @@ if (!SCALES.length || SCALES.some((s) => !(s > 0))) throw new Error("--scales: p
 if (!["both", "with", "without"].includes(o.tests)) throw new Error("--tests: both, with or without");
 const TESTS = o.tests === "both" ? [false, true] : [o.tests === "with"];
 const ROUNDS = Number(o.rounds), CHANGES = Number(o.changes), SEED = Number(o.seed);
-// The file is the real NEXUS_HOME's, taken before each configuration points NEXUS_HOME at its own folder.
+// The file is the real NEXUS_HOME's, taken before each configuration points NEXUS_HOME at its own folder: the one
+// write to the real NEXUS_HOME a script makes on purpose (the Stats view reads it), the named exception to the guard
+// (scripts/temp-home.ts; scripts/test/temp-home.test.ts lists it). Every other write goes to a configuration's home.
 const target = o.out ? resolve(o.out) : serverSpeedFile();
 delete process.env.NEXUS_DIR;
 delete process.env.NEXUS_SESSION;
@@ -83,6 +86,7 @@ type State = { queues: { id: string; steps: { id: string; status: string; sessio
 async function measure(scale: number, tests: boolean): Promise<ServerSpeedConfig> {
   const home = mkdtempSync(join(tmpdir(), "nexus-speed-"));
   process.env.NEXUS_HOME = home;
+  requireTempHome();
   const root = join(home, "synthetic");
   const t0 = performance.now();
   generateNexus(root, { scale, seed: SEED });

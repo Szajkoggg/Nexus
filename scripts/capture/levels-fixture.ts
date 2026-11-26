@@ -4,6 +4,9 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectStore, approveQueue, awayUntil, newId, readAway, setStepLevel, turnAway, writeAway, writeRegistry, type Event, type SessionFile } from "@nexus/protocol";
+import { requireTempHome } from "../temp-home.ts";
+
+requireTempHome();
 
 export function seedLevels(dir: string, o: { away?: boolean } = {}): string {
   const root = join(dir, "demo");

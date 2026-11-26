@@ -2,9 +2,10 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectStore, approveQueue, updateSettings, writeRegistry } from "@nexus/protocol";
-import { assertTempHome } from "../../apps/server/test/helpers.ts";
+import { requireTempHome } from "../temp-home.ts";
 
-assertTempHome(process.env.NEXUS_HOME);
+requireTempHome();
+
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-run-controls.ts <data dir>");
 const projects = ["desktop", "phone"].map((id) => {

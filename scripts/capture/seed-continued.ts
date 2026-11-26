@@ -6,6 +6,9 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectStore, approveQueue, newId, writeRegistry, type Event, type SessionFile, type StatusChange, type StepDef } from "@nexus/protocol";
+import { requireTempHome } from "../temp-home.ts";
+
+requireTempHome();
 
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-continued.ts <data dir>");

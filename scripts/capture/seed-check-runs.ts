@@ -11,9 +11,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectStore, approveQueue, now, updateSettings, writeRegistry, type ProjectFile } from "@nexus/protocol";
-import { assertTempHome } from "../../apps/server/test/helpers.ts";
+import { requireTempHome } from "../temp-home.ts";
 
-assertTempHome(process.env.NEXUS_HOME);
+requireTempHome();
+
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-check-runs.ts <data dir>");
 const fix = !!process.env.FAKE_CHECK_FIX_MS;

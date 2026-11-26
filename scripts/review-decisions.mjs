@@ -12,11 +12,12 @@ import { spawn } from 'node:child_process';
 import { ProjectStore, approveQueue, loadProjectState, newId, updateSettings, writeAway, writeRegistry } from '../packages/protocol/src/index.ts';
 import { EdgeBrowser } from './capture/edge.ts';
 import { freePort, startInstance } from './capture/run.ts';
+import { requireTempHome } from './temp-home.ts';
 
 const root = resolve(import.meta.dirname, '..');
 const out = resolve(process.argv[2] ?? mkdtempSync(join(tmpdir(), 'nexus-review-decisions-')));
 const temp = join(out, 'run-' + Date.now()), home = join(temp, 'home');
-mkdirSync(home, { recursive: true }); process.env.NEXUS_HOME = home;
+mkdirSync(home, { recursive: true }); process.env.NEXUS_HOME = home; requireTempHome();
 const ago = min => new Date(Date.now() - min * 60_000).toISOString();
 const LONG_Q = 'Should the waiting list on a narrow phone keep every queue group expanded so that nothing is hidden behind a tap, even when that makes the list several screens long?';
 const LONG_O = 'Keep every group expanded on the phone, with the queue name and the number of waiting items above each group';

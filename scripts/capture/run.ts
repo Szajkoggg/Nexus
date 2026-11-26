@@ -4,6 +4,7 @@ import { errorText } from "@nexus/protocol/errors";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import { join } from "node:path";
+import { assertTempHome } from "../temp-home.ts";
 import { instanceEnv, shotFile, type Action, type Shot, type View } from "./views.ts";
 
 /** What the capture needs of a browser. Each returns false (or throws) when it could not do it. */
@@ -89,10 +90,11 @@ export interface Instance { url: string; port: number; pid: number; stop(): Prom
 
 /**
  * Starts the server of the checkout at `root` (its apps/server/src/main.ts) as a development instance: its own
- * NEXUS_HOME and port, the checkout's fake runtimes, and none of NEXUS_DIR, NEXUS_HANDOVER, NEXUS_SESSION. Resolves
- * once it answers, or rejects with its output.
+ * NEXUS_HOME (a temporary one: refused otherwise, scripts/temp-home.ts) and port, the checkout's fake runtimes, and none
+ * of NEXUS_DIR, NEXUS_HANDOVER, NEXUS_SESSION. Resolves once it answers, or rejects with its output.
  */
 export async function startInstance(o: { root: string; home: string; port: number; parentEnv?: NodeJS.ProcessEnv; waitMs?: number }): Promise<Instance> {
+  assertTempHome(o.home, o.parentEnv ?? process.env);
   const fakes = { claude: join(o.root, "apps/server/test/fake-claude.ts"), codex: join(o.root, "apps/server/test/fake-codex.ts") };
   const env = instanceEnv(o.parentEnv ?? process.env, { home: o.home, port: o.port, fakes });
   const child: ChildProcess = spawn(process.execPath, [join(o.root, "apps/server/src/main.ts")], { cwd: o.root, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });

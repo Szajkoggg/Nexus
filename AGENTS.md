@@ -86,7 +86,11 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
 - **Screenshots** of the dashboard: `node scripts/capture.ts <views.yaml>` takes the listed views, the afters and
   (from the step's base commit) the befores, each on its own development instance with the fake runtimes; headless
   Edge by hand only for a view it cannot take. Widths: 492 px (the narrowest window), 390 px in an iframe for a
-  phone, 1440 px for a desktop. Register them as `nexus help review` says (keys and roles).
+  phone, 1440 px for a desktop. Register them as `nexus help review` says (keys and roles). Seed and fixture scripts
+  (`scripts/capture/seed-*.ts`) write NEXUS_HOME's files: run one by hand only with NEXUS_HOME set to a new folder in
+  the system's temporary folder, and let `node scripts/capture.ts` take the pictures. Without it they refuse
+  (`scripts/temp-home.ts`); a new script that writes NEXUS_HOME calls `requireTempHome()` first
+  (`scripts/test/temp-home.test.ts` checks it).
 - **Layout faults** (lines through boxes, overlapping boxes, text cut short) are checked on designs and pictures, not
   left to be found in use: `node scripts/layout-faults.ts <mockup file | dev instance URL>` (README.md).
 

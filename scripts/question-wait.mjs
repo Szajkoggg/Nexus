@@ -8,10 +8,11 @@ import { execFileSync, spawn } from 'node:child_process';
 import { ProjectStore, approveQueue, loadProjectState, updateSettings, writeRegistry } from '../packages/protocol/src/index.ts';
 import { EdgeBrowser } from './capture/edge.ts';
 import { freePort, startInstance } from './capture/run.ts';
+import { requireTempHome } from './temp-home.ts';
 
 const root = resolve(import.meta.dirname, '..'), out = resolve(process.argv[2] ?? mkdtempSync(join(tmpdir(), 'nexus-question-wait-')));
 const temp = join(out, 'run-' + Date.now()), home = join(temp, 'home'), log = join(temp, 'fake.log');
-mkdirSync(home, { recursive: true }); process.env.NEXUS_HOME = home;
+mkdirSync(home, { recursive: true }); process.env.NEXUS_HOME = home; requireTempHome();
 const fixtures = [1440, 492, 390].map(width => {
   const id = 'wait-' + width, data = join(temp, id); mkdirSync(data, { recursive: true });
   const store = ProjectStore.init(data, { id, name: 'Questions', root: data });

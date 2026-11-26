@@ -5,6 +5,9 @@ import { join } from "node:path";
 import { ProjectStore, loadProjectState, newId, revisionHash, type QueueFile, type Event } from "@nexus/protocol";
 import { ideaLinks, ideaStatuses } from "../../packages/protocol/src/ideas-read.ts";
 import { changeIdeaStatus, reconcileIdeaStatuses } from "../../packages/protocol/src/idea-status-actions.ts";
+import { requireTempHome } from "../temp-home.ts";
+
+requireTempHome();
 
 const root = join(process.argv[2]!, "demo"), store = new ProjectStore(join(root, ".nexus"));
 const ref = (name: string) => `docs/ideas/${name}.md#2026-11-15`;

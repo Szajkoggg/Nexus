@@ -22,6 +22,7 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
+import { requireTempHome } from "./temp-home.ts";
 
 const { values: o } = parseArgs({ options: {
   minutes: { type: "string", default: "3" }, port: { type: "string", default: "4319" }, dashboards: { type: "string", default: "2" },
@@ -35,6 +36,7 @@ if (PORT === 4317 || PORT < 4318) throw new Error("port 4317 is the live instanc
 const home = mkdtempSync(join(tmpdir(), "nexus-perf-"));
 // Set before the protocol is loaded: the registry and the global settings are written into this home only.
 process.env.NEXUS_HOME = home;
+requireTempHome();
 delete process.env.NEXUS_DIR;
 delete process.env.NEXUS_SESSION;
 const { ProjectStore, approveQueue, newId, updateSettings, writeRegistry } = await import("@nexus/protocol");

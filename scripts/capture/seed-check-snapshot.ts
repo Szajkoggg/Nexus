@@ -8,9 +8,10 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectStore, approveQueue, newId, writeRegistry, type ChecksFile, type Event, type SessionFile } from "@nexus/protocol";
-import { assertTempHome } from "../../apps/server/test/helpers.ts";
+import { requireTempHome } from "../temp-home.ts";
 
-assertTempHome(process.env.NEXUS_HOME);
+requireTempHome();
+
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-check-snapshot.ts <data dir>");
 const root = join(dir, "demo");

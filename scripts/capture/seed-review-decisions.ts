@@ -9,6 +9,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
 import { ProjectStore, answerDecision, approveQueue, newId, writeRegistry, type Event, type SessionFile } from "@nexus/protocol";
+import { requireTempHome } from "../temp-home.ts";
+
+requireTempHome();
 
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-review-decisions.ts <data dir>");

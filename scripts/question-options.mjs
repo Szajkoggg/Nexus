@@ -8,10 +8,11 @@ import { spawn } from 'node:child_process';
 import { ProjectStore, newId, writeRegistry, loadProjectState, approveQueue } from '../packages/protocol/src/index.ts';
 import { EdgeBrowser } from './capture/edge.ts';
 import { freePort, startInstance } from './capture/run.ts';
+import { requireTempHome } from './temp-home.ts';
 const root = resolve(import.meta.dirname, '..');
 const out = resolve(process.argv[2] ?? mkdtempSync(join(tmpdir(), 'nexus-question-options-')));
 const temp = join(out, 'run-' + Date.now()), home = join(temp, 'home');
-mkdirSync(home, {recursive:true}); process.env.NEXUS_HOME = home;
+mkdirSync(home, {recursive:true}); process.env.NEXUS_HOME = home; requireTempHome();
 const long = 'Keep the compact list with the complete description visible on every screen';
 const fixtures = [1440, 492, 390, 'other'].map(width => {
   const id = 'options-' + width, data = join(temp, id);

@@ -2,6 +2,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ProjectStore, writeRegistry } from "@nexus/protocol";
+import { requireTempHome } from "../temp-home.ts";
+
+requireTempHome();
 
 const root = join(process.argv[2]!, "demo");
 mkdirSync(join(root, "docs/ideas"), { recursive: true });

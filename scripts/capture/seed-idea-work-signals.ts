@@ -8,6 +8,9 @@ import { ProjectStore, loadProjectState, newId, revisionHash, type Event, type Q
 import { ideaStatuses } from "../../packages/protocol/src/ideas-read.ts";
 import { changeIdeaStatus } from "../../packages/protocol/src/idea-status-actions.ts";
 import { takeInLinkProposals } from "../../packages/protocol/src/idea-proposals.ts";
+import { requireTempHome } from "../temp-home.ts";
+
+requireTempHome();
 
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-idea-work-signals.ts <data dir>");

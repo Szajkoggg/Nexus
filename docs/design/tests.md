@@ -353,3 +353,28 @@ other, with a TEMP of its own (so what a run leaves can be counted):
   run) are still left: a later queue's.
 - The full run: 822 s before, 666 s after (-19%); the tests' summed time 8143 s to 6407 s; tests over 5 s 502 to
   449, over 10 s 335 to 262; the same 1622 tests, all passing.
+
+## Scripts and tests off the real NEXUS_HOME (queue NHG)
+
+On 2026-11-26 a worker ran a capture seed (`scripts/capture/seed-idea-work-signals.ts`) by hand without NEXUS_HOME. Through
+its imports (seed-ideas-corrections.ts, seed-ideas.ts) it called `writeRegistry()`, which without NEXUS_HOME writes the
+real `%APPDATA%\Nexus\projects.yaml`: the live server saw only the seed's "demo" project, and its runs stopped. The
+user put the file back; no data was lost.
+
+- **One rule** (`scripts/temp-home.ts`): a script's or a test's NEXUS_HOME is set explicitly, lies inside
+  `os.tmpdir()`, and is not the folder `nexusHome()` gives without it (`join(APPDATA ?? homedir()/.config, "Nexus")`),
+  so a real home simulated under a temporary APPDATA is refused too. `requireTempHome()` ends a script with exit code
+  2 and what to do, before it writes; `assertTempHome()` throws (the tests' servers: apps/server/test/helpers.ts
+  re-exports it; scripts/capture/run.ts `startInstance` checks the instance's home with it).
+- **Who calls it**: every script under scripts/ that writes NEXUS_HOME's files: a call of the protocol's writers
+  (`writeRegistry`, `writeAway`, `appendTurn`, the global settings, capacity, usage, `appendServerSpeed`), a path built
+  with `nexusHome()`, or a relative import of such a script. An imported module's body runs before the importer's, so
+  the guard in an entry script would come after its imports had written: each writing module guards itself, and the
+  importer calls it as well. A script that sets NEXUS_HOME itself (question-*.mjs, review-decisions.mjs,
+  perf-load.ts, server-speed.ts per configuration) calls it after the setting. `scripts/test/temp-home.test.ts` checks
+  this over the scripts' texts (scripts/temp-home-rule.ts), and runs a seed without, with a simulated real and with a
+  temporary NEXUS_HOME, always with a temporary APPDATA and LOCALAPPDATA.
+- **The one exception**: scripts/server-speed.ts appends its result to the real
+  `<NEXUS_HOME>/benchmarks/server-speed.jsonl` on purpose (the Stats view reads it); the rule's list names the call
+  and why. `npm run dev` (scripts/dev.ts) keeps its own `%APPDATA%\Nexus-dev` and no guard: it is the user's tool, as
+  are the server and the CLI, which keep using the real NEXUS_HOME.

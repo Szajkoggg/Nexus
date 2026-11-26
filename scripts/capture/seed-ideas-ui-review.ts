@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { ProjectStore, loadProjectState } from "@nexus/protocol";
 import { ideaLinks } from "../../packages/protocol/src/ideas-read.ts";
 import { changeIdeaLinks } from "../../packages/protocol/src/idea-link-actions.ts";
+import { requireTempHome } from "../temp-home.ts";
+
+requireTempHome();
 
 const store = new ProjectStore(join(process.argv[2]!, "demo/.nexus"));
 for (const queue of ["IO", "ST2"]) {

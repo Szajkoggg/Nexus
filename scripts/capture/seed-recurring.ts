@@ -10,6 +10,9 @@ import {
   ProjectStore, approveQueue, ensureUserSession, newId, readTemplates, resolveRecurring, revisionHash, writeRegistry,
   type Event, type RecurringFile, type SessionFile,
 } from "@nexus/protocol";
+import { requireTempHome } from "../temp-home.ts";
+
+requireTempHome();
 
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-recurring.ts <data dir>");
