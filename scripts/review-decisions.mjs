@@ -163,6 +163,7 @@ const open = async (f, width, path = '/Q/Q1') => {
   await browser.open(inst.url + '/#/' + f.id + path, width, width >= 1024 ? 900 : 844, preload);
   // The decisions as the files hold them now: a review's count (or its missing list), or the return batch.
   await until('the page of ' + f.id, () => js(`!!document.querySelector('[data-decisions-count], [data-decisions=missing], [data-batch-step]')`));
+  await sleep(600); // the live state after the first answer
 };
 const card = id => `[data-decision='${id}']`;
 /** Clicks the last element matching `sel` (the viewer's sheet before the panel under it), focused first as a click does. */
@@ -327,6 +328,7 @@ try {
     await until('the version refusal shows', async () => (await ui()).alerts.some(a => /changed since you read it/.test(a)));
     assert.equal(answers(f, 'D1').length, 1, 'nothing saved for the old version');
     await js(`document.documentElement.dataset.freeze='false'`); await open(f, 390);
+    await until('D1 at its new version', async () => /You answered an earlier version/.test((await ui()).text));
     u = await ui();
     assert.equal(u.chosen.some(c => c.startsWith('D1')), false, 'the old version\'s choice is not carried over');
     assert.match(u.text, /You answered an earlier version \(A: one list, oldest first\); the question changed/);
@@ -335,6 +337,7 @@ try {
     await geometry('long-decision@390');
     await choose('D3', 2); await save('D3');
     await until('D3 saved', () => answers(f, 'D3').length === 1);
+    await until('the page shows D3 asking a change', async () => (await ui()).holdKind === 'fix');
     u = await ui();
     assert.equal(u.holdKind, 'fix'); assert.match(u.hold, /Your answer to D3 asks for a change: Fix it sends your answers to the worker/);
     assert.equal(u.accept.disabled, true);
@@ -383,12 +386,13 @@ try {
     await browser.click('Fix it'); await until('confirm', () => js(`document.body.innerText.includes('Send it back')`)); await browser.click('Send it back');
     await until('round 2 in review', () => f.step().status === 'review' && f.step().timeline.filter(e => e.type === 'step.done').length === 2, 400);
     await open(f, 1440);
+    await until('a new round opens every decision again', async () => (await ui()).count === '0 of 3 answered');
     let u = await ui();
-    assert.equal(u.count, '0 of 3 answered', 'a new round opens every decision again');
     assert.deepEqual(u.chosen, [], 'no choice of round 1 is carried over');
     assert.match(u.text, /Round 1: you chose B: grouped by queue/);
     await browser.click('Same as round 1: B: grouped by queue');
     await until('saved again', () => answers(f, 'D1').some(a => a.round === 2));
+    await until('the page shows D1 saved again', async () => (await ui()).count === '1 of 3 answered');
     u = await ui();
     assert.equal(u.count, '1 of 3 answered');
     await record('send-back-round-history-and-same-as-round-1', f);
@@ -402,11 +406,13 @@ try {
     let u = await ui(); assert.match(u.text, /The orchestrator's proposal; it counts once it is your answer/);
     await choose('D2', 2); await save('D2'); await until('D2', () => answers(f, 'D2').length === 1);
     await choose('D3', 2); await save('D3'); await until('D3', () => answers(f, 'D3').length === 1);
+    await until('the page shows D2 and D3 saved', async () => (await ui()).holdKind === 'proposal');
     u = await ui();
     assert.equal(u.holdKind, 'proposal'); assert.match(u.hold, /D1: the orchestrator's answer is a proposal/); assert.equal(u.accept.disabled, true);
     await browser.click('Use this answer');
     await until('adopted', () => answers(f, 'D1').at(-1).by === 'user');
     assert.equal(answers(f, 'D1').at(-1).choice, 'B: grouped by queue');
+    await until('the page shows D1 adopted', async () => (await ui()).accept?.disabled === false);
     u = await ui(); assert.equal(u.accept.disabled, false);
     await clickLast('[data-action=accept]');
     await until('accepted', () => f.step().status === 'done');

@@ -429,17 +429,20 @@ export function Menu({ items, down = false, label = t("ui.moreActions"), trigger
  * everything else under ⋯, a short hint on the left. `children` is the open form of an action (a note, Fix it, a
  * reason), shown above the buttons it belongs to.
  */
-export function ActionBar({ left, hint, menu, secondary, primary, children }: {
+export function ActionBar({ left, hint, hintRow, menu, secondary, primary, children }: {
   /** Controls at the bar's start (the viewer's: the picture's mark and comment), before the hint. */
   left?: ReactNode;
   hint?: ReactNode; menu?: MenuEntry[]; secondary?: ReactNode; primary?: ReactNode; children?: ReactNode;
+  /** The hint on a line of its own above the buttons (a reason Accept waits: the buttons keep one line). */
+  hintRow?: boolean;
 }) {
   return (
     <div className="shrink-0 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]">
       {children && <div className="scroll-thin max-h-[45vh] overflow-y-auto border-b border-line px-4 py-3 sm:px-5">{children}</div>}
       <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3 sm:px-5">
         {left}
-        {hint ? <span className="min-w-[8rem] flex-1 text-xs text-fg-3">{hint}</span> : <span className="mr-auto" />}
+        {hint && hintRow ? <span className="basis-full text-right text-xs text-fg-3">{hint}</span>
+          : hint ? <span className="min-w-[8rem] flex-1 text-xs text-fg-3">{hint}</span> : <span className="mr-auto" />}
         {menu && <Menu items={menu} />}
         {secondary}
         {primary}

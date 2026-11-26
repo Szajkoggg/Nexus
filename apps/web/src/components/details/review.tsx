@@ -116,7 +116,7 @@ function useReviewDecision({ project, queue: q, step: s, next, criteria }: Revie
 export function ReviewBar(props: ReviewArgs) {
   const d = useReviewDecision(props, t("details.review.acceptGoOn"));
   return (
-    <ActionBar hint={d.error ? <span role="alert" className="text-danger">{d.error}</span> : d.hint()} menu={d.menu} secondary={d.secondary} primary={d.primary}>
+    <ActionBar hint={d.error ? <span role="alert" className="text-danger">{d.error}</span> : d.hint()} hintRow={!!d.decisions.cards.length || !!d.error} menu={d.menu} secondary={d.secondary} primary={d.primary}>
       {d.forms}
     </ActionBar>
   );
@@ -173,6 +173,7 @@ export function PictureActions({ project, queue, step, path, src, material }: {
           )}
         </div>
       }
+      hintRow={reviewing && cards.length > 0}
       hint={fail ? <span role="alert" className="text-danger">{fail}</span> : reviewing && decision.hint(true) ? <span className="block text-right">{decision.hint(true)}</span> : reviewing && !phone ? <span className="block text-right">{t("details.picture.theStep")}</span> : undefined}
       menu={reviewing ? [...decision.menu, original] : [original]}
       secondary={reviewing ? <>
