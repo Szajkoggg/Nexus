@@ -57,6 +57,12 @@ So rolling back means four things:
 - Build new engines on the files. Their recovery resumes the held queues (`resume_after_restart`) exactly as a
   successor's would. The old engines were shut down for good by the release.
 
+The projects' side of both is `ProjectRegistry` (`src/project-registry.ts`, queue LCF): `release` stops their
+watchers, the planner's and the capacity's writes and every agent; `dropAll` takes each released project out as a
+removed one is (its model closed, its engine out of the coordinator); `refresh` loads them anew. The port stays
+`main.ts`'s. `test/project-registry.test.ts` runs that start over on two projects: every old model is closed once,
+the coordinator holds only the new engines, and a write after it reaches one model per project.
+
 The update then ends in phase `failed`. The error is the reason followed by "rolled back to <commit>" (in a
 development checkout: "this server goes on"). The log keeps every line, and a push notification goes to the user's
 devices. A failure before the hand-over (a checkout, install or build that fails) also puts a live worktree back.

@@ -11,30 +11,24 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, queueView, refuseUnreadable, addNote, closingToSkip, closingToSkipAtApproval, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
-  ensureGlobalSettings, readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readRegistry, readCapacity, readUsage, readTurns, readServerSpeed, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
+  readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readCapacity, readUsage, readTurns, readServerSpeed, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, reviewStats, type ReviewStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
-  SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, queueWorkedOn, stepsWorkedOn, ProjectModel, FileCache, useHomeReader, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
+  SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, queueWorkedOn, stepsWorkedOn, FileCache, useHomeReader, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
   projectIdeas, ideaMatches, ideaLinks, changeIdeaLinks, decideIdeaMatches, ideaStatuses, changeIdeaStatus, reconcileIdeaStatuses, readNotes, type IdeasResponse, type IdeaMatchesResponse,
   previewIdeaHandoff, sendIdeaHandoff, retryIdeaHandoff, shownState,
 } from "@nexus/protocol";
 import { digestInput, newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
-import { Engine } from "./engine.ts";
 import { Coordinator } from "./coordinator.ts";
-import { Capacity } from "./capacity.ts";
-import { readSnapshots } from "./snapshots.ts";
 import { agentOwning, lowerOwnedProcesses } from "./worker-process.ts";
 import { branchState, leftBehind, stepCommits } from "./gitinfo.ts";
 import { mergeBack, userCleanUp } from "./mergeback.ts";
-import { Merger } from "./merger.ts";
 import { fixProjectRules, projectRules } from "./rulesfix.ts";
 import { RemovalBlocked, checkRemoval, deleteNexusDir, removalView, stopProject, unregister } from "./removal.ts";
 import { decideStoppedWork, discardRecorded, readStoppedWork } from "./stopwork.ts";
-import { Orchestrator } from "./orchestrator.ts";
-import { Conversations } from "./conversations.ts";
 import { listModels } from "./models.ts";
-import { readDeployChanges, readDeploySettings, writeDeploySettings } from "./deploy.ts";
-import { crashNotice, dismissCrash, readCrash, recordCrash } from "./crash.ts";
+import { readDeploySettings, writeDeploySettings } from "./deploy.ts";
+import { crashNotice, dismissCrash, recordCrash } from "./crash.ts";
 import { Standby, refuseHandoverDir, smokeCheck, takeHandoverEnv } from "./handover.ts";
 import { Lifecycle, ROOT, projectPart, version } from "./lifecycle.ts";
 import { DeployPlanner, PlanError, planTime } from "./deploy-plan.ts";
@@ -45,7 +39,8 @@ import { LiveStream, type LiveSources } from "./live.ts";
 import { SEQ_HEADER, type LogKind } from "@nexus/protocol/live";
 import { searchProject } from "./search.ts";
 import { perf } from "./perf.ts";
-import { watchHome, watchProject as watchProjectFiles, type ProjectWatch } from "./watchers.ts";
+import { watchHome, type ProjectWatch } from "./watchers.ts";
+import { ProjectRegistry, type Entry } from "./project-registry.ts";
 import { dashboardFiles, isPublicFile } from "./web-static.ts";
 import {
   AttentionWatch, allowed, auth, authCookie, isLocal, loginPage, push, pushDevices, pushKey, qrSvg, rotateToken,
@@ -111,78 +106,16 @@ let standingBy = !!HANDOVER;
 
 // ---------------------------------------------------------------- projects
 
-/**
- * A project loaded in this server. `model`: its files kept in memory (docs/design/model.md). `store` is the model's:
- * every reader in this server (the requests, the user's actions, the engine, the orchestrator, the merger and the rest)
- * reads through it, and the state it derives (loadProjectState over it) is the model's, once per change.
- */
-interface Entry { id: string; root: string; store: ProjectStore; model: ProjectModel; engine: Engine; orchestrator: Orchestrator; conversations: Conversations; merger: Merger; error?: string }
 const projects = new Map<string, Entry>();
 /** Over every project's engine: one queue per checkout, and the limit on queues running at once (src/coordinator.ts). */
 const coordinator = new Coordinator();
 // The workers' and checks' processes run below normal priority: the server and the user's programs go first (queue SV3).
 lowerOwnedProcesses(true);
-/**
- * One heavy operation on the workstation at a time, across projects (src/capacity.ts). Made when this server becomes
- * active, which writes <NEXUS_HOME>/capacity.yaml anew: the grants of a server before it ended with its processes.
- */
-let capacity: Capacity | undefined;
 
+/** Loads the registry's projects (src/project-registry.ts), only once this server is active. */
 function refreshRegistry(): void {
   if (!active) return;
-  capacity ??= new Capacity({ onChange: () => broadcast({ type: "server" }) });
-  // Global settings (docs/protocol/settings.md, "Global settings"): the file exists from the first start on, with the built-in defaults; each project's
-  // project.yaml from before them is migrated once, before anything reads it (effective values unchanged).
-  ensureGlobalSettings();
-  const reg = readRegistry();
-  for (const p of reg.projects) {
-    if (projects.has(p.id)) continue;
-    const files = ProjectStore.forRoot(p.root);
-    try { if (files.migrateProject()) console.log(`settings of project ${p.id}: migrated to follow the global settings where equal`); }
-    catch (err) { console.error(`settings of project ${p.id}: not migrated: ${errorText(err)}`); }
-    // Steps done before review levels keep the meaning they had (docs/protocol/review.md, "Before review levels").
-    try { if (files.markReviewLevels()) console.log(`project ${p.id}: steps done from now on are reviewed by level`); }
-    catch (err) { console.error(`project ${p.id}: review levels not marked: ${errorText(err)}`); }
-    // A deploy planned after a step or queue of this project holds the run at that step's end (src/deploy-plan.ts); so
-    // does Nexus merging a worktree queue back into the run's checkout (src/merger.ts), until its fast-forward.
-    let merger: Merger | undefined;
-    // The project's files read once, here, and kept (docs/design/model.md): the engine's recovery reads its state, and
-    // everything after reads through its store.
-    const model = new ProjectModel(files.dir);
-    const store = model.store;
-    // Measured: making the engine recovers the project's runs after a restart (queue SV1 found it reading the whole
-    // state once per queue).
-    const engine = perf.measure(`engine start ${p.id}`, () => new Engine(store, () => changed(p.id), { coordinator, capacity, snapshots: readSnapshots, boundary: (q, step, state) => planner.atBoundary(p.id, q, step, state) || (merger?.atBoundary(q, step, state) ?? false) }));
-    merger = new Merger(store, { start: (q) => void engine.start(q), release: (q, why) => engine.releaseHold(q, why), busy: () => engine.draining || lifecycle.busy, poke: () => changed(p.id), processesLeft: (q) => engine.queueProcessesLeft(q) });
-    // Through its usual notices it is told the outcome of an update it asked for (lifecycle.notice), and what changed
-    // for agents in each deploy since its session began (deploy-changes.jsonl).
-    // Its routine reviews go to short-lived review helpers (src/review-helper.ts) while review_helper.enabled is on.
-    const orchestrator = new Orchestrator(store, engine, () => changed(p.id), { update: () => lifecycle.notice(), plan: () => planner.notices(), changes: readDeployChanges, crash: readCrash, push: ({ kind, ...n }) => void push(n, { kind }) }, { helpers: {} });
-    projects.set(p.id, { id: p.id, root: p.root, store, model, engine, orchestrator, merger, conversations: new Conversations(store, orchestrator, () => changed(p.id)) });
-    watchProject(p.id, store.dir);
-  }
-  // A project taken off the registry (by the server's removal, or by hand): its agents and timers stop, its watcher
-  // closes, and the coordinator no longer counts it.
-  for (const [id, e] of projects) if (!reg.projects.some((p) => p.id === id)) void stopProject(dropProject(e).parts);
-}
-
-/**
- * Takes a project out of this server: out of the map and the coordinator, its watcher closed, its pending change
- * dropped, its push baseline forgotten. Returns its parts that run agents or timers (for stopProject), and the closing
- * of its watcher (on Windows an open watcher may hold the folder).
- */
-function dropProject(e: Entry): { parts: Parameters<typeof stopProject>[0]; closed: Promise<void> } {
-  projects.delete(e.id);
-  coordinator.remove(e.engine);
-  clearTimeout(pending.get(e.id));
-  pending.delete(e.id);
-  const w = watchers.get(e.id);
-  watchers.delete(e.id);
-  watchedNotes.delete(e.id);
-  watch.forget(e.id);
-  e.model.close();
-  live.forget(e.id);
-  return { parts: [e.engine, e.orchestrator, e.conversations, e.merger], closed: (w?.close() ?? Promise.resolve()).catch((err: Error) => console.error(`watch ${e.id}: not closed: ${err.message}`)) };
+  registry.refresh();
 }
 
 /**
@@ -326,9 +259,6 @@ function logChanged(id: string, path: string): void {
   if (logPending.has(key)) return;
   logPending.set(key, setTimeout(() => { logPending.delete(key); publish(id); }, 150));
 }
-function watchProject(id: string, dir: string): void {
-  watchers.set(id, watchProjectFiles(id, dir, { model: () => projects.get(id)?.model, changed: () => changed(id), log: (path) => logChanged(id, path) }));
-}
 
 // NEXUS_HOME's files that every project's state, the statistics and the estimates read, kept in memory (model.ts):
 // this server's writes reach the model as they are made, a change by hand through this watcher.
@@ -385,6 +315,11 @@ const planner = new DeployPlanner({
   },
 });
 const watch = new AttentionWatch();
+// The loaded projects: made, dropped, released for an update and dropped before a failed one's start over (queue LCF).
+const registry = new ProjectRegistry({
+  projects, coordinator, pending, watchers, watchedNotes, live, watch, planner, lifecycle, changed, logChanged, push,
+  capacityChanged: () => broadcast({ type: "server" }),
+});
 
 // Every request is timed by its route, its synchronous part measured as a span (src/perf.ts).
 app.use("*", perf.middleware);
@@ -780,7 +715,7 @@ app.post("/api/projects/:id/remove", async (c) => {
     const { deleteData } = checkRemoval(e.id, e.root, view, body);
     // Off the registry and out of this server in one go: no request in between may load it again.
     unregister(e.id, e.root);
-    const dropped = dropProject(e);
+    const dropped = registry.drop(e);
     const [stopped] = await Promise.all([stopProject(dropped.parts), dropped.closed]);
     broadcast({ type: "projects" });
     console.log(`project ${e.id} removed from Nexus${deleteData ? "; deleting its .nexus folder" : ""}`);
@@ -1225,19 +1160,7 @@ async function takeOver(standby: Standby): Promise<void> {
 /** The predecessor's side of an update: stop every agent and every write, and free the port. It stays alive. */
 async function release(): Promise<void> {
   active = false;
-  for (const t of pending.values()) clearTimeout(t);
-  pending.clear();
-  const closing = [...watchers.values()].map((w) => w.close());
-  watchers.clear();
-  await Promise.all(closing);
-  planner.shutdown(); // its timers write the plan file: no longer this server's
-  capacity?.shutdown(); // so does the coordinator: the successor writes capacity.yaml anew
-  capacity = undefined;
-  // Chat turns still running are cut off first and recorded: the successor goes on with them (src/lifecycle.ts).
-  for (const e of projects.values()) projectPart(e).shutdown();
-  // An agent's exit is written to its runtime file: wait for those last writes.
-  const alive = () => [...projects.values()].some((e) => e.engine.alive() || e.orchestrator.alive() || e.conversations.alive());
-  for (const until = Date.now() + 10_000; alive() && Date.now() < until;) await new Promise((r) => setTimeout(r, 100));
+  await registry.release();
   for (const s of sockets) s.terminate();
   const http = server as Server;
   await new Promise<void>((r) => { http.close(() => r()); http.closeAllConnections(); });
@@ -1249,10 +1172,8 @@ async function release(): Promise<void> {
  * port cannot be had; the error says so.
  */
 async function reacquire(): Promise<void> {
-  // Their engines are shut down for good (release); each is dropped as a removed project is: its model stops hearing
-  // of this process's writes, the coordinator forgets its engine (queue LH: they were only cleared, two write listeners
-  // per project left behind, and every write after the next activate touched the old models too).
-  for (const e of [...projects.values()]) dropProject(e);
+  // Their engines are shut down for good (release): each is dropped as a removed project is (ProjectRegistry.dropAll).
+  registry.dropAll();
   const http = server as Server;
   reacquiring = true;
   try {
@@ -1301,7 +1222,7 @@ server.on("error", (err: NodeJS.ErrnoException) => {
   process.exit(1);
 });
 
-const shutdown = () => { capacity?.shutdown(); for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); e.merger.shutdown(); } process.exit(0); };
+const shutdown = () => { registry.capacity?.shutdown(); for (const e of projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); e.merger.shutdown(); } process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
