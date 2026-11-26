@@ -236,6 +236,63 @@ test("a message read in the turn it was sent into is not quoted by the next one:
   }
 });
 
+/** A conversation's process with the hand-over's hooks seen: queuedStart (the held turn given to it) and turn ends. */
+function heldSetup() {
+  const x = setup(ROLE_RECORDS.conversation);
+  const seen: string[] = [];
+  const l = x.host.start(x.s, (resume) => ({ runtime: "claude", options: { cwd: x.store.dir, uuid: "uuid-1", resume, permissionMode: "dontAsk", allowedTools: [], env: {} } }), {}, () => ({
+    turnEnd: () => seen.push("turnEnd"), queuedStart: () => seen.push("queuedStart"), exit: () => seen.push("exit"),
+  }));
+  return { ...x, l, seen };
+}
+
+test("a turn sent to follow (afterTurn) is held while the process settles, and starts after the late turn of the runtime's own; a held restart after it (queue LCF, LCF7)", () => {
+  const { host, s, l, proc, seen } = heldSetup();
+  host.send(l, "first");
+  host.send(l, "sent into it");
+  host.send(l, "the hand-over's instruction", { afterTurn: true });
+  host.restartAfterTurn(s.id);
+  assert.deepEqual(proc().calls, ["send", "send"], "held, not written to the runtime during the turn");
+  proc().settling = true;
+  proc().turn();
+  assert.deepEqual(proc().calls, ["send", "send"], "nor while it settles: the next turn may be the runtime's own");
+  assert.equal(host.idle(), false);
+  // The late turn: the runtime's own, for the message sent into the last one.
+  proc().settling = false;
+  proc().state = "working";
+  proc().emit("activity", { kind: "turn_start", text: "turn started" });
+  assert.deepEqual(seen, ["turnEnd"], "the late turn is not the held one");
+  proc().turn();
+  assert.deepEqual(seen, ["turnEnd", "turnEnd", "queuedStart"], "the held turn starts after the late turn's end");
+  assert.deepEqual(proc().calls, ["send", "send", "send"], "and is written now; the process is not ended with it");
+  proc().turn();
+  assert.deepEqual(proc().calls, ["send", "send", "send", "kill"], "the restart after it");
+});
+
+test("a held turn starts once the moment is over without a late turn (settled); a cutOff while it is held quotes it", () => {
+  {
+    const { host, l, proc, seen } = heldSetup();
+    host.send(l, "first");
+    host.send(l, "read in it");
+    host.send(l, "after it", { afterTurn: true });
+    proc().settling = true;
+    proc().turn();
+    proc().settling = false;
+    proc().emit("settled");
+    assert.deepEqual(seen, ["turnEnd", "queuedStart"]);
+    assert.deepEqual(proc().calls, ["send", "send", "send"]);
+  }
+  {
+    const { store, s, host, l, proc } = heldSetup();
+    host.send(l, "first");
+    host.send(l, "after it", { afterTurn: true, quote: ["the hand-over"] });
+    proc().settling = true;
+    proc().turn();
+    assert.deepEqual(host.cutOff(() => ({ handoff: true })), [s.id], "a held turn is cut off though the process is between turns");
+    assert.deepEqual(store.readRuntime(s.id)?.interrupted, { at: store.readRuntime(s.id)!.interrupted!.at, asked: ["the hand-over"], handoff: true });
+  }
+});
+
 test("an unreadable runtime record is set aside with a warning, and the session starts on", (t) => {
   const { store, s, start, proc } = setup(ROLE_RECORDS.conversation);
   const file = join(store.sessionDir(s.id), "runtime.json");

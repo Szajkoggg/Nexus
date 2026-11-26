@@ -51,6 +51,8 @@ export interface HostHandlers {
   compacted?(c: AgentEvents["compacted"][0]): void;
   /** The process stopped settling after a turn's end with no turn of the runtime's own (AgentProcess.settling). */
   settled?(): void;
+  /** A turn sent to follow the running one (send's afterTurn) was given to the process now: the turn it starts is that one. */
+  queuedStart?(): void;
   /** `byNexus`: the process was ended through AgentHost (retire, close, restartAfterTurn, shutdown). */
   exit?(code: number | null, byNexus: boolean): void;
   /** The queue and step a turn works on, for its record (a worker's run); asked when the turn begins. */
@@ -74,8 +76,6 @@ const tokenCounts = (t: TurnTokens | undefined): TokenCounts | undefined =>
 interface Asked {
   /** The texts sent into the running turn, or the one they started. */
   turn: string[];
-  /** Those waiting as the turn after it. */
-  next: string[];
   /** Those of `turn` sent into it while it ran. */
   into: string[];
   /**
@@ -84,7 +84,7 @@ interface Asked {
    */
   late: number;
 }
-const noAsked = (): Asked => ({ turn: [], next: [], into: [], late: 0 });
+const noAsked = (): Asked => ({ turn: [], into: [], late: 0 });
 
 /** A session's running process, with what the role keeps beside it (`E`). */
 export type Hosted<E extends object = object> = { readonly session: string; readonly proc: AgentProcess } & E;
@@ -127,6 +127,13 @@ export class AgentHost<E extends object = object> {
   private readonly afterTurn = new WeakSet<AgentProcess>();
   /** What each process's turns answer (Asked). */
   private readonly asked = new WeakMap<AgentProcess, Asked>();
+  /**
+   * Turns sent to follow the running one (send's afterTurn), held here until the process is between turns and no
+   * longer settling (queue LCF, LCF7): written to the runtime at once, such a turn could not be told from a turn the
+   * runtime runs of its own for a message sent into the last one (AgentProcess.settling), and a hand-over took that
+   * turn's reply for its summary.
+   */
+  private readonly held = new WeakMap<AgentProcess, { text: string; quote: readonly string[] }[]>();
 
   constructor(store: ProjectStore, record: RoleRecord, options: AgentHostOptions = {}) {
     this.store = store;
@@ -166,7 +173,7 @@ export class AgentHost<E extends object = object> {
    * runtime's own may still start with a message sent into the last one, which an update's drain ending the process
    * now would lose (queue LH). Settling lasts a moment (lateTurnMs).
    */
-  idle(): boolean { return !this.all().some((l) => l.proc.state === "working" || (l.proc.state === "idle" && !!l.proc.settling)); }
+  idle(): boolean { return !this.all().some((l) => l.proc.state === "working" || (l.proc.state === "idle" && !!l.proc.settling) || !!this.held.get(l.proc)?.length); }
 
   /** A process is still running (after shutdown: not yet exited). */
   alive(): boolean { return this.all().some((l) => l.proc.state !== "exited"); }
@@ -221,13 +228,24 @@ export class AgentHost<E extends object = object> {
     proc.on("compacted", (c) => on.compacted?.(c));
     // A restart held for the end of a turn (restartAfterTurn): its process ends now, the next start makes a new one.
     const endHeld = () => { this.afterTurn.delete(proc); this.ended.add(proc); proc.kill(); this.forget(l); };
+    // The first turn sent to follow the last one (held), once the process is between turns and settled: it starts now.
+    const release = () => {
+      const queue = this.held.get(proc);
+      if (!queue?.length || proc.state !== "idle" || proc.settling) return;
+      const next = queue.shift()!;
+      this.asked.set(proc, { ...noAsked(), turn: [...next.quote] });
+      on.queuedStart?.();
+      proc.send(next.text);
+    };
     proc.on("settled", () => {
-      // A restart held for the moment a turn of the runtime's own could still start (turnEnd below): none came.
-      if (this.afterTurn.has(proc) && proc.state === "idle") endHeld();
+      // A restart held for the moment a turn of the runtime's own could still start (turnEnd below): none came, nor
+      // is a turn held to follow.
+      if (this.afterTurn.has(proc) && proc.state === "idle" && !this.held.get(proc)?.length) endHeld();
       // No turn of the runtime's own came: the messages sent into the last turn were read in it.
       const a = this.asked.get(proc);
       if (a?.late) { a.turn.splice(0, a.late); a.late = 0; }
       on.settled?.();
+      release();
     });
     proc.on("facts", (f) => {
       if (f.model) model = f.model;
@@ -236,13 +254,15 @@ export class AgentHost<E extends object = object> {
     });
     proc.on("turnEnd", (end) => {
       const a = this.asked.get(proc);
-      // A turn sent to follow this one (send's afterTurn: a hand-over asked during it) starts now in this process.
-      const queued = !!a?.next.length;
+      // A turn sent to follow this one (send's afterTurn: a hand-over asked during it), held until the process is
+      // between turns and settled (release, below): then it starts in this process.
+      const queued = !!this.held.get(proc)?.length;
       // A message sent into the turn just as it ended (before Nexus read its end) was not read in it: the runtime runs
       // it as a turn of its own, which the settling waits for. That turn answers it, and a hand-over that cuts it off
-      // quotes it (cutOff); without such a turn (settled) they were read in this one, and are dropped.
+      // quotes it, then the held turn's (cutOff); without such a turn (settled) they were read in this one, and are
+      // dropped.
       const late = a && proc.settling ? a.into : [];
-      if (a) this.asked.set(proc, { ...noAsked(), turn: [...late, ...a.next], late: late.length });
+      if (a) this.asked.set(proc, { ...noAsked(), turn: [...late], late: late.length });
       begin(false);
       this.recordTurn(session, open!, model, end);
       const last = { started_at: open!.started, ended_at: now() };
@@ -254,6 +274,8 @@ export class AgentHost<E extends object = object> {
       // process: killed now, it would take that turn with it; the process ends after it (queue CM).
       if (this.afterTurn.has(proc) && !proc.settling && !queued) endHeld();
       on.turnEnd?.(end);
+      // After the role has taken the ended turn: the held turn's start is the next one's.
+      release();
     });
     proc.on("exit", (code) => {
       // A turn its process did not finish (a kill, an update's drain, a crash): recorded as interrupted.
@@ -334,10 +356,18 @@ export class AgentHost<E extends object = object> {
    */
   send(l: Hosted<E>, text: string, o: { afterTurn?: boolean; quote?: readonly string[] } = {}): void {
     const working = l.proc.state === "working";
+    // To follow a turn still running, or one that may still come of the runtime's own (settling), or one held already:
+    // held until the process is between turns and settled (held, release).
+    const queue = this.held.get(l.proc) ?? [];
+    const quote = o.quote ?? [text];
+    if (o.afterTurn && (working || !!l.proc.settling || queue.length > 0)) {
+      queue.push({ text, quote });
+      this.held.set(l.proc, queue);
+      return;
+    }
     const into = working && !o.afterTurn;
     const a = this.asked.get(l.proc) ?? noAsked();
-    const quote = o.quote ?? [text];
-    (working && o.afterTurn ? a.next : a.turn).push(...quote);
+    a.turn.push(...quote);
     if (into) a.into.push(...quote);
     this.asked.set(l.proc, a);
     l.proc.send(text, into ? "next" : undefined);
@@ -351,11 +381,15 @@ export class AgentHost<E extends object = object> {
   cutOff(extra: (l: Hosted<E>) => { handoff?: boolean; asked?: readonly string[] } = () => ({})): string[] {
     const cut: string[] = [];
     for (const l of this.live.values()) {
-      if (l.proc.state !== "working") continue;
+      const held = this.held.get(l.proc) ?? [];
+      // Between turns, a turn held to follow (send's afterTurn, while the process settles) is cut off all the same.
+      if (l.proc.state !== "working" && !held.length) continue;
       const a = this.asked.get(l.proc);
       // `asked` of the role's: what it holds back for the session's next process (a conversation's waiting input).
       const { asked: more = [], ...rest } = extra(l);
-      this.write(l.session, { interrupted: { at: now(), asked: [...(a?.turn ?? []), ...(a?.next ?? []), ...more], ...rest } });
+      const answered = l.proc.state === "working" ? a?.turn ?? [] : [];
+      this.write(l.session, { interrupted: { at: now(), asked: [...answered, ...held.flatMap((h) => h.quote), ...more], ...rest } });
+      this.held.delete(l.proc);
       l.proc.stop();
       cut.push(l.session);
     }

@@ -235,7 +235,9 @@ export function runFakeClaude(io: FakeIo): () => void {
   async function pump(): Promise<void> {
     if (busy) return;
     busy = true;
-    while (queue.length) await turn(queue.shift()!);
+    // A late turn held at its gate (FAKE_LATE_GATE) comes first: the CLI reads its input in order, and that message
+    // came before anything queued after it (queue LCF, LCF7); its gate's opening pumps again.
+    while (queue.length && !lateTurns) await turn(queue.shift()!);
     busy = false;
   }
 

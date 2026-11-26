@@ -325,10 +325,18 @@ same check a change of the project's settings meets) and:
   too. The waiting input is shown as `working`, keeps `idle()` false for an update's drain, and an update's `cutOff`
   writes it into `interrupted.asked`.
 
-A hand-over asked during a turn is queued in the process as its next turn (`afterTurn`); `AgentHost` now keeps a
-process held for a restart alive while such a turn is queued in it and ends it after that turn: killed at the first
-turn's end, it took the hand-over with it. That one hand-over runs on the old values; anything sent after the save
-waits for the new process. Compact needs the process at once, so it is refused (409, as at a turn) while input waits.
+A hand-over asked during a turn is the process's next turn (`afterTurn`); `AgentHost` keeps a process held for a
+restart alive while such a turn is to follow and ends it after that turn: killed at the first turn's end, it took the
+hand-over with it. That one hand-over runs on the old values; anything sent after the save waits for the new process.
+
+`AgentHost` holds that turn itself (queue LCF, LCF7) and gives it to the process only once it is between turns and no
+longer settling: after the turn's end, or, when a message sent into the turn still runs as a late turn of the runtime's
+own, after that turn (or once the moment is over without one). Written to the CLI during the turn, as before, the
+hand-over's turn could not be told from such a late turn: the conversation took the next turn to start for the
+hand-over's, so the late turn's reply went to the orchestrator as the summary and the real summary stayed in the chat
+as a reply. The conversation now marks a turn the hand-over's when `AgentHost` starts it (`queuedStart`). The order is
+the late turn, the hand-over's, then the restart on the saved pair; an update's `cutOff` during the late turn quotes
+the message, then the hand-over's instruction, and one while the hand-over's turn is still held quotes that. Compact needs the process at once, so it is refused (409, as at a turn) while input waits.
 
 Ways not taken: Codex can change model and effort per turn (`retune`, as the engine does for workers), but one path
 for both runtimes, through the stale check, keeps the boundary the same; a restart at save time while idle was

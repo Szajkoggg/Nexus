@@ -306,6 +306,178 @@ test("claude: a save while the process settles with no late turn: the message wa
   } finally { delete process.env.FAKE_LATE_NEXT; x.stop(); }
 });
 
+/**
+ * A Claude conversation whose first turn stays open after its reply (FAKE_LATE_NEXT) until a message comes into it,
+ * which then runs as a late turn once the gate file exists (FAKE_LATE_GATE); the moment it may start in is held open
+ * (lateTurnMs). `oldSaw`: the texts the first process answered with.
+ */
+async function lateTurnSetup(o: { notes?: string; slowMs: string }) {
+  const x = setup({ notes: o.notes, host: { lateTurnMs: 4 * LONGER.run } });
+  const gate = join(x.root, "late-gate");
+  process.env.FAKE_LATE_NEXT = "1";
+  process.env.FAKE_LATE_GATE = gate;
+  process.env.FAKE_CHAT_SLOW_MS = o.slowMs;
+  const c = x.conversations.create({ title: "Late" });
+  x.conversations.say(c.id, "first");
+  await x.until("the first reply, its turn still open", () => x.replies(c.id).length === 1);
+  delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_GATE; // for the next process
+  const proc = x.procs[0]!;
+  assert.equal(proc.state, "working", "the first turn still runs");
+  const oldSaw: string[] = [];
+  proc.on("message", (t: string) => oldSaw.push(t));
+  return { x, c, gate, proc, oldSaw, open: () => writeFileSync(gate, "") };
+}
+const cleanLate = () => { delete process.env.FAKE_LATE_NEXT; delete process.env.FAKE_LATE_GATE; delete process.env.FAKE_CHAT_SLOW_MS; };
+
+test("claude: a save while the turn still runs, a message into that turn, one after the save (LCF7 a): the late turn runs in the old process, the restart after it on the saved pair; nothing lost or run twice", async () => {
+  const { x, c, proc, oldSaw, open } = await lateTurnSetup({ slowMs: "300" });
+  try {
+    x.conversations.say(c.id, "FAKE-SLOW: second"); // into the running turn
+    x.conversations.update(c.id, { effort: "low" }); // saved while the process works, not while it settles (KM4's)
+    assert.equal(proc.state, "working", "saved during the running turn");
+    x.conversations.say(c.id, "third"); // waits for the new process
+    await x.until("the turn ended, the process settling", () => proc.state === "idle" && !!proc.settling, LONGER.step);
+    assert.equal(x.starts().length, 1, "nothing started while it settles");
+    assert.ok(!x.conversations.idle());
+    open();
+    await x.until("all three answered", () => x.replies(c.id).length === 3 && x.conversations.idle(), LONGER.step);
+    assert.equal(x.replies(c.id)[1], "slow reply");
+    assert.ok(oldSaw.includes("slow reply"), "the late turn ran in the process it was sent to");
+    assert.equal(x.starts().length, 2, "one restart");
+    assert.equal(x.overlap(), 1, "never two processes at a turn");
+    assert.equal(ranOn(x, "claude").effort, "low", "the restart on the saved pair");
+    assert.equal(resumed(x, "claude"), c.native_id);
+    assert.deepEqual(["FAKE-SLOW: second", "third"].map((t) => x.heard().filter((h) => h === t).length), [1, 1], "each message reached a process once");
+  } finally { cleanLate(); x.stop(); }
+});
+
+test("claude: a message into the turn, a hand-over and a save in the same turn, which ends settling (LCF7 b): the late turn, then the hand-over's, then the restart on the saved pair", async () => {
+  const { x, c, proc, oldSaw, open } = await lateTurnSetup({ notes: "Dev/Notes", slowMs: "300" });
+  const summaries = () => x.store.readChat(x.orchestrator.session()?.id ?? "-").entries.filter((e) => e.from === "user").map((e) => e.text);
+  try {
+    x.conversations.say(c.id, "FAKE-SLOW: late"); // into the running turn
+    x.conversations.handoff(c.id); // the turn after it (afterTurn)
+    x.conversations.update(c.id, { effort: "low" });
+    x.conversations.say(c.id, "third"); // waits for the new process
+    assert.equal(proc.state, "working");
+    await x.until("the turn ended, the process settling", () => proc.state === "idle" && !!proc.settling, LONGER.step);
+    assert.equal(x.starts().length, 1);
+    open();
+    await x.until("the third answered", () => x.replies(c.id).length === 4 && x.conversations.idle(), LONGER.step);
+    assert.deepEqual(oldSaw.slice(-2), ["slow reply", longReply("SUMMARY")], "the late turn, then the hand-over's, in the old process");
+    assert.deepEqual(x.replies(c.id).slice(1, 3), ["slow reply", longReply("SUMMARY")]);
+    assert.equal(summaries().length, 1, "one summary handed over");
+    assert.ok(summaries()[0]!.includes(longReply("SUMMARY")), `the hand-over's reply went over, not the late turn's: ${summaries()[0]}`);
+    const own = x.starts().filter((a) => (a.argv as string[]).includes(c.native_id!));
+    assert.equal(own.length, 2, "then one restart");
+    assert.equal(ranOn(x, "claude", c.native_id!).effort, "low", "on the saved pair");
+    assert.equal(x.overlap(), 1);
+    assert.deepEqual(["FAKE-SLOW: late", "third"].map((t) => x.heard().filter((h) => h === t).length), [1, 1]);
+  } finally { cleanLate(); x.stop(); }
+});
+
+test("claude: the same turn (LCF7 b), cut off by a hand-over to the next server during the late turn: the record quotes the message, then the hand-over's instruction; the next server goes on with them on the saved pair", async () => {
+  const { x, c, open } = await lateTurnSetup({ notes: "Dev/Notes", slowMs: "20000" });
+  try {
+    x.conversations.say(c.id, "FAKE-SLOW: late");
+    x.conversations.handoff(c.id);
+    x.conversations.update(c.id, { effort: "low" });
+    const proc = x.procs[0]!;
+    await x.until("the turn ended, the process settling", () => proc.state === "idle" && !!proc.settling, LONGER.step);
+    open();
+    await x.until("the late turn at work", () => proc.state === "working" && x.store.readChat(c.id).entries.some((e) => e.kind === "tool" && e.text.includes("FAKE-SLOW")), LONGER.step);
+    x.conversations.cutOff();
+    const cut = x.store.readRuntime(c.id)?.interrupted;
+    assert.equal(cut?.asked.length, 2, JSON.stringify(cut));
+    assert.equal(cut!.asked[0], "FAKE-SLOW: late", "the message first");
+    assert.match(cut!.asked[1]!, /^\[Nexus\] The user hands this conversation to the orchestrator/, "then the hand-over's instruction");
+    assert.equal(cut!.handoff, true);
+    x.conversations.shutdown();
+    await x.until("the old process ended", () => !x.conversations.alive(), LONGER.processes);
+    cleanLate();
+    x.restart().resumeCutOff();
+    await x.until("the next server's turn handed a summary over", () => x.store.readChat(x.orchestrator.session()?.id ?? "-").entries.some((e) => e.from === "user"), LONGER.step);
+    assert.equal(ranOn(x, "claude", c.native_id!).effort, "low", "the saved pair kept across the restart");
+    const own = x.starts().filter((a) => (a.argv as string[]).includes(c.native_id!)).at(-1)!.argv as string[];
+    assert.equal(own[own.indexOf("--resume") + 1], c.native_id, "in the same native session");
+  } finally { cleanLate(); x.stop(); }
+});
+
+test("codex: a hand-over and a save during a turn (no settling on Codex, LCF7): the turn, the hand-over's at its end, then the restart on the saved pair", async () => {
+  process.env.FAKE_CHAT_SLOW_MS = "1000";
+  const x = setup({ runtime: "codex", notes: "Dev/Notes" });
+  const summaries = () => x.store.readChat(x.orchestrator.session()?.id ?? "-").entries.filter((e) => e.from === "user").map((e) => e.text);
+  try {
+    const c = x.conversations.create({ title: "Codex", runtime: "codex" });
+    x.conversations.say(c.id, "FAKE-SLOW");
+    await x.until("the slow turn at work", () => x.store.readChat(c.id).entries.some((e) => e.kind === "tool"), LONGER.step);
+    x.conversations.handoff(c.id);
+    x.conversations.update(c.id, { effort: "low" });
+    x.conversations.say(c.id, "third");
+    await x.until("the third answered", () => x.replies(c.id).length === 3 && x.conversations.idle(), LONGER.step);
+    assert.deepEqual(x.replies(c.id).slice(0, 2), ["slow reply", longReply("SUMMARY")]);
+    assert.equal(summaries().length, 1);
+    assert.ok(summaries()[0]!.includes(longReply("SUMMARY")));
+    assert.equal(x.starts().filter((a) => a.method === "thread/start" || a.method === "thread/resume").length, 2, "one restart");
+    assert.equal(ranOn(x, "codex").effort, "low");
+    assert.equal(x.overlap(), 1);
+  } finally { delete process.env.FAKE_CHAT_SLOW_MS; x.stop(); }
+});
+
+test("claude: Stop during a turn whose restart is held (a save, then a message): the stopped turn ends the old process, the message runs once in the new one on the saved pair (LCF7)", async () => {
+  process.env.FAKE_CHAT_SLOW_MS = "20000";
+  const x = setup();
+  try {
+    const c = x.conversations.create({ title: "Stop" });
+    x.conversations.say(c.id, "FAKE-SLOW");
+    await x.until("the slow turn at work", () => x.store.readChat(c.id).entries.some((e) => e.kind === "tool"), LONGER.step);
+    x.conversations.update(c.id, { effort: "low" });
+    x.conversations.say(c.id, "after the stop");
+    x.conversations.stop(c.id);
+    await x.until("the waiting message answered", () => x.replies(c.id).length === 1 && x.conversations.idle(), LONGER.step);
+    assert.ok(!x.replies(c.id).includes("slow reply"), "the stopped turn wrote no reply");
+    assert.equal(x.starts().length, 2);
+    assert.equal(x.overlap(), 1);
+    assert.equal(ranOn(x, "claude").effort, "low");
+    assert.equal(x.heard().filter((t) => t === "after the stop").length, 1);
+  } finally { delete process.env.FAKE_CHAT_SLOW_MS; x.stop(); }
+});
+
+test("claude: the old process dies while it settles with its restart held (LCF7): the waiting message runs once in a new process on the saved pair", async () => {
+  const { x, c, proc, open } = await lateTurnSetup({ slowMs: "300" });
+  try {
+    x.conversations.say(c.id, "FAKE-SLOW: second");
+    x.conversations.update(c.id, { effort: "low" });
+    x.conversations.say(c.id, "third");
+    await x.until("the turn ended, the process settling", () => proc.state === "idle" && !!proc.settling, LONGER.step);
+    proc.kill(); // not through the host: a crash
+    await x.until("the third answered", () => x.replies(c.id).length === 2 && x.conversations.idle(), LONGER.step);
+    open();
+    assert.equal(x.starts().length, 2);
+    assert.equal(x.overlap(), 1);
+    assert.equal(ranOn(x, "claude").effort, "low");
+    assert.equal(x.heard().filter((t) => t === "third").length, 1);
+  } finally { cleanLate(); x.stop(); }
+});
+
+test("claude: the restarted process does not start (LCF7): the error is in the chat, nothing waits, and the next message runs in another process on the saved pair", async () => {
+  process.env.FAKE_CHAT_SLOW_MS = "1000";
+  const x = setup();
+  try {
+    const c = x.conversations.create({ title: "Broken" });
+    x.conversations.say(c.id, "FAKE-SLOW");
+    await x.until("the slow turn at work", () => x.store.readChat(c.id).entries.some((e) => e.kind === "tool"), LONGER.step);
+    x.conversations.update(c.id, { effort: "low" });
+    x.conversations.say(c.id, "FAKE-EXIT: 1 the new process could not start");
+    await x.until("the new process's failure in the chat", () => x.store.readChat(c.id).entries.some((e) => e.kind === "error" && e.text.includes("could not start")) && x.conversations.idle(), LONGER.step);
+    assert.deepEqual(x.replies(c.id), ["slow reply"]);
+    x.conversations.say(c.id, "again");
+    await x.until("answered", () => x.replies(c.id).length === 2, LONGER.step);
+    assert.equal(x.starts().length, 3);
+    assert.equal(ranOn(x, "claude").effort, "low");
+  } finally { delete process.env.FAKE_CHAT_SLOW_MS; x.stop(); }
+});
+
 test("claude: a hand-over asked before a save runs in the old process; one asked after it waits for the new one; neither is lost", async () => {
   process.env.FAKE_CHAT_SLOW_MS = "1200";
   const x = setup({ notes: "Dev/Notes" });

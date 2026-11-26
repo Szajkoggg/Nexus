@@ -61,7 +61,8 @@ const IDLE_MS = 15 * 60_000; // an idle partner's process ends; the next message
 /** What a partner's process keeps beside it: its idle timer, and whether its running turn writes a hand-over. */
 /**
  * `handoff`: the running turn is the hand-over's, its reply the summary. `handoffNext`: the hand-over was asked while
- * another turn ran; its instruction waits as the next turn, and that turn is the hand-over's.
+ * another turn ran (or the process settled after one); its instruction is held until that turn, and a turn the runtime
+ * may still run of its own after it, have ended, and the turn it then starts is the hand-over's (queuedStart).
  */
 /**
  * `compacting`: the running turn is a compaction the user asked for (compact); `compacted`: the runtime said it is done.
@@ -338,7 +339,9 @@ ${text}`;
     const l = this.ensure(s);
     if (!l) { this.waiting.set(s.id, [...(this.waiting.get(s.id) ?? []), w]); return; }
     clearTimeout(l.timer);
-    if (w.handoff) { if (l.proc.state === "working") l.handoffNext = true; else l.handoff = true; }
+    // At a turn, or settling after one, the hand-over's turn is held until the process is between turns and settled
+    // (AgentHost.send's afterTurn); its start (queuedStart) makes it the hand-over's.
+    if (w.handoff) { if (l.proc.state === "working" || l.proc.settling) l.handoffNext = true; else l.handoff = true; }
     this.host.send(l, w.text, { ...(w.quote ? { quote: w.quote } : {}), ...(w.handoff ? { afterTurn: true } : {}) });
   }
 
@@ -537,8 +540,6 @@ ${text}`;
               } catch (e) { this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `Could not hand it over: ${errorText(e)}` }); }
             }
           }
-          // A hand-over asked during the turn that just ended: the next turn, its instruction, is the hand-over's.
-          else if (l.handoffNext) { l.handoffNext = false; l.handoff = true; }
           clearTimeout(l.timer);
           // Not after shutdown: a turn's end the stopped process still delivers would arm it again, and an armed timer
           // kept a stopped Nexus (a test's process) alive for its 15 minutes (queue FU4). It never keeps Node up.
@@ -548,6 +549,9 @@ ${text}`;
           }
           this.changed();
         },
+        // A hand-over asked during a turn: its instruction's turn starts now (not a turn the runtime ran of its own for
+        // a message sent into the last one: that one's reply is no summary, queue LCF).
+        queuedStart: () => { if (l.handoffNext) { l.handoffNext = false; l.handoff = true; } },
         exit: () => { clearTimeout(l.timer); this.flush(s.id); this.changed(); },
       };
     });
