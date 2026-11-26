@@ -573,7 +573,9 @@ a test, in any mode. `performance` measures with the project's command and compa
 A seventh, `notes`, is meant to recur: it keeps the notes true. It reads the Claude sessions' memory notes (the
 `memory_dir` parameter, outside the project), the ideas notes and the project documents against the code, and reports what
 is stale, built but unmarked, or untrue. Only the clear typos in the project documents are fixed in fix_small mode; the
-memory and ideas notes are only reported.
+memory and ideas notes are only reported. Its ideas survey also proposes the missing and wrong links between the ideas
+notes and the queues (add, remove, replace), even in survey mode; a link changes only when you accept the proposal. A
+change to the template makes the recurring `notes` queue wait for your approval again.
 `agent-contract` checks that the agents' instructions, the command line and its help, the file schemas and the
 protocol's description agree (fix_small fixes only clear slips in the description). `git-hygiene` reports the
 worktrees and branches that closed queues left behind and untracked files that belong nowhere, in the checkouts you
