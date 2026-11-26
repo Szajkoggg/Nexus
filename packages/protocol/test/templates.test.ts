@@ -339,15 +339,16 @@ test("the notes template: needs memory_dir; survey only reads, the fix step touc
   assert.match(t.params.find((p) => p.name === "memory_dir")!.description, /reads it in the auto permission mode, but not in dontAsk.*Read\(/);
   assert.match(text, /Reading the memory folder is refused by the permissions/);
   // The survey steps are told to change nothing.
-  for (const st of (survey.steps as { goal: string }[])) assert.match(st.goal, /Change nothing, commit nothing/);
+  const goals = (survey.steps as { goal: string }[]).map((st) => st.goal.replaceAll("\n", " "));
+  for (const goal of goals) assert.match(goal, /Change nothing, commit nothing/);
   // The ideas survey proposes the links in one batch, in survey mode too; the report lists the proposals apart; a proposal is no change.
-  const ideas = (survey.steps as { goal: string }[])[1]!.goal.replaceAll("\n", " ");
+  const [, ideas, report] = goals as [string, string, string];
   assert.match(ideas, /`nexus ideas status`/);
   assert.match(ideas, /propose to add the link.*propose to remove it.*propose to replace it/);
   assert.match(ideas, /`nexus ideas propose --file <file> --reason "notes survey <queue id>"`/);
   assert.match(ideas, /nothing proposed: …/);
   assert.match(ideas, /allowed in survey mode/);
-  assert.match((survey.steps as { goal: string }[])[2]!.goal.replaceAll("\n", " "), /list the link proposals made .* apart from the findings that were only reported/);
+  assert.match(report, /list the link proposals made .* apart from the findings that were only reported/);
   assert.match(text, /A link proposal \(`nexus ideas propose`\) is not such a change/);
   // The fix step does not touch the ideas notes, and proposes nothing.
   assert.doesNotMatch(step, /nexus ideas/);
