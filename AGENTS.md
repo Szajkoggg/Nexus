@@ -64,6 +64,9 @@ Nexus is developed with Nexus. The agents working on this repository are run by 
   `apps/server/test/in-process-runtime.ts` as the `spawn` option) and the CLI as a function
   (`packages/cli/test/run-cli.ts`); a test file that starts them, a server or the CLI as processes, or runs in a Node process of its own, is listed in
   `scripts/real-process-tests.ts` with why (`scripts/test/real-process-tests.test.ts` checks it).
+  Every test file's process gets a temporary NEXUS_HOME, APPDATA and LOCALAPPDATA of its own, and loses a session's
+  NEXUS_DIR and NEXUS_SESSION (`apps/server/test/temp-home.ts`, loaded first by `model-reads.ts`): a test needs no
+  guard of its own; one that starts a test process without `model-reads.ts` passes temporary folders itself.
 - **Real runtimes**, only when a fake cannot answer the question (a new CLI flag, a protocol detail): the smallest probe,
   with a small model (Claude: `haiku`; Codex: `gpt-6-luna`), in a temporary directory, and say what it cost.
 - **Documentation**: a change to a file format, event, API or CLI updates the protocol in the same commit; a design

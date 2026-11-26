@@ -378,3 +378,16 @@ user put the file back; no data was lost.
   `<NEXUS_HOME>/benchmarks/server-speed.jsonl` on purpose (the Stats view reads it); the rule's list names the call
   and why. `npm run dev` (scripts/dev.ts) keeps its own `%APPDATA%\Nexus-dev` and no guard: it is the user's tool, as
   are the server and the CLI, which keep using the real NEXUS_HOME.
+- **The tests' own folders** (apps/server/test/temp-home.ts, the first import of model-reads.ts, so loaded before every
+  test file by npm test, test:times, test:files, the load tool, crash-server.ts and server-speed.ts's test load): each
+  test file's process gets NEXUS_HOME, APPDATA and LOCALAPPDATA in a new `nexus-test-env-*` folder of the temporary
+  folder, removed when the process ends. It is set in a module of its own because an ESM module's imports run before
+  its body. The checks Nexus runs start `npm test` without NEXUS_HOME (apps/server/src/check-runs.ts), so before this a
+  test that set none used the live server's `%APPDATA%\Nexus`. A value already temporary is kept (a test's server or
+  crash-server.ts process shares the test's folders); the runner's own process (`node --test`, which loads it too) sets
+  nothing, so its files never share one folder. NEXUS_HOME is never `join(APPDATA, "Nexus")`, which the rule refuses.
+  A session's NEXUS_DIR, NEXUS_SESSION and NEXUS_HANDOVER are removed unless they point into the temporary folder (a
+  worker's `npm test` by hand passes them on). The job host's compiled type stays shared between the tests in
+  `<tmpdir>/nexus-job-host` (NEXUS_JOB_CACHE; the user's choice, NHG1): compiled once per machine, never in the
+  user's LOCALAPPDATA. USERPROFILE and HOME stay (git reads its configuration there); nexusHome()'s homedir()
+  fallback applies only without APPDATA, which is always set. `apps/server/test/temp-home.test.ts` shows it.

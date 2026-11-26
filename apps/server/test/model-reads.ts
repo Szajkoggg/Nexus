@@ -9,6 +9,8 @@
 // once after them, before a watcher could report, each read first looks whether a file, folder or log the model holds
 // changed on disk (a stat, no read), as the files would show it. A file that compares the model with the files
 // themselves calls `useProjectReaders(undefined)`.
+// First: this process's own temporary NEXUS_HOME, APPDATA and LOCALAPPDATA, before anything reads them (queue NHG).
+import "./temp-home.ts";
 import { existsSync, statSync, watch } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { ProjectModel, useProjectReaders, type FileCache } from "@nexus/protocol";

@@ -64,6 +64,8 @@ export const REAL_PROCESS_TESTS: Readonly<Record<string, string>> = {
   "apps/server/test/unknown-project.test.ts": "starts a server",
   "apps/server/test/uploads.test.ts": "starts a server",
   "apps/server/test/withdraw.test.ts": "starts a server",
+  // The tests' own global folders: what each test file's process gets from the preloader.
+  "apps/server/test/temp-home.test.ts": "runs test files under node --test to show each file's process gets its own temporary NEXUS_HOME, APPDATA and LOCALAPPDATA, removed when it ends",
   // The machine's full-test lock: its processes are what it tests.
   "scripts/test/test-lock.test.ts": "a test run, its starter and its wait for the lock, as the processes they are",
 };
