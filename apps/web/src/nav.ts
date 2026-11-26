@@ -98,4 +98,10 @@ export const nav = {
   /** Closes a layer, then opens a queue or step in another project (the waiting list). */
   closeThenItem: (kind: string, project: string, queue?: string, step?: string, qid?: string) =>
     apply(queue ? closeThen(current, kind, itemHash(project, queue, step, qid), "item") : closeThen(current, kind, itemHash(project))),
+  /**
+   * Closes a layer, then opens a project's Manage links over its Ideas view, with a filter (`matching:proposed`: the
+   * agents' link proposals; a waiting card's Review…).
+   */
+  closeThenMatching: (kind: string, project: string, filter: string) =>
+    apply(closeThen(current, kind, itemHash(project), `matching:${filter}`, { tab: "ideas" })),
 };

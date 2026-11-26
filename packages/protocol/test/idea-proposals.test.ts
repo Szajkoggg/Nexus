@@ -178,3 +178,17 @@ test("an unknown queue or entry, and a proposer without the right, are refused a
   assert.equal(proposalDecisions(f.store).length, 0, "refusals at intake are no decision of the user's");
   assert.throws(() => f.decide([{ id: all[0]!.id, accept: true }]), (e: unknown) => e instanceof ActionError && e.status === 409 && /refused already/.test(e.message));
 });
+
+test("the waiting list: one item of kind links per batch with items pending, gone once the user decided them", (t) => {
+  const f = fixture(t);
+  const batch = f.propose("o", [add("B", REF), add("M", OTHER)], "From the report");
+  f.propose("c", [add("B", "notes/a.md#2026-11-20")]);
+  f.intake();
+  const items = () => loadProjectState(f.store).attention.filter((a) => a.kind === "links");
+  assert.equal(items().length, 1, "the refused batch waits for nothing");
+  const [a] = items();
+  assert.equal(a!.text, "The orchestrator proposes 2 idea links: “From the report”");
+  assert.deepEqual(a!.links!.items.map((p) => p.id), [`${batch}/1`, `${batch}/2`]);
+  f.decide([{ id: `${batch}/1`, accept: true }, { id: `${batch}/2`, accept: false }]);
+  assert.equal(items().length, 0);
+});

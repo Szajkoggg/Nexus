@@ -152,7 +152,8 @@ export function App() {
   const queue = openedQueue(shownQueue, fullQueue);
   const step = queue?.steps.find((s) => s.id === route.step);
   const close = () => nav.close("item");
-  const openWaiting = (w: WaitingItem) => nav.closeThenItem("waiting", w.project, w.queue, attentionTarget(w), w.qid);
+  // A batch of link proposals opens Manage links, Proposed; the others their queue or step.
+  const openWaiting = (w: WaitingItem) => w.kind === "links" ? nav.closeThenMatching("waiting", w.project, "proposed") : nav.closeThenItem("waiting", w.project, w.queue, attentionTarget(w), w.qid);
   // Below 1024 px: the phone layout, with a tab instead of the chat, Ideas and waiting layers (layers.ts phoneView).
   // From 1024 px: chat-first (UX proposals, 11A), the middle column showing the chat, Ideas or the project's queues.
   const phone = usePhone();
@@ -444,6 +445,7 @@ export function App() {
                   onOpen={(a: AttentionItem) => {
                     // A tag proposal opens the project's settings, where its lists are.
                     if (a.kind === "tags") nav.open("settings");
+                    else if (a.kind === "links" && projectId) nav.closeThenMatching("waiting", projectId, "proposed");
                     else if (projectId && a.queue) nav.item(projectId, a.queue, attentionTarget(a), a.qid);
                   }} />
               )}

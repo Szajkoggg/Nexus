@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { applyStateMessage } from "../liveViews.ts";
-import type { IdeaLinkAction, IdeaLinkView } from "@nexus/protocol";
+import type { IdeaLinkAction, IdeaLinkView, IdeaProposalsResponse } from "@nexus/protocol";
 import type { IdeasResponse } from "@nexus/protocol/ideas";
 import { projectUrl, useQuery, useLiveRead, type ProjectState } from "../api.ts";
 import { t, type Key } from "../i18n.ts";
@@ -8,20 +8,26 @@ import { nav, useNav } from "../nav.ts";
 import { layerValue } from "../layers.ts";
 import { usePage } from "../page.ts";
 import { ReadError } from "./ui.tsx";
+import { ProposalsBox, openProposal } from "./IdeaProposals.tsx";
 import { DecisionPicker, IdeaField, IdeaSaveState, ideaButton, ideaCard, ideaInput, useIdeaSave } from "./IdeaForms.tsx";
 
-type Filter = "all" | "pending" | "linked" | "rejected" | "attention";
-const filters: Filter[] = ["all", "pending", "linked", "rejected", "attention"];
-const matches = (r: IdeaLinkView, f: Filter) => f === "all" || (f === "attention" ? r.diagnostics.length > 0 : f === "linked" ? r.effective : r.state === f);
+// "proposed": the agents' link proposals only (their box), no origin; the box stands above the list in every filter.
+type Filter = "all" | "proposed" | "pending" | "linked" | "rejected" | "attention";
+const filters: Filter[] = ["all", "proposed", "pending", "linked", "rejected", "attention"];
+const matches = (r: IdeaLinkView, f: Filter) => f !== "proposed" && (f === "all" || (f === "attention" ? r.diagnostics.length > 0 : f === "linked" ? r.effective : r.state === f));
 type Edit = { operation: IdeaLinkAction["operation"]; origin?: IdeaLinkView; accept?: boolean | null; action?: IdeaLinkAction };
 const originLabel = (r: IdeaLinkView) => t(r.state === "ignored" ? "ideas.link.ignored" : `ideas.link.${r.origin}`);
 
 export function IdeasMatching({ project, phone }: { project: string; phone?: boolean }) {
-  const note = layerValue(useNav(), "note");
+  const at = useNav();
+  const note = layerValue(at, "note");
   const { version, reload } = usePage();
   const { data, error } = useQuery<IdeasResponse>(projectUrl(project, "/ideas"), version);
   const state = useLiveRead<ProjectState>(projectUrl(project, "/state"), project, applyStateMessage);
-  const [filter, setFilter] = useState<Filter>("all");
+  const proposals = useQuery<IdeaProposalsResponse>(projectUrl(project, "/ideas/proposals"), version);
+  const proposed = proposals.data?.proposals.filter(openProposal).length ?? 0;
+  const [filter, setFilter] = useState<Filter>(layerValue(at, "matching") === "proposed" ? "proposed" : "all");
+  const queueTitle = (id: string) => state.data?.queues.find((q) => q.id === id)?.title;
   const [search, setSearch] = useState("");
   const [edit, setEdit] = useState<Edit>();
   const [saved, setSaved] = useState(false);
@@ -38,15 +44,19 @@ export function IdeasMatching({ project, phone }: { project: string; phone?: boo
       {state.error && <ReadError error={state.error} what={t("ideas.findQueue")} />}
       {(error || state.error) && <button className={ideaButton} onClick={reload}>{t("ideas.refresh")}</button>}
       <div className="flex flex-wrap gap-2" role="group" aria-label={t("ideas.manage")}>
-        {filters.map((f) => <button key={f} className={`${ideaButton} ${filter === f ? "bg-accent/15 border-accent/50" : ""}`} aria-pressed={filter === f} onClick={() => setFilter(f)}>{t(`ideas.link.${f}`)} · {items.filter((r) => matches(r, f)).length}</button>)}
+        {filters.map((f) => <button key={f} className={`${ideaButton} ${filter === f ? "bg-accent/15 border-accent/50" : ""}`} aria-pressed={filter === f} onClick={() => setFilter(f)}>{t(`ideas.link.${f}`)} · {f === "proposed" ? proposed : items.filter((r) => matches(r, f)).length}</button>)}
       </div>
+      {proposals.error && <ReadError error={proposals.error} what={t("ideas.proposals.readError")} />}
+      {proposals.data && <ProposalsBox project={project} data={proposals.data} queueTitle={queueTitle} />}
+      {filter !== "proposed" && <>
       <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-fg-3">{t("ideas.link.scope")}</p>
         <button className={ideaButton} disabled={!data || !state.data || !!error || !!state.error} onClick={() => begin({ operation: "add" })}>{t("ideas.link.add")}</button></div>
       <input aria-label={t("ideas.link.find")} placeholder={t("ideas.link.find")} className={ideaInput} value={search} onChange={(e) => setSearch(e.target.value)} />
       {saved && <p role="status" className="text-sm text-ok">{t("ideas.saved")}</p>}
       <div ref={form}>{edit && data && state.data && <LinkForm key={`${edit.operation}:${edit.origin?.id ?? edit.action?.id ?? "new"}:${edit.accept}`} project={project} data={data} queues={state.data.queues} edit={edit}
         onCancel={() => setEdit(undefined)} onSaved={() => { setEdit(undefined); setSaved(true); }} />}</div>
-      {!shown.length && data && <p className="text-sm text-fg-3">{t("ideas.link.noItems")}</p>}
+      </>}
+      {!shown.length && data && filter !== "proposed" && <p className="text-sm text-fg-3">{t("ideas.link.noItems")}</p>}
       {shown.map((r) => <article key={r.id} className={ideaCard} data-box={`Link ${r.id}`} data-origin={r.id}>
         <h2 className="text-sm font-semibold">{r.queue} · {r.title}</h2>
         <p className="text-xs text-fg-3">{originLabel(r)} · {r.state}{r.at ? ` · ${r.at}` : ""}</p>

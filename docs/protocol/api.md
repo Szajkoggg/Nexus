@@ -243,7 +243,7 @@ subscriptions are in `<NEXUS_HOME>/push.json`, written by the server only:
 Whatever newly appears in a project's "waiting for you" list is pushed; the list as found when the server starts is
 the baseline. Every push has a kind, and each device gets it only when its `notify` lets it through
 (`@nexus/protocol` notify.ts, `shouldNotify`): the waiting list's kinds (`question`, `stopped`, `approval`, `review`,
-`failed`, `start`, `provisional`, `plan`, `merge`, `tags`, `recurring`, `cleanup`), `update_failed` (an update of Nexus failed),
+`failed`, `start`, `provisional`, `plan`, `merge`, `tags`, `recurring`, `cleanup`, `links`), `update_failed` (an update of Nexus failed),
 `deploy` (a planned deploy waits or was dropped), `cancelled` (the orchestrator cancelled a queue), and `test`, which
 always goes. `off` lists the kinds turned off (a kind not listed is on). Within the quiet hours (`quiet.on`; `from` up
 to `to`, `HH:MM` in the device's `timezone`, over midnight when `from` is later; none when they are equal) nothing

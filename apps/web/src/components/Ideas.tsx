@@ -15,6 +15,8 @@ import { ActionBar, Button, PanelBody, PanelHeader, ReadError, statusWord } from
 
 import { EntryState, IdeaStatusForm, IdeaStatusHistory, Signal } from "./IdeaStatus.tsx";
 import { ideaButton, ideaCard } from "./IdeaForms.tsx";
+import { EntryProposals } from "./IdeaProposals.tsx";
+import type { IdeaProposalsResponse } from "@nexus/protocol";
 import { IdeaActions, IdeaActivity } from "./IdeaOnward.tsx";
 export { IdeasMatching } from "./IdeaLinks.tsx";
 
@@ -219,13 +221,16 @@ function NoteBody({ project, note, data }: { project: string; note: IdeaNoteView
     scroller.addEventListener("scroll", save);
     return () => { save(); scroller.removeEventListener("scroll", save); };
   }, [project, note.file]);
+  // The agents' link proposals that touch a date of this note show on its card (IWS, part d).
+  const proposals = useQuery<IdeaProposalsResponse>(projectUrl(project, "/ideas/proposals"), usePage().version).data;
+  const queueTitle = (id: string) => data.links.items.find((r) => r.queue === id)?.title;
   return <div ref={body} className="space-y-4 [overflow-wrap:anywhere]" data-idea-note>
     {note.summary && <section data-box="Summary"><h3 className={label}>{t("ideas.summary")}</h3><p className="text-[13px] leading-relaxed text-fg-2">{note.summary}</p></section>}
     <section data-box="Open" data-idea-open><h3 className={label}>{t("ideas.questions", { count: note.questions.length })}</h3>
       {note.questions.length ? <ul className="list-disc space-y-1 pl-4 text-[12.5px] text-fg-2">{note.questions.map((q, i) => <li key={i}>{q}</li>)}</ul> : <p className="text-xs text-fg-3">{t("ideas.noQuestions")}</p>}
     </section>
     {note.entries.length > 0 && <section><h3 className={label}>{t("ideas.decidedDates", { count: note.entries.length })}</h3>
-      <div className="space-y-2">{[...note.entries].reverse().map((e) => <EntryCard key={e.date} e={e} data={data} />)}</div></section>}
+      <div className="space-y-2">{[...note.entries].reverse().map((e) => <EntryCard key={e.date} e={e} data={data} project={project} proposals={proposals} queueTitle={queueTitle} />)}</div></section>}
     <RelatedWork project={project} note={note} data={data} />
     {note.ideas > 0 && <p className="text-xs text-fg-3">{t("ideas.ideasInFile", { count: note.ideas })}</p>}
     <IdeaActivity project={project} file={note.file} />
@@ -234,7 +239,9 @@ function NoteBody({ project, note, data }: { project: string; note: IdeaNoteView
   </div>;
 }
 
-function EntryCard({ e, data }: { e: IdeaEntryView; data: IdeasResponse }) {
+function EntryCard({ e, data, project, proposals, queueTitle }: {
+  e: IdeaEntryView; data: IdeasResponse; project: string; proposals?: IdeaProposalsResponse; queueTitle: (id: string) => string | undefined;
+}) {
   const change = (action?: string) => nav.open(`idea-status:${JSON.stringify([e.ref, action])}`);
   const done = dispositionOf(e) === "active" && queuesDone(e);
   return <article className={ideaCard} data-box={`Decision ${e.date}`} data-decision={e.ref}>
@@ -242,6 +249,7 @@ function EntryCard({ e, data }: { e: IdeaEntryView; data: IdeasResponse }) {
     <p className="text-[12.5px] text-fg-2">{e.lead} / {t("ideas.decisions", { count: e.decisions })}</p>
     <EntryFacts e={e} />
     {e.effective?.diagnostics.map((d) => <p key={d} className="text-xs text-warn">{d}</p>)}
+    {proposals && <EntryProposals project={project} data={proposals} entryRef={e.ref} queueTitle={queueTitle} />}
     <div className="flex flex-wrap items-center gap-3 text-xs">{done
       ? <button className={ideaButton} data-review-confirm onClick={() => change()}>{t("ideas.reviewAndConfirm")}</button>
       : <button className="text-accent underline" onClick={() => change()}>{t(e.effective?.work.state === "finished" && !["full", "partial"].includes(implementationOf(e)) ? "ideas.reviewImplementation" : "ideas.changeStatus")}</button>}

@@ -1,0 +1,37 @@
+# IWS4B: the afters of the agents' link proposals (docs/ux/idea-work-signals.md part d), on the data of
+# seed-idea-work-signals.ts: Manage links with the proposals box, the waiting list with a batch's card, and the
+# Deploy timing note whose 14 Nov card carries a proposal. The befores and mockups are IWS1's (same keys).
+seed: scripts/capture/seed-idea-work-signals.ts
+views:
+  - key: idea-links@1440
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: [{ click: Ideas }, { click: Overview }, { click: Manage links }]
+  - key: waiting-link-proposals@1440
+    route: "#/demo"
+  - key: ideas-entry-proposal@1440
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: [{ click: Ideas }, { click: Overview }, { click: Deploy timing }]
+  - key: idea-links@492
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: [{ click: Ideas }, { click: Overview }, { click: Manage links }]
+  - key: waiting-link-proposals@492
+    route: "#/demo"
+    actions: [{ click: Waiting }]
+  - key: ideas-entry-proposal@492
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: [{ click: Ideas }, { click: Overview }, { click: Deploy timing }]
+  - key: idea-links@390
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: [{ click: Ideas }, { click: Overview }, { click: Manage links }]
+  - key: waiting-link-proposals@390
+    route: "#/demo"
+    actions: [{ click: Waiting }]
+  - key: ideas-entry-proposal@390
+    route: "#/demo"
+    script: scripts/capture/reset-ideas.js
+    actions: [{ click: Ideas }, { click: Overview }, { click: Deploy timing }]

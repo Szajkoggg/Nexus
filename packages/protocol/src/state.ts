@@ -3,7 +3,7 @@
 import { errorText } from "./errors.ts";
 import { applyCheckSets, enterAcceptedReview, lastDone, reviewRound, verdictBeforeReview } from "./checks.ts";
 import { activeDecisions, applyAnswer, applyDecision, applyMaterial, applyNone, currentAnswer, decisionGate, emptyDecisions, helperHandOverRefusal, listState, settledDecisions, type Acceptor, type DecisionContext, type DecisionsView, type ListState } from "./review-decisions.ts";
-import { CONVERSATION_ONLY, DECISION_LIST, HELPER_EVENTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
+import { CONVERSATION_ONLY, DECISION_LIST, HELPER_EVENTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile, type IdeaProposal, type IdeaProposer } from "./schemas.ts";
 import { ProjectStore, chainPlan, countRebuild, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
@@ -46,7 +46,7 @@ export interface AttentionItem {
    * making the queue failed); one item per recurring. `cleanup`: Nexus could not remove a done survey run's worktree
    * (git.yaml `cleanup.waiting`: untracked files left in it, and the like); the user looks, then cleans up.
    */
-  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan" | "merge" | "tags" | "recurring" | "cleanup";
+  kind: "question" | "stopped" | "approval" | "review" | "failed" | "start" | "provisional" | "plan" | "merge" | "tags" | "recurring" | "cleanup" | "links";
   queue?: string;
   /** Kind `recurring`: the recurring queue it is about (its standing approval waits, or a time passed without a run). */
   recurring?: string;
@@ -71,6 +71,11 @@ export interface AttentionItem {
   plan?: { proposal?: { after: string[]; reason: string; current: string[] }; predecessor?: string; cause?: "stopped" | "cancelled" | "missing" };
   /** Kind `tags`: the proposal waiting for the user's decision. */
   tags?: TagProposal;
+  /**
+   * Kind `links`: an agent's batch of idea-link proposals with items waiting for the user (.nexus/idea-proposals.yaml,
+   * idea-proposals.ts), one item per batch: its event, the proposer, the batch's reason, and its pending items.
+   */
+  links?: LinkProposalBatch;
   /**
    * Kind `merge`: what the user's Merge back moves (the waiting card asks it where no queue is at hand): the queue's
    * branch (absent: unnamed) into its base branch. Absent when the base is no branch (nothing to merge into), and
@@ -329,6 +334,8 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
   const away = readAway(store.env, (w) => warnings.push(w));
   let tags: TagsFile;
   try { tags = store.readTags(); } catch (e) { warnings.push(errorText(e)); tags = { protocol: 1, areas: [], activities: [], renames: [], proposals: [], decisions: [] }; }
+  let proposals: IdeaProposal[];
+  try { proposals = store.readIdeaProposals().proposals; } catch (e) { warnings.push(errorText(e)); proposals = []; }
   let metrics: MetricsFile;
   try { metrics = store.readMetrics(); } catch (e) { warnings.push(errorText(e)); metrics = { protocol: 1, metrics: [] }; }
 
@@ -549,7 +556,7 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
     questions: [...questions.values()],
     tags,
     metrics,
-    attention: [...recurringAttention(recurring, queues), ...attentionOf([...queues.values()], [...questions.values()], tags, away)]
+    attention: [...recurringAttention(recurring, queues), ...linksAttention(proposals), ...attentionOf([...queues.values()], [...questions.values()], tags, away)]
       .sort((a, b) => (b.at ?? "").localeCompare(a.at ?? "")),
     warnings,
     away: awayNow(away),
@@ -640,6 +647,34 @@ function batchAnswers(q: QueueView, st: StepView, away: Pick<AwayFile, "current"
       ...(a.provisional ? { provisional: true as const } : {}), ...(a.by !== "user" && awayAt(away, a.at) ? { away: true as const } : {}),
     }];
   });
+}
+
+/** A batch of idea-link proposals waiting for the user, as its waiting item carries it (kind `links`). */
+export interface LinkProposalBatch {
+  event: string; by: IdeaProposer; reason?: string;
+  items: Pick<IdeaProposal, "id" | "op" | "queue" | "ref" | "to">[];
+}
+
+/** Who proposes, in a few words ("The orchestrator", "Thinking partner “Plan view”", "The worker of NT"). */
+export function proposerName(by: IdeaProposer): string {
+  if (by.role === "orchestrator") return "The orchestrator";
+  if (by.role === "conversation") return by.title ? `Thinking partner “${by.title}”` : "A thinking partner";
+  return `The worker of ${by.queue ?? "a maintenance queue"}`;
+}
+
+/** One waiting item per batch of idea-link proposals with items pending (decision D15). */
+function linksAttention(proposals: readonly IdeaProposal[]): AttentionItem[] {
+  const batches = new Map<string, { at: string; batch: LinkProposalBatch }>();
+  for (const p of proposals) {
+    if (p.state !== "pending") continue;
+    const b = batches.get(p.event) ?? { at: p.at, batch: { event: p.event, by: p.by, ...(p.batch_reason ? { reason: p.batch_reason } : {}), items: [] } };
+    b.batch.items.push({ id: p.id, op: p.op, queue: p.queue, ref: p.ref, ...(p.to ? { to: p.to } : {}) });
+    batches.set(p.event, b);
+  }
+  return [...batches.values()].map(({ at, batch }) => ({
+    kind: "links", at, links: batch,
+    text: `${proposerName(batch.by)} proposes ${batch.items.length} idea link${batch.items.length === 1 ? "" : "s"}${batch.reason ? `: “${batch.reason}”` : ""}`,
+  }));
 }
 
 function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsFile, away: Pick<AwayFile, "current" | "past">): AttentionItem[] {

@@ -162,6 +162,13 @@ command and no event that accepts or declines: `nexus ideas accept|reject` stay 
 The orchestrator is told each decision request once, whoever proposed (D11): which items were accepted, declined or
 found outdated, with each proposer. A thinking partner or a survey worker is not told; it sees the links as they are.
 
+The state's `attention` gets one item of kind `links` per batch with items still `pending` (D15): `links` holds the
+batch's `event`, `by`, `reason?` and its pending `items` (`id`, `op`, `queue`, `ref`, `to?`), and `text` says who
+proposes how many ("The orchestrator proposes 3 idea links: “…”"); it is pushed like every waiting item (kind
+`links`). The dashboard shows the proposals in Manage links (a box above the list, and the filter **Proposed**), on
+the waiting card (Accept all N, Review…, Decline all) and on the date card of an entry they touch; each decision is
+the POST above.
+
 **User dispositions and implementation assessments (IC3).** The date remains the unit; there is no
 per-bullet identifier or migration. GET ideas now also returns `statuses` (the statuses endpoint's response),
 `entries[].content` (complete normalized dated content), `entries[].effective` (the matching status view), and each

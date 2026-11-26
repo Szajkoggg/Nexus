@@ -8,7 +8,7 @@
 /** The kinds a device can turn off, in the order the settings show them. */
 export const NOTIFY_KINDS = [
   "question", "stopped", "approval", "review", "failed", "start", "provisional",
-  "plan", "merge", "tags", "recurring", "cleanup",
+  "plan", "merge", "tags", "recurring", "cleanup", "links",
   "update_failed", "deploy", "cancelled",
 ] as const;
 export type NotifyKind = (typeof NOTIFY_KINDS)[number];

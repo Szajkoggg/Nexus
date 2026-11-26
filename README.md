@@ -54,6 +54,18 @@ and undo. Missing targets retain their identity and a visible diagnostic. Refere
 proof of implementation. A failed save retains your draft; **Retry the same save** is safe after an uncertain
 response. **Refresh and review** loads concurrent changes before a new decision.
 
+**Links the agents propose.** The orchestrator, a thinking partner and a maintenance survey may propose idea links
+(add a queue's link to a date, remove a wrong one, change its target); nothing changes until you accept. Their
+proposals show in three places: in **Manage links**, a box **Proposed by agents · N** above the list (the filter
+**Proposed** shows only it), one group per batch with who proposed it, when, its reason, **Accept all N** and
+**Decline all**, and each proposal with what it does to the link (ADD, REMOVE, CHANGE TARGET), the proposer's reason,
+what accepting means for the link's origins, its **Evidence**, and **Accept** / **Decline**; under **Waiting for
+you**, one **Link proposals** card per batch with **Accept all N**, **Review…** (Manage links, Proposed) and
+**Decline all**; and on a note's date card, the proposals that touch that date. Each is checked again when you
+accept: one that no longer fits is greyed with why ("Outdated: this link already exists …") and only **Dismiss**;
+in a batch with such an item, **Accept the valid one(s)** writes the others. An accepted proposal is a link with
+the proposer's reason in **Correction history**, undone like any other; the orchestrator is told what you decided.
+
 The [tested MT/IO/ST2 correction guide](docs/ux/ideas-corrections-guide.md) identifies the exact origins and dates
 to review; it changes no real data. `nexus ideas matches` and `nexus ideas status` let agents read effective links,
 dispositions, assessments, conflicts and history as JSON. Server-owned user decisions supplement the note;
