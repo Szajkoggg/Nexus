@@ -63,11 +63,15 @@ function setup(o: { runtime?: Runtime; notes?: string; host?: AgentHostOptions }
   const heard = (): string[] => (existsSync(process.env.FAKE_LOG!) ? readFileSync(process.env.FAKE_LOG!, "utf8").split("\n").filter(Boolean).map((l) => (JSON.parse(l) as { text: string }).text) : []);
   const replies = (id: string) => store.readChat(id).entries.filter((e) => e.from === "partner" && e.kind === "message").map((e) => e.text);
   const settings = (id: string) => (conversations.head(id) as { settings: ConversationSettings }).settings;
+  /** The texts handed over to the orchestrator: a hand-over's summary comes into its chat as the user's message. */
+  const handedOver = () => store.readChat(orchestrator.session()?.id ?? "-").entries.filter((e) => e.from === "user").map((e) => e.text);
+  /** The conversation's turn has run a tool: a FAKE-SLOW turn is at work. */
+  const atWork = (id: string) => store.readChat(id).entries.some((e) => e.kind === "tool");
   const until = (what: string, pred: () => boolean, ms = WAIT_MS) => waitUntil(what, pred, ms);
   const stop = () => { clearInterval(sampler); conversations.shutdown(); orchestrator.shutdown(); engine.shutdown(); };
   /** A new server's Conversations over the same project (after cutOff and shutdown). */
   const restart = () => { conversations = new Conversations(store, orchestrator, () => {}, { spawn, ...o.host }); return conversations; };
-  return { root, store, orchestrator, get conversations() { return conversations; }, args, starts, heard, replies, settings, until, stop, restart, overlap: () => overlap, procs };
+  return { root, store, orchestrator, get conversations() { return conversations; }, args, starts, heard, replies, settings, handedOver, atWork, until, stop, restart, overlap: () => overlap, procs };
 }
 
 /** The model and effort a start (Claude's argv) or the last turn (Codex's turn/start) ran on. */
@@ -134,7 +138,7 @@ test("claude: saved twice and messaged twice during a reply: one new process, on
   try {
     const c = x.conversations.create({ title: "Twice" });
     x.conversations.say(c.id, "FAKE-SLOW");
-    await x.until("the slow turn at work", () => x.store.readChat(c.id).entries.some((e) => e.kind === "tool"), LONGER.step);
+    await x.until("the slow turn at work", () => x.atWork(c.id), LONGER.step);
     x.conversations.update(c.id, { effort: "high" });
     x.conversations.say(c.id, "one");
     x.conversations.update(c.id, { model: "fake-c", effort: "low" });
@@ -353,7 +357,6 @@ test("claude: a save while the turn still runs, a message into that turn, one af
 
 test("claude: a message into the turn, a hand-over and a save in the same turn, which ends settling (LCF7 b): the late turn, then the hand-over's, then the restart on the saved pair", async () => {
   const { x, c, proc, oldSaw, open } = await lateTurnSetup({ notes: "Dev/Notes", slowMs: "300" });
-  const summaries = () => x.store.readChat(x.orchestrator.session()?.id ?? "-").entries.filter((e) => e.from === "user").map((e) => e.text);
   try {
     x.conversations.say(c.id, "FAKE-SLOW: late"); // into the running turn
     x.conversations.handoff(c.id); // the turn after it (afterTurn)
@@ -366,8 +369,8 @@ test("claude: a message into the turn, a hand-over and a save in the same turn, 
     await x.until("the third answered", () => x.replies(c.id).length === 4 && x.conversations.idle(), LONGER.step);
     assert.deepEqual(oldSaw.slice(-2), ["slow reply", longReply("SUMMARY")], "the late turn, then the hand-over's, in the old process");
     assert.deepEqual(x.replies(c.id).slice(1, 3), ["slow reply", longReply("SUMMARY")]);
-    assert.equal(summaries().length, 1, "one summary handed over");
-    assert.ok(summaries()[0]!.includes(longReply("SUMMARY")), `the hand-over's reply went over, not the late turn's: ${summaries()[0]}`);
+    assert.equal(x.handedOver().length, 1, "one summary handed over");
+    assert.ok(x.handedOver()[0]!.includes(longReply("SUMMARY")), `the hand-over's reply went over, not the late turn's: ${x.handedOver()[0]}`);
     const own = x.starts().filter((a) => (a.argv as string[]).includes(c.native_id!));
     assert.equal(own.length, 2, "then one restart");
     assert.equal(ranOn(x, "claude", c.native_id!).effort, "low", "on the saved pair");
@@ -396,7 +399,7 @@ test("claude: the same turn (LCF7 b), cut off by a hand-over to the next server 
     await x.until("the old process ended", () => !x.conversations.alive(), LONGER.processes);
     cleanLate();
     x.restart().resumeCutOff();
-    await x.until("the next server's turn handed a summary over", () => x.store.readChat(x.orchestrator.session()?.id ?? "-").entries.some((e) => e.from === "user"), LONGER.step);
+    await x.until("the next server's turn handed a summary over", () => x.handedOver().length > 0, LONGER.step);
     assert.equal(ranOn(x, "claude", c.native_id!).effort, "low", "the saved pair kept across the restart");
     const own = x.starts().filter((a) => (a.argv as string[]).includes(c.native_id!)).at(-1)!.argv as string[];
     assert.equal(own[own.indexOf("--resume") + 1], c.native_id, "in the same native session");
@@ -406,18 +409,17 @@ test("claude: the same turn (LCF7 b), cut off by a hand-over to the next server 
 test("codex: a hand-over and a save during a turn (no settling on Codex, LCF7): the turn, the hand-over's at its end, then the restart on the saved pair", async () => {
   process.env.FAKE_CHAT_SLOW_MS = "1000";
   const x = setup({ runtime: "codex", notes: "Dev/Notes" });
-  const summaries = () => x.store.readChat(x.orchestrator.session()?.id ?? "-").entries.filter((e) => e.from === "user").map((e) => e.text);
   try {
     const c = x.conversations.create({ title: "Codex", runtime: "codex" });
     x.conversations.say(c.id, "FAKE-SLOW");
-    await x.until("the slow turn at work", () => x.store.readChat(c.id).entries.some((e) => e.kind === "tool"), LONGER.step);
+    await x.until("the slow turn at work", () => x.atWork(c.id), LONGER.step);
     x.conversations.handoff(c.id);
     x.conversations.update(c.id, { effort: "low" });
     x.conversations.say(c.id, "third");
     await x.until("the third answered", () => x.replies(c.id).length === 3 && x.conversations.idle(), LONGER.step);
     assert.deepEqual(x.replies(c.id).slice(0, 2), ["slow reply", longReply("SUMMARY")]);
-    assert.equal(summaries().length, 1);
-    assert.ok(summaries()[0]!.includes(longReply("SUMMARY")));
+    assert.equal(x.handedOver().length, 1);
+    assert.ok(x.handedOver()[0]!.includes(longReply("SUMMARY")));
     assert.equal(x.starts().filter((a) => a.method === "thread/start" || a.method === "thread/resume").length, 2, "one restart");
     assert.equal(ranOn(x, "codex").effort, "low");
     assert.equal(x.overlap(), 1);
@@ -430,7 +432,7 @@ test("claude: Stop during a turn whose restart is held (a save, then a message):
   try {
     const c = x.conversations.create({ title: "Stop" });
     x.conversations.say(c.id, "FAKE-SLOW");
-    await x.until("the slow turn at work", () => x.store.readChat(c.id).entries.some((e) => e.kind === "tool"), LONGER.step);
+    await x.until("the slow turn at work", () => x.atWork(c.id), LONGER.step);
     x.conversations.update(c.id, { effort: "low" });
     x.conversations.say(c.id, "after the stop");
     x.conversations.stop(c.id);
@@ -466,7 +468,7 @@ test("claude: the restarted process does not start (LCF7): the error is in the c
   try {
     const c = x.conversations.create({ title: "Broken" });
     x.conversations.say(c.id, "FAKE-SLOW");
-    await x.until("the slow turn at work", () => x.store.readChat(c.id).entries.some((e) => e.kind === "tool"), LONGER.step);
+    await x.until("the slow turn at work", () => x.atWork(c.id), LONGER.step);
     x.conversations.update(c.id, { effort: "low" });
     x.conversations.say(c.id, "FAKE-EXIT: 1 the new process could not start");
     await x.until("the new process's failure in the chat", () => x.store.readChat(c.id).entries.some((e) => e.kind === "error" && e.text.includes("could not start")) && x.conversations.idle(), LONGER.step);
@@ -481,16 +483,15 @@ test("claude: the restarted process does not start (LCF7): the error is in the c
 test("claude: a hand-over asked before a save runs in the old process; one asked after it waits for the new one; neither is lost", async () => {
   process.env.FAKE_CHAT_SLOW_MS = "1200";
   const x = setup({ notes: "Dev/Notes" });
-  const summaries = () => x.store.readChat(x.orchestrator.session()?.id ?? "-").entries.filter((e) => e.from === "user").length;
   try {
     const c = x.conversations.create({ title: "Hand" });
     x.conversations.say(c.id, "FAKE-SLOW");
-    await x.until("the slow turn at work", () => x.store.readChat(c.id).entries.some((e) => e.kind === "tool"), LONGER.step);
+    await x.until("the slow turn at work", () => x.atWork(c.id), LONGER.step);
     x.conversations.handoff(c.id);
     x.conversations.update(c.id, { effort: "low" });
     // A message after the save: the old process is to end after its turn, and the hand-over queued in it still runs.
     x.conversations.say(c.id, "After the save");
-    await x.until("the first summary handed over", () => summaries() === 1, LONGER.step);
+    await x.until("the first summary handed over", () => x.handedOver().length === 1, LONGER.step);
     assert.equal(x.replies(c.id).filter((r) => r === longReply("SUMMARY")).length, 1, "the summary, not mixed with the reply");
     assert.ok(x.replies(c.id).includes("slow reply"));
     const own = () => x.starts().filter((a) => (a.argv as string[]).includes(c.native_id!));
@@ -503,7 +504,7 @@ test("claude: a hand-over asked before a save runs in the old process; one asked
     await x.until("the next slow turn at work", () => x.store.readChat(c.id).entries.filter((e) => e.kind === "tool" && e.text.includes("FAKE-SLOW")).length === 2, LONGER.step);
     x.conversations.update(c.id, { effort: "high" });
     x.conversations.handoff(c.id);
-    await x.until("the second summary handed over", () => summaries() === 2, LONGER.step);
+    await x.until("the second summary handed over", () => x.handedOver().length === 2, LONGER.step);
     assert.equal(own().length, 3, "the first save's process, then the second's");
     assert.equal(ranOn(x, "claude", c.native_id!).effort, "high", "the hand-over's turn on the saved pair");
     assert.equal(x.overlap(), 1);
@@ -538,7 +539,7 @@ test("claude: a restart while a message waits for the new process: the next serv
   try {
     const c = x.conversations.create({ title: "Restart" });
     x.conversations.say(c.id, "FAKE-SLOW");
-    await x.until("the slow turn at work", () => x.store.readChat(c.id).entries.some((e) => e.kind === "tool"), LONGER.step);
+    await x.until("the slow turn at work", () => x.atWork(c.id), LONGER.step);
     x.conversations.update(c.id, { effort: "low" });
     x.conversations.say(c.id, "Waiting one");
     x.conversations.cutOff();
