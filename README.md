@@ -971,8 +971,28 @@ decide. A step cannot be accepted, by you or by a reviewer, while one of its dec
 an acceptance: you answer, then accept (or Fix it, or Reject, which need no answer). The review helper answers the
 reviewer's decisions and hands yours to you; the orchestrator answers a decision of yours only at level 3 or while you
 are away, provisionally, and you confirm it with the step. The answers go to the queue's later steps. In
-`nexus status` a step shows "review decisions: 2 decisions, 1 open (D1)". (The dashboard's decision cards come with
-RVD4; until then a decision of yours is answered through the review API.)
+`nexus status` a step shows "review decisions: 2 decisions, 1 open (D1)".
+
+In the dashboard a step in your review starts with **Your decisions · 1 of 3 answered**, before its summary and
+pictures. Each decision is a card: the question, what follows from it, "View …" for the picture or file it is about,
+its options (the worker's recommendation marked "recommended", never chosen for you), a box for why or for another
+answer ("none of these: …"), and its own **Save**. A saved decision folds to one line with Change; once all are saved
+they fold into one box. For example, a design step "Design: the waiting list's layout" may ask D1 "Which layout?"
+(A: one list, B: grouped by queue; B recommended, View A and B), D2 "What does Snooze do?" and D3 "Does the phone
+change in this queue?": you look at the pictures, choose B for D1 and save it, and so on, then press **Accept and go
+on**, a click of its own. **Accept stays disabled** while the bar says why: "2 decisions open (D2, D3): answer them to
+accept" (Go to D2 takes you to it), "D2: chosen, not saved: save it or cancel it to accept", "Your answer to D3 asks for
+a change: Fix it sends your answers to the worker" (an option the worker marked as meaning the work must change), or
+"D1: the orchestrator's answer is a proposal: make it yours to accept" (an answer it gave while you were away: **Use
+this answer** saves it as yours). **Fix it…** and **Reject** work without any answer. The picture viewer says the same
+beside its Accept and has **Decisions (1 of 3)**, the same cards over the picture, those about it first. A choice you
+did not save is not kept by a reload; a save that fails says so on its card ("Not saved: …"); if the question changed
+or another tab answered meanwhile, the save or the Accept is refused with why and the page shows what is current.
+After a send-back every decision is open again, with "Round 1: you chose B" and one click "Same as round 1: B". In the
+return batch each provisionally accepted step lists the orchestrator's answers (with why, when, "while you were away"),
+**Instead…** beside each opens Fix it with "D1: I choose “A” instead of “B”" written in, and with more than one step
+**Confirm all N…** first lists the orchestrator's answers to your decisions, then confirms them all (or none, if one
+changed meanwhile).
 
 **Away mode**: "Away…" at the foot of the sidebar (in Settings on a phone) turns it on until a time (08:00 by default,
 the next such time); "Away until 08:00" then shows there and at the top of the right rail (in the header on a phone),

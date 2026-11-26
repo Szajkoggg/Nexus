@@ -1,8 +1,19 @@
 # Required review decisions
 
 Part of [the design](../DESIGN.md). Queue RVD, step RVD1: the contract and the screens. **Status: a proposal for the
-user's review**. The user decided D1–D4 on 2026-11-26, each as recommended (below). **Built so far**: RVD2, the protocol and the server; RVD3, the commands, the briefings, the review helper's packet and the orchestrator's notice (docs/protocol/review.md,
-"Review decisions").
+user's review**. The user decided D1–D4 on 2026-11-26, each as recommended (below). **Built so far**: RVD2, the protocol and the server; RVD3, the commands, the briefings, the review helper's packet and the orchestrator's notice; RVD4, the dashboard
+(docs/protocol/review.md, "Review decisions").
+
+**Found in RVD4.** Accept is also held by a choice made but not saved (otherwise it would accept the answer saved before,
+which the page no longer shows); the bar names the first decision it waits for with "Go to D2". Unsaved choices live in
+the page's memory, shared by the panel and the viewer, keyed by project, step, decision, version, round and who holds
+the review: a reload, a new version, a send-back's round, another project or a change of who reviews shows no old choice.
+The orchestrator's proposal (its provisional answer once the review is the user's again) is shown on the card with "Use
+this answer", which saves it as the user's own. The viewer's bar says the count short ("2 decisions open: D2, D3"): the
+long reason did not fit beside the mark and the comment at 492 px. The user may answer while the orchestrator holds
+the review too (the cards are there; Accept is not). The return batch's items carry the answers and the provisional
+acceptance's event (Confirm all names it). The rail's batch was 2 px wider than its item (layout-faults); it now takes
+the rail's own padding.
 
 **Found in RVD3.** The commands are `nexus decide` (with `--none`, `--withdraw`, `--id`) and `nexus review decide`, as
 proposed; `--for` defaults to `user`, so a decision the worker does not classify is never one a reviewer may settle. A

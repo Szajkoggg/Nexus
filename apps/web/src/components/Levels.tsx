@@ -1,9 +1,10 @@
 // Review levels, provisional acceptances and away mode in the dashboard (docs/protocol/review.md, "Review"): the level picker of
 // the approval view, a step's level and provisional mark on its line and panel, Confirm and Fix it on a provisional
 // acceptance (the return batch and the step), and the away-mode switch with its "until HH:MM" field and its sign.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { act, actResult, enc, projectUrl, request, useAction, type AttentionItem, type StepView } from "../api.ts";
-import { Button, TEXTAREA } from "./ui.tsx";
+import { insteadText } from "../decisions.ts";
+import { Button, TEXTAREA, TimeAgo } from "./ui.tsx";
 import { formatClock, t } from "../i18n.ts";
 import { usePage } from "../page.ts";
 import { runtimeName } from "../runtimes.ts";
@@ -115,10 +116,19 @@ export function provisionalWord(s: Pick<StepView, "provisional">): string | unde
  * Confirm and Fix it on one provisional acceptance. Confirm is one click; Fix it opens a box for what to fix, sent as
  * the step's send-back (the orchestrator drafts a step that fixes it). `onDone` after either.
  */
-export function ProvisionalActions({ project, queue, step, onDone, wide }: { project: string; queue: string; step: string; onDone: () => void; wide?: boolean }) {
+export function ProvisionalActions({ project, queue, step, onDone, wide, preset }: {
+  project: string; queue: string; step: string; onDone: () => void; wide?: boolean;
+  /** Opens Fix it with this text written in (the return batch's "Instead…"); a new object with each click. */
+  preset?: { text: string };
+}) {
   const [fixing, setFixing] = useState(false);
   const [text, setText] = useState("");
   const { busy, error, run } = useAction();
+  useEffect(() => {
+    if (!preset) return;
+    setFixing(true);
+    setText((old) => (old.trim() ? `${old.trimEnd()} ${preset.text}` : preset.text));
+  }, [preset]);
   const go = (path: string, body: unknown) => void run(
     () => actResult(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/${path}`, body),
     () => { setFixing(false); setText(""); onDone(); },
@@ -144,25 +154,111 @@ export function ProvisionalActions({ project, queue, step, onDone, wide }: { pro
   );
 }
 
+type BatchStep = NonNullable<AttentionItem["provisional"]>[number];
+
 /**
  * The return batch's steps, in the "waiting for you" list: each with its queue and step, what the orchestrator said
- * the user should look at, Open, and Confirm or Fix it right there.
+ * the user should look at, the answers its review gave to the step's decisions (queue RVD: who, when, why, "while you
+ * were away"; Instead… opens Fix it with the other choice written in), Open, and Confirm or Fix it right there. With
+ * more than one step, Confirm all, after a confirmation that lists the orchestrator's answers to the user's decisions.
  */
-export function BatchRows({ project, item, onOpen, onChanged }: {
+export function BatchRows({ project, item, onOpen, onChanged, className = "px-3.5 pb-3" }: {
   project: string; item: AttentionItem; onOpen: (queue: string, step: string) => void; onChanged?: () => void;
+  /** Its padding: the rail's list lines it up with its own items' (px-3). */
+  className?: string;
 }) {
+  const steps = item.provisional ?? [];
   return (
-    <ul className="space-y-2 px-3.5 pb-3">
-      {(item.provisional ?? []).map((p) => (
-        <li key={`${p.queue}/${p.step}`} className="rounded-md border border-line bg-canvas/50 px-3 py-2">
-          <button onClick={() => onOpen(p.queue, p.step)} className="block w-full text-left">
-            <span className="font-mono text-xs text-fg-3">{p.queue}/{p.step}</span> <span className="text-sm font-medium text-fg">{p.title}</span>
-            {p.text && <span className="mt-0.5 block text-xs text-fg-2"><span className="text-fg-3">{t("provisional.lookAt")} </span>{p.text}</span>}
-          </button>
-          <div className="mt-2"><ProvisionalActions project={project} queue={p.queue} step={p.step} onDone={() => onChanged?.()} /></div>
-        </li>
-      ))}
-    </ul>
+    <div className={`space-y-2 ${className}`}>
+      {steps.length > 1 && <ConfirmAll project={project} steps={steps} onDone={() => onChanged?.()} />}
+      <ul className="space-y-2">
+        {steps.map((p) => <BatchRow key={`${p.queue}/${p.step}`} project={project} p={p} onOpen={onOpen} onChanged={onChanged} />)}
+      </ul>
+    </div>
+  );
+}
+
+const byWord = (by: "user" | "orchestrator" | "helper") => t(by === "user" ? "decisions.by.you" : by === "helper" ? "decisions.by.helper" : "decisions.by.orchestrator");
+
+function BatchRow({ project, p, onOpen, onChanged }: { project: string; p: BatchStep; onOpen: (queue: string, step: string) => void; onChanged?: () => void }) {
+  const [preset, setPreset] = useState<{ text: string }>();
+  return (
+    <li className="rounded-md border border-line bg-canvas/50 px-3 py-2" data-batch-step={`${p.queue}/${p.step}`}>
+      <button onClick={() => onOpen(p.queue, p.step)} className="block w-full text-left">
+        <span className="font-mono text-xs text-fg-3">{p.queue}/{p.step}</span> <span className="text-sm font-medium text-fg">{p.title}</span>
+        {p.text && <span className="mt-0.5 block text-xs text-fg-2"><span className="text-fg-3">{t("provisional.lookAt")} </span>{p.text}</span>}
+      </button>
+      {p.none && !p.decisions?.length && <p className="mt-1 break-words text-xs text-fg-3">{t("decisions.batch.none")}: “{p.none}”</p>}
+      {!!p.decisions?.length && (
+        <ul className="mt-1.5" onClick={(e) => e.stopPropagation()}>
+          {p.decisions.map((d) => (
+            <li key={d.id} className="border-t border-line py-1.5 text-sm" data-batch-decision={d.id}>
+              <div className="flex items-baseline gap-2">
+                <span className="shrink-0 font-mono text-xs text-fg-3">{d.id}</span>
+                <span className="min-w-0 flex-1 break-words"><span className="text-fg-2">{d.text}</span> <b className="font-semibold text-fg">{d.choice ?? t("decisions.noneOfThem")}</b></span>
+                {d.by !== "user" && (
+                  <button type="button" onClick={() => setPreset({ text: insteadText(d) })} aria-label={t("decisions.insteadLabel", { id: d.id })}
+                    className="shrink-0 whitespace-nowrap text-xs text-accent hover:underline max-lg:min-h-11">{t("decisions.instead")}</button>
+                )}
+              </div>
+              <p className="break-words text-xs text-fg-3">
+                {byWord(d.by)} · <TimeAgo at={d.at} />
+                {d.away && ` · ${t("decisions.batch.away")}`}{d.provisional && ` · ${t("decisions.provisional")}`}
+                {d.words && <> · “{d.words}”</>}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-2"><ProvisionalActions project={project} queue={p.queue} step={p.step} preset={preset} onDone={() => onChanged?.()} /></div>
+    </li>
+  );
+}
+
+/**
+ * Confirm all (the user's decision D4): a confirmation listing each step's orchestrator answers to the user's
+ * decisions, then one request naming each provisional acceptance shown; if any changed meanwhile nothing is confirmed
+ * and the refusal says which (the list then shows what is current).
+ */
+function ConfirmAll({ project, steps, onDone }: { project: string; steps: BatchStep[]; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const { reload } = usePage();
+  const { busy, error, run } = useAction();
+  const confirm = () => void run(
+    () => actResult(project, "POST", "/provisional/confirm", { steps: steps.map((p) => ({ queue: p.queue, step: p.step, event: p.event })) }),
+    () => { setOpen(false); onDone(); },
+  ).finally(reload);
+  return (
+    <div onClick={(e) => e.stopPropagation()}>
+      {!open ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="quiet" onClick={() => setOpen(true)}>{t("decisions.confirmAll", { count: steps.length })}</Button>
+          <span className="text-xs text-fg-3">{t("decisions.confirmAllHint")}</span>
+        </div>
+      ) : (
+        <div className="rounded-md border border-review/30 bg-review/5 p-3" role="group" aria-label={t("decisions.confirmAllTitle", { count: steps.length })}>
+          <p className="text-sm text-fg">{t("decisions.confirmAllTitle", { count: steps.length })}</p>
+          <ul className="mt-1.5 space-y-1 text-sm">
+            {steps.map((p) => {
+              const theirs = (p.decisions ?? []).filter((d) => d.for === "user" && d.by === "orchestrator");
+              return (
+                <li key={`${p.queue}/${p.step}`} className="break-words">
+                  <span className="font-mono text-xs text-fg-3">{p.queue}/{p.step}</span> <span className="text-fg">{p.title}</span>
+                  <span className="block text-xs text-fg-2">
+                    {theirs.length ? theirs.map((d) => `${d.id}: ${d.choice ?? t("decisions.noneOfThem")}`).join(" · ") : t("decisions.confirmAllNoAnswers")}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button disabled={busy} onClick={confirm}>{t("decisions.confirmAllButton", { count: steps.length })}</Button>
+            <Button variant="quiet" onClick={() => setOpen(false)}>{t("common.cancel")}</Button>
+            {error && <span role="alert" className="text-xs text-danger">{error}</span>}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

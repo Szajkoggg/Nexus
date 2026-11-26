@@ -2,7 +2,7 @@
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
 import { errorText } from "./errors.ts";
 import { applyCheckSets, enterAcceptedReview, lastDone, reviewRound, verdictBeforeReview } from "./checks.ts";
-import { applyAnswer, applyDecision, applyMaterial, applyNone, decisionGate, emptyDecisions, helperHandOverRefusal, listState, settledDecisions, type Acceptor, type DecisionContext, type DecisionsView, type ListState } from "./review-decisions.ts";
+import { activeDecisions, applyAnswer, applyDecision, applyMaterial, applyNone, currentAnswer, decisionGate, emptyDecisions, helperHandOverRefusal, listState, settledDecisions, type Acceptor, type DecisionContext, type DecisionsView, type ListState } from "./review-decisions.ts";
 import { CONVERSATION_ONLY, DECISION_LIST, HELPER_EVENTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, countRebuild, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
@@ -56,7 +56,7 @@ export interface AttentionItem {
   /** A question's options, as the worker gave them (the waiting list shows them as buttons). */
   options?: string[];
   /** The return batch's steps (kind `provisional`). */
-  provisional?: { queue: string; step: string; title: string; at: string; text?: string; summary?: string }[];
+  provisional?: BatchStep[];
   /** The option recommended to the user (its button is marked). */
   recommended?: string;
   /** A stop's condition (kind `stopped`), apart from its reason (`text`); none for a stop known as one text. */
@@ -549,7 +549,7 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
     questions: [...questions.values()],
     tags,
     metrics,
-    attention: [...recurringAttention(recurring, queues), ...attentionOf([...queues.values()], [...questions.values()], tags)]
+    attention: [...recurringAttention(recurring, queues), ...attentionOf([...queues.values()], [...questions.values()], tags, away)]
       .sort((a, b) => (b.at ?? "").localeCompare(a.at ?? "")),
     warnings,
     away: awayNow(away),
@@ -610,7 +610,39 @@ function recurringAttention(recurring: RecurringView[], queues: Map<string, Queu
   });
 }
 
-function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsFile): AttentionItem[] {
+/**
+ * One step of the return batch: the provisional acceptance (`event`, which Confirm all names), what the orchestrator
+ * said to look at, and the answers its final review round settled (queue RVD), each with who gave it, when, and
+ * whether the user was away then.
+ */
+export interface BatchStep {
+  queue: string; step: string; title: string; at: string; event: string; text?: string; summary?: string;
+  decisions?: BatchAnswer[];
+  /** Why the step has nothing to decide (its declared none). */
+  none?: string;
+}
+
+/** An answer of a provisionally accepted step's review, for the return batch (`options`: the decision's, for "Instead…"). */
+export interface BatchAnswer {
+  id: string; text: string; options: string[]; for: "user" | "reviewer";
+  by: "user" | "orchestrator" | "helper"; at: string; choice?: string; words?: string; provisional?: true; away?: true;
+}
+
+/** The current answers of a provisionally accepted step's final round, for the return batch. */
+function batchAnswers(q: QueueView, st: StepView, away: Pick<AwayFile, "current" | "past">): BatchAnswer[] {
+  const round = reviewRound(q, st);
+  return activeDecisions(st.decisions).flatMap((d) => {
+    const a = currentAnswer(d, round);
+    if (!a) return [];
+    return [{
+      id: d.id, text: d.text, options: d.options.map((o) => o.label), for: d.for, by: a.by, at: a.at,
+      ...(a.choice ? { choice: a.choice } : {}), ...(a.text ? { words: a.text } : {}),
+      ...(a.provisional ? { provisional: true as const } : {}), ...(a.by !== "user" && awayAt(away, a.at) ? { away: true as const } : {}),
+    }];
+  });
+}
+
+function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsFile, away: Pick<AwayFile, "current" | "past">): AttentionItem[] {
   const out: AttentionItem[] = [];
   // The orchestrator's proposals for the project's tag lists: the user's to accept or decline, one by one.
   for (const p of tags.proposals) out.push({ kind: "tags", text: `${tagProposalText(p, tags)}${p.reason ? `: ${p.reason}` : ""}`, at: p.at, tags: p });
@@ -674,10 +706,14 @@ function attentionOf(queues: QueueView[], questions: QuestionView[], tags: TagsF
     }
   }
   // The return batch: every provisional acceptance not confirmed or sent to a fix, also of a finished queue.
-  const batch = queues.flatMap((q) => q.steps.filter((s) => pendingProvisional(s)).map((s) => ({
-    queue: q.id, step: s.id, title: s.title, at: s.provisional!.at,
-    ...(s.provisional!.text ? { text: s.provisional!.text } : {}), ...(s.summary ? { summary: s.summary } : {}),
-  }))).sort((a, b) => a.at.localeCompare(b.at));
+  const batch = queues.flatMap((q) => q.steps.filter((s) => pendingProvisional(s)).map((s): BatchStep => {
+    const decisions = batchAnswers(q, s, away);
+    return {
+      queue: q.id, step: s.id, title: s.title, at: s.provisional!.at, event: s.provisional!.event,
+      ...(s.provisional!.text ? { text: s.provisional!.text } : {}), ...(s.summary ? { summary: s.summary } : {}),
+      ...(decisions.length ? { decisions } : {}), ...(!activeDecisions(s.decisions).length && s.decisions.none ? { none: s.decisions.none.text } : {}),
+    };
+  })).sort((a, b) => a.at.localeCompare(b.at));
   if (batch.length) {
     out.push({ kind: "provisional", text: `${batch.length} provisional acceptance${batch.length === 1 ? "" : "s"} wait${batch.length === 1 ? "s" : ""} for your confirmation`, at: batch.at(-1)!.at, provisional: batch });
   }

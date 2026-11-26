@@ -1,13 +1,14 @@
 // A seed for the capture tool (queue RVD): a test project "demo" whose design step WT1 waits for the user's review,
 // with two alternative layouts and a phone mockup, three acceptance criteria and a summary that names three choices
-// the user has to make. It is the data of RVD1's before (today's review, where those choices sit in the summary's
-// prose) and of its mockups (docs/ux/mockups/27-review-decisions.html), which draw the same step with its decision
-// list. Run by scripts/capture.ts as `node <this> <data dir>` with NEXUS_HOME set to the development instance's; it
-// writes only there.
+// the user has to make. It was the data of RVD1's before (today's review, where those choices sit in the summary's
+// prose) and of its mockups (docs/ux/mockups/27-review-decisions.html); since RVD4 the worker also declares the three
+// choices as review decisions, and the user saved D1 already (the afters: scripts/capture/examples/review-decisions.yaml).
+// Run by scripts/capture.ts as `node <this> <data dir>` with NEXUS_HOME set to the development instance's; it writes
+// only there.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { crc32, deflateSync } from "node:zlib";
-import { ProjectStore, approveQueue, newId, writeRegistry, type Event, type SessionFile } from "@nexus/protocol";
+import { ProjectStore, answerDecision, approveQueue, newId, writeRegistry, type Event, type SessionFile } from "@nexus/protocol";
 
 const dir = process.argv[2];
 if (!dir) throw new Error("usage: node seed-review-decisions.ts <data dir>");
@@ -49,6 +50,7 @@ const st = ProjectStore.init(root, { id: "demo", name: "Demo app", root, orchest
 writeRegistry({ protocol: 1, projects: [{ id: "demo", root }] });
 // Reviewed by level from before the seeded events (else the server's first start would mark them as from before).
 st.markReviewLevels(ago(24 * 60));
+st.markReviewDecisions(ago(24 * 60));
 const w: SessionFile = { protocol: 1, id: newId(), project: "demo", role: "worker", runtime: "claude", title: "WT worker", cwd: root, launched_by: "nexus", created_at: ago(120), queue: "WT" };
 st.writeSession(w);
 const emit = (min: number, body: Record<string, unknown>) => st.appendEvent({ v: 1, id: newId(), at: ago(min), session: w.id, ...body } as Event);
@@ -75,7 +77,18 @@ emit(60, { type: "review.added", queue: "WT", step: "WT1", round: 1, items: [
   { path: b, label: "B: grouped by queue", kind: "image", key: "waiting-list@1440", role: "variant-b", size: { width: 1440, height: 900 } },
   { path: phone, label: "Phone: one list", kind: "image", key: "waiting-list@390", role: "mockup", size: { width: 390, height: 844 } },
 ] });
+// The three choices of the summary, as the worker declares them before its step.done (nexus decide).
+const decide = (min: number, decision: string, text: string, options: string[], recommended: string, material: string[], why: string) =>
+  emit(min, { type: "review.decision", queue: "WT", step: "WT1", decision, text, options: options.map((label) => ({ label })), recommended, material, why, for: "user" });
+decide(59.5, "D1", "Which layout for the waiting list on the desktop?", ["A: one list, oldest first", "B: grouped by queue"], "B: grouped by queue",
+  ["waiting-list@1440"], "WT2 builds it; the other one is dropped.");
+decide(59.4, "D2", "What does Snooze do?", ["Hide it for an hour", "Hide it until it changes"], "Hide it until it changes",
+  [], "When a snoozed item comes back to the list.");
+decide(59.3, "D3", "Does the phone's Waiting tab change in this queue?", ["Yes, in WT2", "Later, in a queue of its own"], "Later, in a queue of its own",
+  ["waiting-list@390"], "Yes adds a step to WT; later leaves the phone as it is.");
 emit(58, { type: "check.result", queue: "WT", step: "WT1", name: "npm test", ok: true, summary: "212 passed" });
 emit(55, { type: "step.done", queue: "WT", step: "WT1", activities: ["ui", "capture"],
   summary: "Two layouts for the waiting list, A (one list, oldest first) and B (grouped by queue), at 1440 and 390 px. For your decision: which layout (I recommend B); whether Snooze hides an item for an hour or until it changes (I recommend until it changes); and whether the phone changes in this queue or later (I recommend later)." });
+// The user saved D1 already (the dashboard's answer: version 1, round 1).
+answerDecision(st, { queue: "WT", step: "WT1", decision: "D1", version: 1, round: 1, choice: "B: grouped by queue" });
 console.log(`seeded ${root}`);

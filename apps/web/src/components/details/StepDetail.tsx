@@ -27,6 +27,7 @@ import type { PanelProps } from "./props.ts";
 import { Changes } from "./QueueDetail.tsx";
 import { Question, QuestionSheet } from "./questions.tsx";
 import { PictureActions, Rejected, ReviewBar } from "./review.tsx";
+import { DecisionList, useStepDecisions } from "./decisions.tsx";
 import {
   CheckRunBox, ContinuedBox, GoalAcceptance, Material, MessageAgent, Messages, Notes, ProvisionalBox, RetryLine, ReviewNotes, ReviewPictures, SentBack, StatusNote, StepChecks, StepMetrics,
   Summary, Timeline,
@@ -50,6 +51,22 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
   const { pairs, images } = stepPictures(step, (path) => fileUrl(id, path));
   const shown = shownPicture(layerValue(useNav(), "viewer"), images.length);
   const writes = { project: id, queue, step };
+  // A decision's material (queue RVD): a picture's view key or path opens the viewer on it; another item, its file.
+  const material = (m: string) => {
+    const at = pairs.findIndex((p) => p.item.path === m || p.item.key === m);
+    if (at >= 0) {
+      const item = pairs[at]!.item;
+      const many = !!item.key && item.key === m && pairs.filter((p) => p.item.key === m).length > 1;
+      return { label: many || !item.label ? m : item.label, open: () => nav.open(`viewer:${at}`) };
+    }
+    const other = step.review_items.find((r) => r.path === m || r.url === m);
+    if (!other) return undefined;
+    return { label: other.label ?? m, open: () => window.open(other.url ?? fileUrl(id, other.path!), "_blank", "noreferrer") };
+  };
+  const decisions = useStepDecisions(id, queue, step);
+  // In review the user answers (also while the orchestrator holds it: the user's answer counts whoever reviews); after
+  // it, the answers are only shown.
+  const decisionsPart = <DecisionList project={id} queue={queue} step={step} decisions={decisions} material={material} readOnly={readOnly || step.status !== "review"} />;
 
   // The step's parts. While it waits for the user's review the summary and the pictures come first (UX proposals,
   // 13 and 14); otherwise the usual order.
@@ -69,7 +86,7 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
   const viewer = shown !== undefined && images.length > 0 && (
     <ImageViewer images={images} index={shown} onIndex={(i) => nav.open(`viewer:${i}`)} onClose={() => nav.close("viewer")}
       back={step.id} context={`${project.project.name} · ${queue.id} · ${step.id} ${step.title}`}
-      footer={readOnly ? undefined : (i) => <PictureActions key={pairs[i]!.item.path} project={id} queue={queue} step={step} path={pairs[i]!.item.path!} src={images[i]!.src} />} />
+      footer={readOnly ? undefined : (i) => <PictureActions key={pairs[i]!.item.path} project={id} queue={queue} step={step} path={pairs[i]!.item.path!} src={images[i]!.src} material={material} />} />
   );
   const notes = (!readOnly || step.notes.length > 0) && <Notes {...writes} forOrchestrator={forOrchestrator} notesOpen={notesOpen} readOnly={readOnly} />;
   const refusals = <StepRefusals project={project} queue={queue.id} step={step.id} />;
@@ -83,6 +100,7 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
   const accepted = acceptedWord(step);
   const body = reviewing ? (
     <>
+      {decisionsPart}
       {integration}
       {summary}
       <StepTags step={step} />
@@ -93,7 +111,7 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
     </>
   ) : (
     <>
-      <ProvisionalBox {...writes} />{integration}{chat}{retry}{switches}{summary}
+      <ProvisionalBox {...writes} />{decisionsPart}{integration}{chat}{retry}{switches}{summary}
       <ReviewNotes step={step} reviewing={reviewing} orchestratorAsks={orchestratorAsks} />
       {push}{rejected}<SentBack step={step} />{message}{questionsPart}<StatusNote step={step} /><GoalAcceptance step={step} />
       <Material project={id} step={step} pairs={pairs} />{viewer}
@@ -151,7 +169,7 @@ export function StepDetail({ project, queue, step, onClose, of, qid }: PanelProp
             : <p role="status" className="text-sm text-fg-2">{t("details.question.unavailable")}</p>)}
           {body}
         </PanelBody>}
-      {!questionFirst && reviewing && <ReviewBar key={step.id} project={id} queue={queue.id} step={step.id} next={noteTargets(queue.steps, step.id).next} criteria={step.acceptance} />}
+      {!questionFirst && reviewing && <ReviewBar key={`${id}/${queue.id}/${step.id}`} project={id} queue={queue} step={step} next={noteTargets(queue.steps, step.id).next} criteria={step.acceptance} />}
     </>
   );
 }

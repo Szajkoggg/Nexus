@@ -1,14 +1,61 @@
-# The step review of a design step with three choices for the user (queue RVD), on scripts/capture/seed-review-decisions.ts.
-# RVD1 took these as the befores of the mockups in docs/ux/mockups/27-review-decisions.html; RVD4 takes its afters here.
-#   node scripts/capture.ts scripts/capture/examples/review-decisions.yaml --step <queue>/<step>
+# The step review of a design step with three decisions for the user (queue RVD), on scripts/capture/seed-review-decisions.ts.
+# RVD1 took the first three as the befores of the mockups in docs/ux/mockups/27-review-decisions.html; RVD4 takes the
+# afters here: D1 saved, D2 chosen but not saved, D3 open; the viewer's decisions sheet; Fix it with no answer; then
+# D2 and D3 saved (the complete views change the instance's data, so they come last).
+#   node scripts/capture.ts scripts/capture/examples/review-decisions.yaml --no-before
+# The return batch: review-decisions-return.yaml.
 seed: scripts/capture/seed-review-decisions.ts
 views:
   - key: review-decisions@1440
     route: "#/demo/WT/WT1"
     label: "The review of a design step with three decisions"
+    actions:
+      - click: { selector: "[data-decision='D2'] [role=radio]:nth-child(2)" }
   - key: review-decisions@492
     route: "#/demo/WT/WT1"
     label: "The review of a design step with three decisions, narrowest window"
+    actions:
+      - click: { selector: "[data-decision='D2'] [role=radio]:nth-child(2)" }
+      - scroll: "Your decisions"
   - key: review-decisions@390
     route: "#/demo/WT/WT1"
     label: "The review of a design step with three decisions, phone"
+    actions:
+      - click: { selector: "[data-decision='D2'] [role=radio]:nth-child(2)" }
+      - scroll: "Your decisions"
+  - key: review-decisions-viewer@492
+    route: "#/demo/WT/WT1"
+    label: "The picture viewer: Accept waits for two decisions; the decisions sheet, those about this picture first"
+    actions:
+      - click: { selector: "img[alt='A: one list, oldest first']" }
+      - wait: 600
+      - click: { selector: "[data-action='decisions']" }
+  - key: review-decisions-fix@390
+    route: "#/demo/WT/WT1"
+    label: "Fix it with no decision answered, phone"
+    actions:
+      - click: { selector: "[data-action='fix']" }
+      - type: { text: "Draw B with the queue's name above each group.", into: "textarea[placeholder='What you want instead…']" }
+  - key: review-decisions-complete@1440
+    route: "#/demo/WT/WT1"
+    label: "Every decision saved: Accept is enabled, still a click of its own"
+    actions:
+      # Fix it opens with the text the fix view left (its draft is kept): closed again first.
+      - click: { selector: "[data-action='fix']" }
+      - click: { selector: "[data-decision='D2'] [role=radio]:nth-child(2)" }
+      - click: { selector: "[data-decision='D2'] [data-action='save']" }
+      - wait: 800
+      - click: { selector: "[data-decision='D3'] [role=radio]:nth-child(2)" }
+      - type: { text: "After WT ships", into: "[data-decision='D3'] textarea" }
+      - click: { selector: "[data-decision='D3'] [data-action='save']" }
+      - wait: 800
+  - key: review-decisions-complete@492
+    route: "#/demo/WT/WT1"
+    label: "Every decision saved, narrowest window"
+    actions:
+      - click: { selector: "[data-action='fix']" }
+  - key: review-decisions-complete@390
+    route: "#/demo/WT/WT1"
+    label: "Every decision saved, phone"
+    actions:
+      - click: { selector: "[data-action='fix']" }

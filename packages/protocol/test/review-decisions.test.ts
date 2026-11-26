@@ -267,6 +267,31 @@ test("away mode: the orchestrator's answers while away count for a provisional a
   assert.match(userAcceptRefusal(x.state(), x.q(), x.st()) ?? "", /proposal/);
 });
 
+test("the return batch lists the orchestrator's answers with why, time and the away mark, and the acceptance to confirm", () => {
+  const x = setup({ level: 3 });
+  x.work([["D1"], ["D2", { for: "reviewer" }]]);
+  const since = new Date(last - 60_000).toISOString();
+  const until = new Date(last + 3000).toISOString();
+  writeAway({ protocol: 1, past: [{ since, until, ended: until, why: "expired" }] });
+  x.answer(x.orch, "D1", "B", { text: "reads better" });
+  ahead(5000); // away has ended: level 3 still lets the orchestrator answer, not marked "while you were away"
+  x.answer(x.orch, "D2", "A");
+  const event = x.emit(x.orch, { type: "review.provisional", text: "the layout is yours" });
+  const batch = x.state().attention.find((a) => a.kind === "provisional")!.provisional!;
+  assert.deepEqual(batch.map((b) => [b.step, b.event]), [["Q1", event]]);
+  assert.deepEqual(batch[0]!.decisions!.map((d) => [d.id, d.by, d.choice, d.words, d.provisional, d.away, d.for, d.options]), [
+    ["D1", "orchestrator", "B", "reads better", true, true, "user", ["A", "B"]],
+    ["D2", "orchestrator", "A", undefined, undefined, undefined, "reviewer", ["A", "B"]],
+  ]);
+  // A step that declared none: its why instead of answers.
+  const y = setup({ level: 3 });
+  y.work([], "a refactor");
+  y.emit(y.orch, { type: "review.provisional" });
+  const row = y.state().attention.find((a) => a.kind === "provisional")!.provisional![0]!;
+  assert.equal(row.none, "a refactor");
+  assert.equal(row.decisions, undefined);
+});
+
 test("the user's level 1 takes the review: the orchestrator's later answers do not count", () => {
   const x = setup({ level: 2 });
   x.work([["D1", { for: "reviewer" }]]);

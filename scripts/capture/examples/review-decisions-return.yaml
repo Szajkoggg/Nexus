@@ -1,0 +1,17 @@
+# The return batch after away mode (queue RVD), on scripts/capture/seed-review-decisions-return.ts: the orchestrator's
+# answers to WT1's decisions with why, time and "while you were away", Instead…, Confirm, Fix it and Confirm all.
+#   node scripts/capture.ts scripts/capture/examples/review-decisions-return.yaml --no-before
+seed: scripts/capture/seed-review-decisions-return.ts
+views:
+  - key: review-decisions-return@1440
+    route: "#/demo"
+    label: "The return batch with the orchestrator's answers"
+    actions:
+      # The day's digest stands above the waiting list: seen once (here), it is folded in the views after this one too.
+      - click: "Mark as seen"
+  - key: review-decisions-return@492
+    route: "#/demo"
+    label: "The return batch with the orchestrator's answers, narrowest window"
+  - key: review-decisions-return@390
+    route: "#/demo"
+    label: "The return batch with the orchestrator's answers, phone"

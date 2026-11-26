@@ -351,10 +351,12 @@ function ComposerBox({ draft, placeholder, button, onSubmit, allowEmpty = false,
   );
 }
 
-export function Button({ children, onClick, disabled, variant = "primary", pressed }: {
+export function Button({ children, onClick, disabled, variant = "primary", pressed, action }: {
   children: ReactNode; onClick: () => void; disabled?: boolean; variant?: "primary" | "quiet" | "danger";
   /** A toggle (the bar's "Fix it…" while its form is open). */
   pressed?: boolean;
+  /** What it does, as `data-action` (for the browser regressions and captures to find it). */
+  action?: string;
 }) {
   const style = {
     primary: "bg-accent-strong text-on-accent hover:bg-accent",
@@ -362,7 +364,7 @@ export function Button({ children, onClick, disabled, variant = "primary", press
     danger: "text-danger hover:bg-danger/10",
   }[variant];
   return (
-    <button onClick={onClick} disabled={disabled} aria-pressed={pressed} className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 max-lg:min-h-11 max-lg:px-4 ${style}`}>
+    <button onClick={onClick} disabled={disabled} aria-pressed={pressed} data-action={action} className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 max-lg:min-h-11 max-lg:px-4 ${style}`}>
       {children}
     </button>
   );

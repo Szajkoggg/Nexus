@@ -26,7 +26,8 @@ levels 2 and 3 within these rules; see "The review helper".
 is at level 3, or at level 2 while away mode is on; any other is ignored with a warning) makes the step `done` with `provisional` (`at`, `event`, `text?`) on the
 derived step, and the run goes on. Until the user deals with it, it is in the **return batch**: one item of kind
 `provisional` in the attention list ("N provisional acceptances wait for your confirmation"), with `provisional`, the
-steps oldest first (`queue`, `step`, `title`, `at`, `text?`, `summary?`); a finished queue's steps too. For each the
+steps oldest first (`queue`, `step`, `title`, `at`, `event` (the provisional acceptance, which Confirm all names),
+`text?`, `summary?`, `decisions?` and `none?`, see "Review decisions"); a finished queue's steps too. For each the
 user either confirms it (`review.confirmed`, `POST …/steps/:s/confirm`; `provisional.confirmed`) or asks a fix
 (`review.fix_asked`, **Fix it**: the same `POST …/steps/:s/send-back`; `provisional.fix` with `text` and `at`). Both
 are the user's only: the orchestrator never confirms, and the CLI has no command for either. A Fix it does not reopen
@@ -112,7 +113,7 @@ user is ignored (with a warning); the user may accept either. Workers may write 
 
 ## Review decisions
 
-**Status: protocol, server, commands and briefings in effect** (queue RVD, RVD2 and RVD3); the dashboard comes in RVD4. The design and the user's decisions are
+**Status: in effect** (queue RVD: RVD2 the protocol and the server, RVD3 the commands and briefings, RVD4 the dashboard). The design and the user's decisions are
 in DESIGN.md, ["Required review decisions"](../design/review-decisions.md).
 
 A step's review carries a **decision list**: the questions its review must answer before the step can be accepted
@@ -175,6 +176,14 @@ A step's review carries a **decision list**: the questions its review must answe
   session's, whose seed the opening follows) has "Decisions from earlier reviews": each accepted step's current answers
   with the question and who answered, an orchestrator's provisional one marked until the user confirms the step
   (`queueDecisions`, `settledDecisions`). `nexus help decisions` is the standard.
+- **The return batch** (RVD4): each provisionally accepted step's item in `provisional` has `decisions`, the current
+  answers of its final round (`id`, `text`, `options`, `for`, `by`, `at`, `choice?`, `words?`, `provisional?`, and
+  `away?` for a reviewer's answer given while the user was away), and `none`, the why of a declared none.
+- **The dashboard** (RVD4): the step's panel in review starts with the decision cards (each with its own Save; an
+  option chosen but not saved is kept in the page's memory only, by the decision's version, the round and who holds
+  the review), and Accept is disabled while a decision is open, asks for a change, holds only the orchestrator's
+  proposal, or has an unsaved choice; its request names the answers shown (`decisions`). The picture viewer shows the
+  same and the same cards. The browser regression is `scripts/review-decisions.mjs`.
 - **The user's answer**: `POST …/steps/:s/decisions/:d/answer` (`version`, `round`, `choice?`, `text?`; 409 when either
   moved; the same answer twice writes once). **Confirm all**: `POST …/provisional/confirm` (`steps`, each with the
   provisional acceptance seen), all or nothing. Both in api.md.

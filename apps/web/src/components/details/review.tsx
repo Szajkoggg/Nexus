@@ -9,25 +9,36 @@ import { usePhone } from "../../phone.ts";
 import { reviewedByOrchestrator } from "@nexus/protocol/status-rules";
 import { ActionBar, Button, Composer, Markdown, TEXTAREA, TimeAgo, useDraftText, type MenuEntry } from "../ui.tsx";
 import { usePage } from "../../page.ts";
+import { DecisionList, goToDecision, holdText, useStepDecisions } from "./decisions.tsx";
 
-interface ReviewArgs { project: string; queue: string; step: string; next?: string; criteria: string[] }
+interface ReviewArgs { project: string; queue: QueueView; step: StepView; next?: string; criteria: string[] }
 
 /**
  * The user's decision on a step in their review, for an action bar: Accept (with a note, under ⋯), Fix it… beside it,
  * Reject under ⋯, and the forms they open. Fix it opens with the text kept from before, if there is one. The step's
  * drawer and the picture viewer each show it (`accept` names the button).
  */
-function useReviewDecision({ project, queue, step, next, criteria }: ReviewArgs, accept_label: string) {
+function useReviewDecision({ project, queue: q, step: s, next, criteria }: ReviewArgs, accept_label: string, goTo: (id: string) => void = goToDecision) {
   const { reload: onChanged } = usePage();
   const [error, setError] = useState<string>();
+  const queue = q.id, step = s.id;
+  // Accept waits for every decision answered and saved (queue RVD); it names the answers shown, so that an answer
+  // saved meanwhile elsewhere refuses it. Fix it and Reject never wait for an answer.
+  const decisions = useStepDecisions(project, q, s);
+  const held = decisions.hold;
   // Accept's note: closed by default; empty means a plain accept. It goes to the next step, or to the orchestrator
   // (always on the queue's last step).
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
   const [noteTo, setNoteTo] = useState<"next" | "orchestrator">("next");
   const to = next ? noteTo : "orchestrator";
-  const accept = () => act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/accept`, note.trim() ? { text: note, note_to: to } : {})
-    .then(() => { setNote(""); setNoteOpen(false); onChanged(); }, (e: Error) => setError(e.message));
+  const accept = () => {
+    if (held) { goTo(held.ids[0]!); return; }
+    setError(undefined);
+    return act(project, "POST", `/queues/${enc(queue)}/steps/${enc(step)}/accept`, {
+      ...(note.trim() ? { text: note, note_to: to } : {}), ...(s.decision_list === "declared" ? { decisions: decisions.seen } : {}),
+    }).then(() => { setNote(""); setNoteOpen(false); onChanged(); }, (e: Error) => { setError(e.message); onChanged(); });
+  };
   const [fixOpen, setFixOpen] = useState(() => !!readDraft(draftKey(project, "fix", queue, step)));
   const [rejectOpen, setRejectOpen] = useState(false);
   // Fix it with criteria: the text waits here until the user confirms that it overrides them.
@@ -40,9 +51,17 @@ function useReviewDecision({ project, queue, step, next, criteria }: ReviewArgs,
   const opened = noteOpen || fixOpen || rejectOpen;
   return {
     error,
+    decisions,
+    /** Why Accept waits, with a way to the first decision it waits for; "All decisions answered" once none holds it. */
+    hint: (short?: boolean) => held
+      ? <span className="block text-warn" data-accept-hold={held.kind}>
+        {short && held.kind === "open" ? t("decisions.hold.short", { count: held.ids.length, ids: held.ids.join(", ") }) : holdText(held)}{" "}
+        {!short && <button type="button" onClick={() => goTo(held.ids[0]!)} className="whitespace-nowrap font-medium text-accent hover:underline max-lg:min-h-11">{t("decisions.goTo", { id: held.ids[0]! })} ↓</button>}
+      </span>
+      : decisions.cards.length ? <span className="block text-fg-2" data-accept-hold="none">{t("decisions.allSaved")}</span> : undefined,
     menu,
-    secondary: <Button variant="quiet" pressed={fixOpen} onClick={() => setFixOpen(!fixOpen)}>{t("details.review.fixOpen")}</Button>,
-    primary: <Button onClick={() => void accept()}>{note.trim() ? t("details.review.acceptWithNote") : accept_label}</Button>,
+    secondary: <Button variant="quiet" action="fix" pressed={fixOpen} onClick={() => setFixOpen(!fixOpen)}>{t("details.review.fixOpen")}</Button>,
+    primary: <Button action="accept" disabled={!!held} onClick={() => void accept()}>{note.trim() ? t("details.review.acceptWithNote") : accept_label}</Button>,
     forms: opened && <div className="space-y-4">
       {rejectOpen && <RejectStep project={project} queue={queue} step={step} onCancel={() => setRejectOpen(false)} />}
       {noteOpen && (
@@ -97,7 +116,7 @@ function useReviewDecision({ project, queue, step, next, criteria }: ReviewArgs,
 export function ReviewBar(props: ReviewArgs) {
   const d = useReviewDecision(props, t("details.review.acceptGoOn"));
   return (
-    <ActionBar hint={d.error ? <span className="text-danger">{d.error}</span> : undefined} menu={d.menu} secondary={d.secondary} primary={d.primary}>
+    <ActionBar hint={d.error ? <span role="alert" className="text-danger">{d.error}</span> : d.hint()} menu={d.menu} secondary={d.secondary} primary={d.primary}>
       {d.forms}
     </ActionBar>
   );
@@ -110,10 +129,17 @@ export function ReviewBar(props: ReviewArgs) {
  * picture without leaving the viewer. A comment goes back to the worker as a Fix it while the step waits for the user's
  * review; otherwise it is a note on the next pending step. The original file is under ⋯.
  */
-export function PictureActions({ project, queue, step, path, src }: { project: string; queue: QueueView; step: StepView; path: string; src: string }) {
+export function PictureActions({ project, queue, step, path, src, material }: {
+  project: string; queue: QueueView; step: StepView; path: string; src: string;
+  /** Opens a decision's material (decisions.tsx). */
+  material?: (m: string) => { label: string; open: () => void } | undefined;
+}) {
   const { reload: onChanged } = usePage();
   const marks = step.pictures[path];
   const [error, setError] = useState<string>();
+  // The step's decisions as a sheet over the picture (queue RVD): those about this picture first.
+  const [sheet, setSheet] = useState(false);
+  const openDecision = (id: string) => { setSheet(true); requestAnimationFrame(() => goToDecision(id)); };
   const next = noteTargets(queue.steps, step.id).next;
   const reviewing = showsReviewActions(step);
   const where = reviewing ? t("details.picture.toWorker")
@@ -124,7 +150,9 @@ export function PictureActions({ project, queue, step, path, src }: { project: s
     draft: draftKey(project, "picture", queue.id, step.id, path),
     onSubmit: async (text) => { await act(project, "POST", `${base}/comment`, { path, text }); onChanged(); },
   });
-  const decision = useReviewDecision({ project, queue: queue.id, step: step.id, next, criteria: step.acceptance }, t("details.acceptTheStep"));
+  const decision = useReviewDecision({ project, queue, step, next, criteria: step.acceptance }, t("details.acceptTheStep"), openDecision);
+  const { cards, answered, total } = decision.decisions;
+  const picture = { path, key: step.review_items.find((r) => r.path === path)?.key };
   const original = { label: t("details.picture.original"), onSelect: () => window.open(src, "_blank", "noreferrer") };
   const phone = usePhone();
   const fail = error ?? comment.error ?? (reviewing ? decision.error : undefined);
@@ -145,13 +173,17 @@ export function PictureActions({ project, queue, step, path, src }: { project: s
           )}
         </div>
       }
-      hint={fail ? <span className="text-danger">{fail}</span> : reviewing && !phone ? <span className="block text-right">{t("details.picture.theStep")}</span> : undefined}
+      hint={fail ? <span role="alert" className="text-danger">{fail}</span> : reviewing && decision.hint(true) ? <span className="block text-right">{decision.hint(true)}</span> : reviewing && !phone ? <span className="block text-right">{t("details.picture.theStep")}</span> : undefined}
       menu={reviewing ? [...decision.menu, original] : [original]}
-      secondary={reviewing ? decision.secondary : undefined}
+      secondary={reviewing ? <>
+        {cards.length > 0 && <Button variant="quiet" action="decisions" pressed={sheet} onClick={() => setSheet(!sheet)}>{t("decisions.sheet", { answered, total })}</Button>}
+        {decision.secondary}
+      </> : undefined}
       primary={reviewing ? decision.primary : undefined}
     >
-      {(reviewing && decision.forms) || marks?.comments.length ? (
+      {(reviewing && (decision.forms || (sheet && cards.length > 0))) || marks?.comments.length ? (
         <div className="space-y-3 text-sm">
+          {reviewing && sheet && cards.length > 0 && <DecisionList project={project} queue={queue} step={step} decisions={decision.decisions} picture={picture} material={material} bare />}
           {reviewing && decision.forms}
           {!!marks?.comments.length && (
             <div className="space-y-1.5">

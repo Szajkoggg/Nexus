@@ -246,7 +246,7 @@ export function WaitingCards({ projects, current, onOpen }: { projects: ProjectS
           </button>
           {a.lift && a.queue && <div className="-mt-1"><StopRow project={a.project} a={{ ...a, lift: a.lift }} onOpen={() => onOpen(a)} /></div>}
           {a.kind === "merge" && <MergeRow project={a.project} a={a} onOpen={() => onOpen(a)} className="-mt-1 px-3 pb-2.5" />}
-          {a.kind === "provisional" && <div className="-mx-0.5"><BatchRows project={a.project} item={a} onOpen={(queue, step) => nav.item(a.project, queue, step)} /></div>}
+          {a.kind === "provisional" && <BatchRows project={a.project} item={a} onOpen={(queue, step) => nav.item(a.project, queue, step)} className="px-3 pb-3" />}
           {a.kind === "plan" && <div className="-mx-3.5 -mb-3"><PlanRow project={a.project} a={a} /></div>}
           {a.kind === "tags" && <TagProposalRow project={a.project} a={a} className="px-3 pb-2.5" />}
           {a.kind === "recurring" && <RecurringRow project={a.project} a={a} className="px-3 pb-2.5" />}
