@@ -331,6 +331,17 @@ running in don't ask permission mode"). With the rule `Read(//c/<path>/**)` in `
 refusal; a template cannot carry it, since a queue has no permission rules and an agent must not widen its own). The
 template's stop conditions tell the worker to report a refused read as a finding with the rule to add.
 
+The survey's ideas step (the second) also proposes the idea links (decision D14 of docs/ux/idea-work-signals.md): it reads the
+links with `nexus ideas status`, and where a queue built a decided entry but is not linked to it, where a link ties a queue
+to an entry it did not carry out, or where a link has the wrong date, it proposes `add`, `remove` or `replace`, each item with
+its own reason and evidence, in one `nexus ideas propose --file … --reason "notes survey <queue id>"` batch (the file in the
+temporary folder outside the project, deleted afterwards). A proposal is no change to the project, the notes or the links, so
+it is allowed in survey mode and is not what the survey stop condition forbids; only the user's acceptance changes a link. The
+CLI refuses a whole batch with a wrong or repeated item ("nothing proposed: …"): the worker leaves the named items out,
+reports them as findings and proposes the rest again. Marking an entry implemented or confirmed stays the user's and the
+idea partner's; the report only lists it. The report's "Ideas notes" part lists the proposals made apart from the findings
+that were only reported. The recurring `notes` queue waits for approval again when the template changes.
+
 ## Static analysis reminder
 
 Nexus ships a `static-analysis` template (`templates/static-analysis.yaml`, for any stack): survey the stack and ask the

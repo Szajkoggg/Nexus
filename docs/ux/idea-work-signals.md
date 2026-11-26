@@ -292,7 +292,8 @@ Each is declared with `nexus decide IWS1` (D1 …), with the material that shows
 14. **D14 (d) The notes survey**: a later small queue changes the notes template so its survey step proposes the
     missing and wrong links itself (recommended; the recurring notes queue then waits for approval again, and the
     template's survey stop condition changes) / no template change: the orchestrator turns the survey's report into
-    proposals.
+    proposals. *Built by the NIP queue (the notes template's ideas step proposes; its stop condition says a link proposal
+    is no change).*
 15. **D15 (d) Waiting cards**: one per proposer's batch (recommended) / one per project, all pending proposals.
 
 ## Run control and lifecycle code

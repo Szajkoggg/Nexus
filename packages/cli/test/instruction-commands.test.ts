@@ -171,6 +171,7 @@ function texts(): Map<string, string> {
   for (const f of readdirSync(GOLDEN).filter((x) => x.endsWith(".txt")).sort()) out.set(`apps/server/test/golden/${f}`, readFileSync(join(GOLDEN, f), "utf8"));
   for (const [topic, { text }] of Object.entries(HELP_TOPICS)) out.set(`nexus help ${topic}`, text);
   out.set("AGENTS.md", readFileSync(join(ROOT, "AGENTS.md"), "utf8"));
+  for (const f of ["templates/notes.yaml", "nexus-templates/nexus-notes.yaml"]) out.set(f, readFileSync(join(ROOT, f), "utf8"));
   return out;
 }
 
@@ -224,7 +225,7 @@ test("a nexus run without --reason and a flag the CLI does not have fail, and sa
   assert.notDeepEqual(problemsOf(cli, parser, { cmd: "nexus step begin S1", quoted: false }), []);
 });
 
-test("every nexus command in the prompt goldens, the help topics and AGENTS.md is one the CLI takes as written", (t) => {
+test("every nexus command in the prompt goldens, the help topics, AGENTS.md and the notes templates is one the CLI takes as written", (t) => {
   const { problems, checked } = textProblems(texts());
   assert.deepEqual(problems, [], `commands the CLI would refuse or misread:\n${problems.join("\n")}`);
   assert.ok(checked > 300, `${checked} commands checked`);

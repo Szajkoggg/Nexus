@@ -3,8 +3,8 @@ template:
   id: nexus-notes
   title: Notes kept true
   description: Nexus's own instance of the notes template, filled in for this repository. Check the Claude sessions'
-    memory notes, the ideas notes and the project documents; report what is stale, unmarked or untrue; fix_small fixes
-    only typos in the project documents.
+    memory notes, the ideas notes and the project documents; report what is stale, unmarked or untrue and propose the missing and
+    wrong idea links; fix_small fixes only typos in the project documents.
 maintenance: survey
 # A worktree of its own: a survey keeps the main checkout free (nothing to merge back; Nexus removes the worktree once
 # the run is done), fix_small merges its fixes back through the integration step. The ideas notes are not tracked by
@@ -32,8 +32,9 @@ title: "Maintenance: notes kept true"
 description: |
   A survey of three kinds of notes: the memory notes of the Claude sessions ({{memory_dir}}), the ideas notes
   ({{ideas_dir}}) and the project documents ({{docs}}) against {{code}}. It reports what is stale, unmarked or untrue;
-  the report becomes a queue the user approves. In survey mode nothing is changed or committed. In fix_small mode
-  only the clear typos in the project documents are fixed: the memory notes (the orchestrator's) and the ideas notes
+  the report becomes a queue the user approves. In survey mode nothing is changed or committed; the ideas survey
+  does propose the missing and wrong links between the ideas notes and the queues (`nexus ideas propose`), which the
+  user accepts or declines. In fix_small mode only the clear typos in the project documents are fixed: the memory notes (the orchestrator's) and the ideas notes
   (the idea partner's) are only reported, in every mode.
   The report ends with a section "Recommended additions" (see the last survey step).
 coding: true
@@ -43,7 +44,7 @@ stop_conditions:
     finding, with the rule the user would add (in the project's allowed_tools, from the refusal's Allow rule), and
     survey the rest.
   - Surveying would need a change to the project, the memory folder or the ideas (a fix, a commit) in survey mode;
-    report it as a finding instead.
+    report it as a finding instead. A link proposal (`nexus ideas propose`) is not such a change; the user decides it.
   - A decision that belongs to the user comes up (which of a document and the code is right); ask with nexus ask, with a
     recommendation.
   - A file to commit has changes this queue did not make; ask with nexus ask, never commit them.
@@ -75,11 +76,27 @@ steps:
       that is decided or planned: has it been built? Look for the traces in the code, the documents, the git log and
       the queues (`nexus status`, the queues' reports). Report the entries that were built but are not marked so,
       with the commit or queue that built them, and the entries marked built that the code does not bear out.
-      Marking them is the idea partner's; you only report. Or say there were none. Change nothing, commit nothing.
+      Marking them (implemented, confirmed) is the user's and the idea partner's; you only report. Or say there were
+      none. Change nothing, commit nothing.
+      First read the links between the notes and the queues: `nexus ideas status`, and one entry's details with
+      `nexus ideas status <file>.md#<date>`. Write a reference as that command shows it (`<file>.md#<date>`, a Decided
+      entry only), not as a path under {{ideas_dir}}. Where a queue built an entry (a commit or the queue's report is
+      the evidence) but is not linked to it: propose to add the link. Where a link ties a queue to an entry the queue
+      did not carry out: propose to remove it. Where a link ties a queue to the wrong date: propose to replace it by
+      the right one. Each item has its own short reason and its evidence (a list: the commit, the place in the queue's
+      report).
+      Make the proposals in one batch: write the items to a file in the temporary folder where you also write the
+      queue's report (outside the project), run `nexus ideas propose --file <file> --reason "notes survey <queue id>"`,
+      and delete the file. The CLI refuses the whole batch ("nothing proposed: …") if one item is wrong or repeats a
+      proposal that waits already: leave the items it names out, report them as findings, and propose the rest again.
+      If there is nothing to propose, propose nothing. A link proposal is allowed in survey mode: it changes neither
+      the project, the notes nor the links, and the user decides on it; it is not a change in the sense of "change
+      nothing".
     acceptance:
       - Each built but unmarked entry with the commit or queue that built it, and each wrong mark, or that there were
         none.
-      - The ideas folder as it was.
+      - The links read with `nexus ideas status`; each missing, wrong or misdated link proposed as add, remove or replace, one item each with its reason and evidence, in one `nexus ideas propose` batch (items the CLI refused reported as findings), or that there was nothing to propose.
+      - The ideas folder, the links and the project as they were (the proposals wait for the user), and the batch file deleted.
     review:
       level: 2
     kind: research
@@ -95,6 +112,8 @@ steps:
       fix is small (a typo) or not. Change nothing, commit nothing.
       Then give the report: the findings of the three surveys together, under "Memory notes", "Ideas notes" and
       "Project documents", each with its weight.
+      Under "Ideas notes" list the link proposals made (how many, with which operation, for which queue and entry)
+      apart from the findings that were only reported (marks, refused items).
       The report ends with "Recommended additions" (not counted among the findings): what the project could add to
       keep its notes true (a link or example check for the documents, a marking convention for built ideas, a
       parameter left to a default), each with its reason.

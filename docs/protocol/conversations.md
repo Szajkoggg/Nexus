@@ -130,6 +130,8 @@ a retry can retrieve it even if the project subsequently changed or a crashed wr
 `add` a link, `remove` the queue's link to the entry, `replace` it by a link to `to`. The CLI checks what it can before
 it writes (the role; the queue; the note and date; an add not effective yet, a remove's or replace's edge effective, a
 replace's target not linked yet; the same proposal not waiting already) and refuses the whole batch with the reasons.
+The `notes` template's survey is such a worker: its ideas step proposes the missing and wrong links in one batch, in survey
+mode too ([planning.md](planning.md#the-notes-template-and-reading-outside-the-project)).
 
 The server takes the events in as one decision of its change pass ("idea link proposals", before the orchestrator's),
 outside the run-control code: every session's `ideas.links_proposed` whose event id `.nexus/idea-proposals.yaml` does
