@@ -86,5 +86,5 @@ test("nexus help review prints the standard; nexus help lists the topics; an unk
   }
   assert.match(await nexus("help"), /Topics \(nexus help <topic>\):\r?\n  review /);
   assert.match(await nexus("--help"), /nexus help \[<topic>\]/);
-  await assert.rejects(async () => await nexus("help", "nope"), /no help topic "nope" \(topics: review, summaries, context, questions, refusals, commits, tests\)/);
+  await assert.rejects(async () => await nexus("help", "nope"), /no help topic "nope" \(topics: review, summaries, context, questions, decisions, refusals, commits, tests\)/);
 });

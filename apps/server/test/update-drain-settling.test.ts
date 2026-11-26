@@ -86,7 +86,9 @@ test("an update's drain waits for a worker settling after its step's last turn: 
     const activity = store.readActivity(session).entries.filter((e) => ["turn_start", "turn_end", "text"].includes(e.kind) && !/^Nexus /.test(e.text));
     const lateStart = activity.findIndex((e, i) => e.kind === "turn_start" && i > activity.findIndex((x) => x.kind === "turn_end"));
     assert.ok(lateStart > 0, `a late turn started after the step's last turn: ${JSON.stringify(activity.map((e) => e.kind))}`);
-    assert.ok(activity.slice(lateStart).some((e) => e.kind === "text" && e.text.includes("FAKE-HISTORY: keep the grassland settings.")),
+    // Only the message (FAKE-HISTORY) makes the fake reply "history: …"; the reply lists the step's opening first, and
+    // the activity keeps its first 600 characters, so the message's own words may be cut off there.
+    assert.ok(activity.slice(lateStart).some((e) => e.kind === "text" && e.text.startsWith("history: [Nexus] Queue Q")),
       `the message was taken in as the late turn: ${JSON.stringify(activity.slice(lateStart).map((e) => e.text))}`);
     assert.equal(received().filter((m) => m.text.includes("grassland")).length, 1, "the message was sent once, into the turn");
   } finally {
