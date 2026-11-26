@@ -65,6 +65,8 @@ you**, one **Link proposals** card per batch with **Accept all N**, **Review…*
 accept: one that no longer fits is greyed with why ("Outdated: this link already exists …") and only **Dismiss**;
 in a batch with such an item, **Accept the valid one(s)** writes the others. An accepted proposal is a link with
 the proposer's reason in **Correction history**, undone like any other; the orchestrator is told what you decided.
+A new batch is pushed like the other waiting items (the kind "An agent proposes idea links" in the notification
+settings).
 
 The [tested MT/IO/ST2 correction guide](docs/ux/ideas-corrections-guide.md) identifies the exact origins and dates
 to review; it changes no real data. `nexus ideas matches` and `nexus ideas status` let agents read effective links,
