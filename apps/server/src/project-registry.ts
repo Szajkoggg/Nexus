@@ -66,7 +66,7 @@ export class ProjectRegistry {
    * when this server is active, which writes <NEXUS_HOME>/capacity.yaml anew: the grants of a server before it ended
    * with its processes.
    */
-  capacity?: Capacity;
+  private capacity?: Capacity;
 
   constructor(parts: RegistryParts) { this.p = parts; }
 
@@ -76,8 +76,7 @@ export class ProjectRegistry {
    */
   refresh(): void {
     const { projects, coordinator, planner, lifecycle } = this.p;
-    this.capacity ??= new Capacity({ onChange: () => this.p.capacityChanged() });
-    const capacity = this.capacity;
+    const capacity = (this.capacity ??= new Capacity({ onChange: () => this.p.capacityChanged() }));
     const changed = (id: string) => this.p.changed(id);
     // Global settings (docs/protocol/settings.md, "Global settings"): the file exists from the first start on, with the built-in defaults; each project's
     // project.yaml from before them is migrated once, before anything reads it (effective values unchanged).
@@ -165,6 +164,12 @@ export class ProjectRegistry {
    */
   dropAll(): void {
     for (const e of [...this.p.projects.values()]) this.drop(e);
+  }
+
+  /** At the server's own end (SIGINT, SIGTERM): the capacity and every project's parts stop, nothing waited for. */
+  shutdown(): void {
+    this.capacity?.shutdown();
+    for (const e of this.p.projects.values()) { e.engine.shutdown(); e.orchestrator.shutdown(); e.conversations.shutdown(); e.merger.shutdown(); }
   }
 
   /** Watches the project's .nexus folder (watchers.ts): a change runs its decisions, a log line goes to the dashboards. */
