@@ -94,8 +94,9 @@ object)" (A: the server recognises its agents' processes, by job object). HG2 bu
   (`GetExtendedTcpTable`, IPv4 and IPv6, loopback rows only), finds the process that owns the client end and answers
   whether it is a member of its job. A process in an agent's job is refused (403) whatever its headers, its cookie or
   its proxy headers; only the orchestrator's job may send `update`, `cancel`, `plan` and `cancel-plan`, and no agent
-  `away`. The host answers off its control reader; a host that does not answer in three seconds counts as no agent and
-  is logged, so the user is never locked out. With no agent running nothing is asked. Off Windows the guard is today's.
+  `away`. The host answers off its control reader; a host that does not answer in three seconds, or whose lookup fails
+  (it says why, LCF6), counts as no agent and is logged, so the user is never locked out. A loopback connection that no
+  running process owns any more is refused too (LCF6, below). With no agent running nothing is asked. Off Windows the guard is today's.
 - **Codex's elevated sandbox.** That sandbox runs commands as the accounts of the local group `CodexSandboxUsers`
   (`CodexSandboxOffline`, `CodexSandboxOnline`), possibly started outside the job of the Codex that asked for them. So
   the host also reads the owner's account from the session list (`WTSEnumerateProcessesEx`, which names other
@@ -122,3 +123,44 @@ found in the group while the user is not.
 What stays open: a worker with a free shell running as the user can still leave its job (WMI and the task scheduler
 work outside the sandbox) and can write the project's files anyway; the guard makes the HTTP route deliberate, not
 impossible, for it. The orchestrator on Codex, the case the switch waited for, cannot.
+
+### Its lifecycle paths (LCF6)
+
+Queue LCF went through the guard's paths when an agent is interrupted, goes on in a new process, outlives a server, or
+the lookup fails. Three were open, and are closed:
+
+- **An ended client.** The hosts found a connection's owner in the TCP table and asked whether it is in their job. A
+  process that sent its whole request and then exited, or reset the connection while it lived on, left no running owner
+  in the table by the time the hosts were asked; they answered "nobody's", and the write passed with a browser's
+  headers. Reproduced: the hosts asked after the connection closed named 20 of 20 such requests nobody's, and with the
+  server's immediate question the first reset request of a fresh host passed. Now a host answers 3 when no running
+  process owns the client end (no row, a row naming no process, or a process the session list no longer names), and the
+  server refuses such a loopback request while agents run (`ENDED_CLIENT`): whose it was cannot be told, and nobody
+  waits for its answer. A connection that is not a loopback one (a device on the network with `NEXUS_HOST` set) is
+  never in the hosts' table, gets the same answer, and is let through as before.
+- **A failed lookup** (the TCP table or the session list cannot be read) was answered "nobody's" silently. Now it is
+  answered 4 with its reason, and the server logs it before it lets the request through, as a host's silence is.
+- **An agent that outlives an update's release.** The release waits up to 10 s for the agents' exits; one still running
+  after it (a process denying its termination holds its host's K back) ran on beside the successor until the old
+  server's exit, and the successor's guard never knew its job. Now the release ends every agent's job left at once, by
+  its host (`endAgentJobs`, docs/design/updates.md).
+
+| Group | Path | Test | Result |
+|---|---|---|---|
+| Interruption | A process of the job sends a write and exits, or resets the connection, before the hosts are asked | `apps/server/test/agent-guard.test.ts` ("an ended client"); the same reset write in every agent script of the server tests | was let through; fixed, refused |
+| Interruption | The job ends (stop, kill, Stop at once) while a host is asked | `apps/server/test/worker-process-frames.test.ts` ("closes while asked") | that host answers nobody's; the others still look the owner up (an ended one is refused) |
+| Interruption | The job's processes after a stop, a kill or the job host's end | `apps/server/test/worker-job.test.ts`, `apps/server/test/worker-processes.test.ts` | they end with it: no member writes afterwards |
+| Continuation | A worker's step (Claude), a thinking partner on Codex, the orchestrator's fresh session after a reset | `apps/server/test/agent-guard.test.ts` ("every new agent process") | refused, as the first process |
+| Continuation | Every launch names its session's role (worker, orchestrator, review helper) | `apps/server/test/review-helper.test.ts` ("a checkable level-2 step") | each runs in an agent's job |
+| Restart | The server ends: its agents' jobs end with their hosts' pipe | `apps/server/test/agent-guard.test.ts` ("every new agent process"); `apps/server/test/worker-job.test.ts` | the old orchestrator's process ends; nothing of it meets the next server |
+| Restart | The next server resumes the orchestrator's session in a process of its own | `apps/server/test/agent-guard.test.ts` ("every new agent process") | refused |
+| Restart | An update's release with an agent that does not exit in 10 s | `apps/server/test/project-registry.test.ts`, `apps/server/test/worker-process-frames.test.ts` ("endAgentJobs") | ran on beside the successor; fixed, its job ended at the wait's end |
+| Failure | A host does not answer in 3 s | `apps/server/test/worker-process-frames.test.ts` | let through, logged; a late answer changes nothing |
+| Failure | A host's lookup fails | `apps/server/test/worker-process-frames.test.ts` | was silent; now let through and logged with its reason |
+| Failure | The job is not created (F before the runtime started) | `apps/server/test/worker-process-frames.test.ts` | the host ends, the runtime never runs, the host is never asked |
+
+What stays open: a job host that closes while it is asked answers "nobody's", so a request whose own job ends in that
+moment passes when no other agent runs (any other host still looks its owner up). Refusing it would refuse the user's
+own write that coincides with an agent's end. And with `NEXUS_HOST` set to every address, an agent connecting through
+the machine's own network address is not in the hosts' loopback table: the guard does not see it (the remote access
+rules still ask it for the token).

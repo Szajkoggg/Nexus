@@ -65,31 +65,57 @@ const OWNER_ANSWER_MS = 3000;
 
 /** What agentOwning answers for a command of Codex's elevated sandbox found in no agent's job. */
 const CODEX_SANDBOX = "codex-sandbox";
+/**
+ * What agentOwning answers when no running process owns the connection's client end: it sent its request and closed
+ * the connection, or ended, before the job hosts were asked (LCF6). Whose it was cannot be told any more; for a loopback
+ * connection the guard refuses it (main.ts), as nobody waits for its answer. A connection that is not a loopback one is
+ * never in the hosts' table, and gets this answer too.
+ */
+export const ENDED_CLIENT = "ended-client";
 
-/** A job host's answer: a process of its job owns the connection, a command of Codex's sandbox does, or neither. */
-type Ownership = "job" | "sandbox" | "none";
-/** The job host's digits for an Ownership (worker-job.cs Owns); any other is "none". */
-const OWNERSHIP: Readonly<Record<string, Ownership>> = { "1": "job", "2": "sandbox" };
+/**
+ * A job host's answer: a process of its job owns the connection, a command of Codex's sandbox does, no running process
+ * does, a running process outside both does, or the lookup failed (with its reason).
+ */
+type Ownership = "job" | "sandbox" | "ended" | "none" | { failed: string };
+/** The job host's digits for an Ownership (worker-job.cs Owns; 4 is a failed lookup, with its reason); any other is "none". */
+const OWNERSHIP: Readonly<Record<string, Ownership>> = { "1": "job", "2": "sandbox", "3": "ended" };
 
 /**
  * Which agent's job, if any, owns the client end of a loopback connection to this server, named by its two ports (the
  * client's own and the server's): the role of the agent session (queue HG, docs/design/security.md). A command run as
  * an account of Codex's elevated sandbox (the CodexSandboxUsers group) is an agent's in any case: CODEX_SANDBOX, when
- * it is in no agent's job. Asks every agent's job host at once. A host that does not answer in time counts as not
- * owning it, and is logged: a failed lookup must never lock the user out. Off Windows there are no jobs, and the answer
- * is always none.
+ * it is in no agent's job. ENDED_CLIENT when no running process owns it (and no host names a job or the sandbox).
+ * Asks every agent's job host at once. A host that does not answer in time, or whose lookup fails, counts as not
+ * owning it, and is logged: a failed lookup must never lock the user out. Off Windows there are no jobs, and the
+ * answer is always none.
  */
 export async function agentOwning(clientPort: number, serverPort: number): Promise<string | undefined> {
   const hosts = [...agentJobs];
   if (!hosts.length) return undefined;
   const answers = await Promise.all(hosts.map((h) => h.owns(clientPort, serverPort).then(
-    (owns) => ({ owns, agent: h.agent }),
+    (owns) => {
+      if (typeof owns !== "object") return { owns, agent: h.agent };
+      console.error(`write guard: an agent's job host could not look up the connection's owner (${owns.failed}); the request is let through`);
+      return { owns: "none" as const, agent: h.agent };
+    },
     (err: Error) => {
       console.error(`write guard: an agent's job host did not answer (${err.message}); the request is let through`);
-      return { owns: "none" as Ownership, agent: h.agent };
+      return { owns: "none" as const, agent: h.agent };
     },
   )));
-  return answers.find((a) => a.owns === "job")?.agent ?? (answers.some((a) => a.owns === "sandbox") ? CODEX_SANDBOX : undefined);
+  const job = answers.find((a) => a.owns === "job")?.agent;
+  if (job !== undefined) return job;
+  if (answers.some((a) => a.owns === "sandbox")) return CODEX_SANDBOX;
+  return answers.some((a) => a.owns === "ended") ? ENDED_CLIENT : undefined;
+}
+
+/**
+ * Ends every agent's job still running at once, by its host (SIGKILL: the host's end closes the job, and Windows ends
+ * every member, queue LCK F2). An update's release does this after its wait for the agents' exits (ProjectRegistry).
+ */
+export function endAgentJobs(): void {
+  for (const h of agentJobs) h.kill("SIGKILL");
 }
 
 /** Starts the job host's PowerShell (worker-job.ps1) in `cwd` with `env`. */
@@ -207,9 +233,10 @@ export class WorkerProcess extends EventEmitter implements RuntimeChild {
         case "E": this.stderr.write(Buffer.from(value, "base64")); break;
         case "X": this.result = Number(value); break;
         case "T": {
-          const [id, owns] = value.split(" ");
+          const [id, owns, reason] = value.split(" ");
           const a = this.asking.get(Number(id));
-          if (a) { clearTimeout(a.timer); this.asking.delete(Number(id)); a.resolve(OWNERSHIP[owns!] ?? "none"); }
+          const answer: Ownership = owns === "4" ? { failed: Buffer.from(reason ?? "", "base64").toString("utf8") } : OWNERSHIP[owns!] ?? "none";
+          if (a) { clearTimeout(a.timer); this.asking.delete(Number(id)); a.resolve(answer); }
           break;
         }
         case "C": {

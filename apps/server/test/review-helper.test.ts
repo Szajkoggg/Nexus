@@ -25,8 +25,11 @@ function setup(o: { limit?: number; helper?: Record<string, unknown> } = {}) {
   process.env.FAKE_ARGS = join(root, "fake-args.log");
   const store = ProjectStore.init(root, { id: "p", name: "P", root });
   updateSettings(store, { defaults: { review_send_back_limit: o.limit ?? 2 }, review_helper: { model: "claude-haiku-5-5", effort: "low", ...o.helper } });
-  const engine: Engine = new Engine(store, () => tick(), { spawn: inProcessRuntime(), ...QUICK_ENGINE });
-  const orchestrator: Orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn: inProcessRuntime(), helpers: {} });
+  // Every launch's agent role (queue LCF, LCF6): the role its process's job is named by for the write guard.
+  const roles: (string | undefined)[] = [];
+  const spawn = inProcessRuntime({ wrap: (proc, launch) => { roles.push(launch.options.agentRole); return proc; } });
+  const engine: Engine = new Engine(store, () => tick(), { spawn, ...QUICK_ENGINE });
+  const orchestrator: Orchestrator = new Orchestrator(store, engine, () => tick(), {}, { spawn, helpers: { spawn } });
   function tick() { routeAnswers(store); orchestrator.onChange(loadProjectState(store)); engine.onChange(loadProjectState(store)); }
   const timer = setInterval(tick, 150);
   const state = () => loadProjectState(store);
@@ -51,7 +54,7 @@ function setup(o: { limit?: number; helper?: Record<string, unknown> } = {}) {
     engine.start(id);
   };
   const stop = () => { clearInterval(timer); engine.shutdown(); orchestrator.shutdown(); };
-  return { store, engine, orchestrator, state, step, until, delivered, orchestratorSaw, helpers, run, tick, stop };
+  return { store, engine, orchestrator, state, step, until, delivered, orchestratorSaw, helpers, run, tick, stop, roles };
 }
 
 const reviewFact = (q: string, s: string) => (t: string) => t.includes(`Step ${s} of queue ${q} is done and waits for your review`);
@@ -86,6 +89,8 @@ test("a checkable level-2 step: the helper accepts it on its own model and effor
     // Nothing reached the orchestrator: no review notice, no accepted line.
     assert.ok(!x.orchestratorSaw().some(reviewFact("A", "A1")) && !x.orchestratorSaw().some(reviewFact("A", "A2")), x.orchestratorSaw().join("\n---\n"));
     assert.ok(!x.orchestrator.view().chat.some((c) => /A1|A2/.test(c.text)), "no line in the orchestrator's chat");
+    // Every process started ran as its session's role, the helper's too: its job is an agent's for the write guard.
+    assert.deepEqual([...new Set(x.roles)].sort(), ["helper", "orchestrator", "worker"]);
   } finally { x.stop(); }
 });
 

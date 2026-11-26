@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { CleanupTimedOut } from "../src/agent.ts";
-import { WorkerProcess, spawnRuntimeChild } from "../src/worker-process.ts";
+import { ENDED_CLIENT, WorkerProcess, agentOwning, endAgentJobs, spawnRuntimeChild } from "../src/worker-process.ts";
 import { LONGER, until } from "./wait.ts";
 
 const b64 = (text: string) => Buffer.from(text, "utf8").toString("base64");
@@ -309,4 +309,123 @@ setInterval(() => {}, 1000);
     assert.equal(alive(family.root), false);
     await runtime.cleanup!();
   } finally { runtime.kill(); await exited; }
+});
+
+// ---------------------------------------------------------------- the write guard's question (LCF6)
+// What agentOwning answers from each agent's host's T frame (queue HG, its lifecycle paths in queue LCF, LCF6): a host
+// that fails its lookup, does not answer, closes while asked, or never created its job; and endAgentJobs, an update's
+// release's last act. The hosts are pipes of the test's own; agent-guard.test.ts runs the real hosts.
+
+/** An agent's job host's side of the pipe: the T questions the server wrote, and whether it closed. */
+class AgentHostPipe extends EventEmitter {
+  input = "";
+  readonly stdin = new Writable({ write: (chunk: Buffer, _e, done) => { this.input += chunk.toString(); done(); } });
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+  kill(): boolean { this.close(null); return true; }
+  /** The T questions the server wrote: [id, client port, server port]. */
+  asked(): string[][] { return this.input.split("\n").filter((l) => l.startsWith("T ")).map((l) => l.slice(2).split(" ")); }
+  send(text: string): void { this.stdout.write(text); }
+  closed = false;
+  close(code: number | null = 0): void { if (!this.closed) { this.closed = true; this.emit("close", code); } }
+}
+
+/** An agent's job host for `role`, closed when the test ends (the hosts are module state). */
+function agentHost(t: TestContext, role: string) {
+  const h = new AgentHostPipe();
+  new WorkerProcess("runtime.exe", [], { cwd: tmpdir(), env: {}, agent: role }, () => h as unknown as ChildProcessWithoutNullStreams);
+  t.after(() => h.close());
+  return h;
+}
+
+/** Asks about the connection 50000 to 4317, and lets each host answer with `digits` (undefined: no answer). */
+async function ask(hosts: [AgentHostPipe, string | undefined][]) {
+  const answer = agentOwning(50000, 4317);
+  await settle();
+  for (const [h, digits] of hosts) {
+    const q = h.asked().at(-1);
+    assert.deepEqual(q?.slice(1), ["50000", "4317"], "every host is asked about the connection's two ports");
+    if (digits !== undefined) h.send(`T ${q![0]} ${digits}\n`);
+  }
+  return answer;
+}
+
+function errors(t: TestContext) {
+  const logged: string[] = [];
+  t.mock.method(console, "error", (text: string) => { logged.push(text); });
+  return logged;
+}
+
+test("a host naming its job wins over the sandbox, an ended client and nobody; the sandbox over an ended client", async (t) => {
+  const orchestrator = agentHost(t, "orchestrator"), partner = agentHost(t, "conversation"), worker = agentHost(t, "worker");
+  assert.equal(await ask([[orchestrator, "3"], [partner, "0"], [worker, "1"]]), "worker");
+  assert.equal(await ask([[orchestrator, "3"], [partner, "2"], [worker, "0"]]), "codex-sandbox");
+  assert.equal(await ask([[orchestrator, "3"], [partner, "3"], [worker, "3"]]), ENDED_CLIENT);
+  assert.equal(await ask([[orchestrator, "0"], [partner, "0"], [worker, "0"]]), undefined);
+});
+
+test("a failed lookup (4 and its reason) counts as nobody's and is logged with the reason; another host's answer still counts", async (t) => {
+  const logged = errors(t);
+  const a = agentHost(t, "orchestrator"), b = agentHost(t, "worker");
+  assert.equal(await ask([[a, `4 ${b64("the TCP table could not be read (5)")}`], [b, "0"]]), undefined);
+  assert.equal(logged.length, 1);
+  assert.match(logged[0]!, /could not look up the connection's owner \(the TCP table could not be read \(5\)\); the request is let through/);
+  assert.equal(await ask([[a, `4 ${b64("x")}`], [b, "1"]]), "worker");
+});
+
+test("a host that does not answer in 3 s counts as nobody's and is logged; its late answer changes nothing", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const logged = errors(t);
+  const slow = agentHost(t, "orchestrator");
+  let answered: string | undefined | null = null;
+  const pending = ask([[slow, undefined]]).then((a) => { answered = a; });
+  await settle();
+  t.mock.timers.tick(2_999); await settle();
+  assert.equal(answered, null, "not before 3 s");
+  t.mock.timers.tick(1); await pending;
+  assert.equal(answered, undefined);
+  assert.match(logged.join("\n"), /did not answer \(no answer in 3000 ms\); the request is let through/);
+  slow.send(`T ${slow.asked()[0]![0]} 1\n`); await settle();
+  assert.equal(logged.length, 1, "a late answer is dropped quietly");
+});
+
+test("a host that closes while asked answers nobody's, unlogged, and is asked no more; with no host left nothing is asked", async (t) => {
+  const logged = errors(t);
+  const ending = agentHost(t, "conversation");
+  const answer = agentOwning(50001, 4317);
+  await settle();
+  assert.equal(ending.asked().length, 1);
+  ending.close(1);
+  assert.equal(await answer, undefined);
+  assert.equal(logged.length, 0);
+  assert.equal(await agentOwning(50002, 4317), undefined);
+  assert.equal(ending.asked().length, 1, "an ended host is not asked");
+});
+
+test("a job that could not be created (F before the runtime started): the host ends, and is never asked", async (t) => {
+  const failed = agentHost(t, "orchestrator");
+  const other = agentHost(t, "worker");
+  let exit: unknown;
+  failed.on("close", (code) => { exit = code; });
+  failed.send(`F ${b64("CreateJobObject failed")}\n`);
+  await settle();
+  assert.match(failed.input, /\nK\n/, "the server ends the job at once");
+  failed.close(1); // the real host quits after its F (worker-job.cs)
+  await settle();
+  assert.equal(exit, 1);
+  assert.equal(await ask([[other, "0"]]), undefined);
+  assert.equal(failed.asked().length, 0);
+});
+
+test("endAgentJobs (an update's release, after its wait) ends every agent's job still running at once: K and its host killed; an ended host is left alone", async (t) => {
+  const left = agentHost(t, "orchestrator"), other = agentHost(t, "worker"), gone = agentHost(t, "conversation");
+  gone.close(0);
+  let kills = 0;
+  for (const h of [left, other, gone]) { const kill = h.kill.bind(h); h.kill = () => { kills++; return kill(); }; }
+  endAgentJobs();
+  await settle();
+  assert.equal(kills, 2);
+  for (const h of [left, other]) { assert.match(h.input, /\nK\n$/); assert.ok(h.closed); }
+  assert.doesNotMatch(gone.input, /\nK\n/);
+  assert.equal(await agentOwning(50003, 4317), undefined, "no host left to ask");
 });

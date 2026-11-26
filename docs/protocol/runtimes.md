@@ -292,7 +292,7 @@ process's nice value instead. An engine in a test process leaves it off. Subsequ
 | Helper to server | `R <pid>` | Runtime launched inside the job |
 | Helper to server | `O <base64>` / `E <base64>` | Runtime stdout / stderr line, including its newline |
 | Helper to server | `C <id>` | Descendant cleanup completed; the engine may cross the boundary |
-| Helper to server | `T <id> <0\|1\|2>` | The connection's owner: 1 a process of this job, 2 a process running as an account of the local group `CodexSandboxUsers` (Codex's elevated sandbox), 0 neither or not found. The server waits three seconds for it, then takes 0 and logs it |
+| Helper to server | `T <id> <0\|1\|2\|3>`, `T <id> 4 <base64 reason>` | The connection's owner: 1 a process of this job, 2 a process running as an account of the local group `CodexSandboxUsers` (Codex's elevated sandbox), 3 no running process (the connection is not in the loopback table, its row names no process, or its process has ended: the server refuses a loopback request so answered, queue LCF), 0 a running process that is neither; 4 the lookup failed, with its reason (the server takes it as 0 and logs it). The server waits three seconds for it, then takes 0 and logs it |
 | Helper to server | `X <code>` | Runtime exited and descendants were cleaned |
 | Helper to server | `F <base64>` | Cleanup/exit failure text; pending cleanup rejects and the worker is ended |
 

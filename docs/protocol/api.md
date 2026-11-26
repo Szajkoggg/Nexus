@@ -42,8 +42,11 @@ of its own (["Windows worker process host"](runtimes.md#windows-worker-process-h
 account of Codex's elevated sandbox, is refused (403, `an agent's process (<role>) does not do the user's actions;
 agents use the nexus CLI`), whatever its headers, cookie or proxy headers say. The orchestrator's job alone may send
 `update`, `cancel`, `plan` and `cancel-plan`; no agent may send `away`. The user's browser, a phone through Tailscale
-and the user's own `nexus` are in no agent's job and are not affected. A job host that does not answer in three
-seconds counts as no agent (logged), so a failed lookup never locks the user out. Elsewhere than Windows the checks
+and the user's own `nexus` are in no agent's job and are not affected. While agents run, a loopback request whose
+process has already ended (it sent the request and exited, or reset the connection, before the hosts were asked) is
+refused too (403, `the process that sent this has ended before its owner could be told from an agent's; refused while
+agents run`; queue LCF). A job host that does not answer in three seconds, or whose lookup fails, counts as no agent
+(logged), so a failed lookup never locks the user out. Elsewhere than Windows the checks
 above are the only guard.
 
 | Request | Body | Effect |

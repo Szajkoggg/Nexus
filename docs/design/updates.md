@@ -58,7 +58,9 @@ So rolling back means four things:
   successor's would. The old engines were shut down for good by the release.
 
 The projects' side of both is `ProjectRegistry` (`src/project-registry.ts`, queue LCF): `release` stops their
-watchers, the planner's and the capacity's writes and every agent; `dropAll` takes each released project out as a
+watchers, the planner's and the capacity's writes and every agent, waits up to 10 s for their exits, and then ends every
+agent's job still running at once (queue LCF, LCF6: an agent that outlived the wait used to run on beside the successor,
+whose write guard never knew its job; docs/design/security.md, "Its lifecycle paths (LCF6)"); `dropAll` takes each released project out as a
 removed one is (its model closed, its engine out of the coordinator); `refresh` loads them anew. The port stays
 `main.ts`'s. `test/project-registry.test.ts` runs that start over on two projects: every old model is closed once,
 the coordinator holds only the new engines, and a write after it reaches one model per project.

@@ -690,6 +690,15 @@ async function answer(fake: Fake, text: string, tool: (command: string) => void,
       for (const [, name, value] of text.matchAll(/FAKE-METRIC: (\S+) (\S+)/g)) await nexus("metric", "record", name!, value!);
       await nexus("step", "done", step, "--summary", `fake finished ${step} with its metrics`);
     }
+    // "FAKE: script" with "FAKE-SCRIPT: <file>" in the goal: runs that file inside the worker's process tree (its job on
+    // Windows), as a chat's FAKE-SCRIPT does, and finishes the step with its output (queue LCF, the write guard's tests).
+    if (behaviour === "script") {
+      const file = /FAKE-SCRIPT: (\S+)/.exec(text)?.[1] ?? "";
+      let out: string;
+      try { out = execFileSync(process.execPath, [file], { env, cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(); }
+      catch (e) { out = `script failed: ${(e as { stderr?: string }).stderr ?? errorText(e)}`; }
+      await nexus("step", "done", step, "--summary", `fake ran the script of ${step}: ${out}`);
+    }
     if (behaviour === "refused") { refused?.(); await nexus("step", "done", step, "--summary", `fake finished ${step} without what was refused`); }
     // A closing refactoring step done finds nothing worth refactoring.
     if (["done", "slow", "summary", "summaryslow", "checks", "shortchecks"].includes(behaviour)) await nexus("step", "done", step, "--summary", closing ? `fake: nothing in ${step} is worth refactoring, the change is too small` : `fake finished ${step}`);

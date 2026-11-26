@@ -206,7 +206,8 @@ public static class NexusWorkerJob
     static ushort Port(uint raw) { return (ushort)(((raw & 0xff) << 8) | ((raw >> 8) & 0xff)); } // network byte order
 
     // The process that owns a loopback TCP connection's client end, from the connection's two ports (queue HG): the
-    // client's own port and the server's. Zero when no such connection is in the table (or it could not be read).
+    // client's own port and the server's. Zero when no such connection is in the table, or its row names no process (a
+    // closed one's TIME_WAIT); a table that cannot be read throws, so that a failed lookup is told from an ended client.
     static uint Owner(int family, ushort client, ushort server) {
         int size = 0;
         for (int tries = 0; tries < 8; tries++) {
@@ -214,7 +215,7 @@ public static class NexusWorkerJob
             try {
                 uint result = GetExtendedTcpTable(data, ref size, false, family, 4, 0); // TCP_TABLE_OWNER_PID_CONNECTIONS
                 if (result == 122) continue; // ERROR_INSUFFICIENT_BUFFER: size now says how much
-                if (result != 0) return 0;
+                if (result != 0) throw new InvalidOperationException("the TCP table could not be read (" + result + ")");
                 int count = Marshal.ReadInt32(data);
                 // MIB_TCPROW_OWNER_PID: state, local address, local port, remote address, remote port, pid (24 bytes).
                 // MIB_TCP6ROW_OWNER_PID: local address (16), scope, local port, remote address (16), scope, remote port,
@@ -228,7 +229,7 @@ public static class NexusWorkerJob
                 return 0;
             } finally { if (data != IntPtr.Zero) Marshal.FreeHGlobal(data); }
         }
-        return 0;
+        throw new InvalidOperationException("the TCP table kept growing while it was read");
     }
 
     static bool Loopback(int family, IntPtr row) {
@@ -249,16 +250,21 @@ public static class NexusWorkerJob
     }
 
     // The account a process runs as, read from the session list (WTS): a process of another account cannot be opened
-    // from here, but the list names every process's account.
-    static SecurityIdentifier Account(uint pid) {
+    // from here, but the list names every process's account. `running` is false when the list does not name the process
+    // at all: it has ended (a list that cannot be read throws).
+    static SecurityIdentifier Account(uint pid, out bool running) {
         int level = 1;
         IntPtr info; int count;
-        if (!WTSEnumerateProcessesEx(IntPtr.Zero, ref level, -2, out info, out count)) return null; // every session
+        running = false;
+        if (!WTSEnumerateProcessesEx(IntPtr.Zero, ref level, -2, out info, out count)) // every session
+            throw new InvalidOperationException("the process list could not be read (" + Marshal.GetLastWin32Error() + ")");
         try {
             int size = Marshal.SizeOf(typeof(ProcessInfo));
             for (int i = 0; i < count; i++) {
                 var p = (ProcessInfo)Marshal.PtrToStructure(info + i * size, typeof(ProcessInfo));
-                if (p.Pid == pid) return p.Sid == IntPtr.Zero ? null : new SecurityIdentifier(p.Sid);
+                if (p.Pid != pid) continue;
+                running = true;
+                return p.Sid == IntPtr.Zero ? null : new SecurityIdentifier(p.Sid);
             }
             return null;
         } finally { WTSFreeMemoryEx(2, info, count); } // WTSTypeProcessInfoLevel1
@@ -278,13 +284,17 @@ public static class NexusWorkerJob
     }
 
     // Who owns the client end of the connection (queue HG, docs/design/security.md): 1 a process of this job, 2 a
-    // command of Codex's sandbox (an agent's, but not known to be this job's), 0 neither.
+    // command of Codex's sandbox (an agent's, but not known to be this job's), 3 no running process (the client sent
+    // its request and closed the connection or ended before it was asked about: whose it was cannot be told; also every
+    // connection that is not a loopback one), 0 a running process that is neither. A lookup that fails throws.
     static int Owns(ushort client, ushort server) {
         uint owner = Owner(2, client, server);
         if (owner == 0) owner = Owner(23, client, server);
-        if (owner == 0) return 0;
+        if (owner == 0) return 3;
         if (Members().Contains(owner)) return 1;
-        SecurityIdentifier account = Account(owner);
+        bool running;
+        SecurityIdentifier account = Account(owner, out running);
+        if (!running) return 3;
         return account != null && CodexSandbox(account) ? 2 : 0;
     }
 
@@ -379,8 +389,10 @@ public static class NexusWorkerJob
                 // hold the server's write guard back.
                 string[] parts = command.Split(' ');
                 ThreadPool.QueueUserWorkItem(_ => {
-                    int owns = 0;
-                    try { owns = Owns(ushort.Parse(parts[2]), ushort.Parse(parts[3])); } catch (Exception) { }
+                    // A lookup that fails answers 4 with its reason: the server lets the request through and logs it.
+                    string owns;
+                    try { owns = Owns(ushort.Parse(parts[2]), ushort.Parse(parts[3])).ToString(); }
+                    catch (Exception e) { owns = "4 " + Encode(e.Message); }
                     Send("T " + parts[1] + " " + owns);
                 });
             }

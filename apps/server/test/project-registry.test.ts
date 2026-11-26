@@ -43,7 +43,7 @@ test("reacquire's start over: the released projects' old models are closed once,
     live: { forget: (id) => forgotten.push(`live ${id}`) }, watch: { forget: (id) => forgotten.push(`watch ${id}`) },
     planner: { atBoundary: () => false, notices: () => [], shutdown: () => {} },
     lifecycle: { busy: false, notice: () => undefined },
-    changed: () => {}, logChanged: () => {}, capacityChanged: () => {}, push: async () => 0,
+    changed: () => {}, logChanged: () => {}, capacityChanged: () => {}, push: async () => 0, endAgents: () => {},
   });
   try {
     registry.refresh();
@@ -83,4 +83,58 @@ test("reacquire's start over: the released projects' old models are closed once,
     await registry.release();
     registry.dropAll();
   }
+});
+
+// LCF6: an update's release waits up to 10 s for its agents' exits; an agent still running after it (a process that
+// denies its termination keeps its host's K from finishing) used to run on beside the successor, whose write guard
+// never knew its job. Now release ends every agent's job left (endAgents) as its last act, after the wait, not before.
+test("an update's release ends the agents' jobs left after its wait for their exits, not before it", async () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-registry-end-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  assertTempHome(process.env.NEXUS_HOME);
+  const root = join(base, "a");
+  mkdirSync(root);
+  ProjectStore.init(root, { id: "a", name: "A", root });
+  writeRegistry({ protocol: 1, projects: [{ id: "a", root }] });
+  const projects = new Map<string, Entry>();
+  let ended: number | undefined;
+  const registry = new ProjectRegistry({
+    projects, coordinator: new Coordinator(), pending: new Map(), watchers: new Map<string, ProjectWatch>(), watchedNotes: new Map(),
+    live: { forget: () => {} }, watch: { forget: () => {} },
+    planner: { atBoundary: () => false, notices: () => [], shutdown: () => {} },
+    lifecycle: { busy: false, notice: () => undefined },
+    changed: () => {}, logChanged: () => {}, capacityChanged: () => {}, push: async () => 0,
+    endAgents: () => { ended = Date.now(); }, exitWaitMs: 400,
+  });
+  registry.refresh();
+  const e = projects.get("a")!;
+  // The orchestrator's process does not exit.
+  let stuck = true;
+  e.orchestrator.alive = () => stuck;
+  try {
+    const started = Date.now();
+    await registry.release();
+    assert.ok(ended !== undefined, "the jobs left were ended");
+    assert.ok(ended - started >= 400, `not before the wait's end (${ended - started} ms)`);
+  } finally {
+    stuck = false;
+    registry.dropAll();
+  }
+});
+
+test("an update's release whose agents all exited ends the jobs left (none) at once, without waiting", async () => {
+  const base = mkdtempSync(join(tmpdir(), "nexus-registry-end-"));
+  process.env.NEXUS_HOME = join(base, "home");
+  assertTempHome(process.env.NEXUS_HOME);
+  writeRegistry({ protocol: 1, projects: [] });
+  let ended = 0;
+  const registry = new ProjectRegistry({
+    projects: new Map(), coordinator: new Coordinator(), pending: new Map(), watchers: new Map<string, ProjectWatch>(), watchedNotes: new Map(),
+    live: { forget: () => {} }, watch: { forget: () => {} },
+    planner: { atBoundary: () => false, notices: () => [], shutdown: () => {} },
+    lifecycle: { busy: false, notice: () => undefined },
+    changed: () => {}, logChanged: () => {}, capacityChanged: () => {}, push: async () => 0, endAgents: () => { ended++; },
+  });
+  await registry.release();
+  assert.equal(ended, 1);
 });

@@ -20,7 +20,7 @@ import {
 } from "@nexus/protocol";
 import { digestInput, newestFirst, projectDigest, projectRunning, usageSince, type DigestEvent, type DigestResponse, type DigestRunning, type UsageRun } from "@nexus/protocol/digest";
 import { Coordinator } from "./coordinator.ts";
-import { agentOwning, lowerOwnedProcesses } from "./worker-process.ts";
+import { agentOwning, endAgentJobs, ENDED_CLIENT, lowerOwnedProcesses } from "./worker-process.ts";
 import { branchState, leftBehind, stepCommits } from "./gitinfo.ts";
 import { mergeBack, userCleanUp } from "./mergeback.ts";
 import { fixProjectRules, projectRules } from "./rulesfix.ts";
@@ -318,7 +318,7 @@ const watch = new AttentionWatch();
 // The loaded projects: made, dropped, released for an update and dropped before a failed one's start over (queue LCF).
 const registry = new ProjectRegistry({
   projects, coordinator, pending, watchers, watchedNotes, live, watch, planner, lifecycle, changed, logChanged, push,
-  capacityChanged: () => broadcast({ type: "server" }),
+  capacityChanged: () => broadcast({ type: "server" }), endAgents: endAgentJobs,
 });
 
 // Every request is timed by its route, its synchronous part measured as a span (src/perf.ts).
@@ -364,9 +364,12 @@ const ORCHESTRATOR_WRITES = new Set(["/api/server/update", "/api/server/cancel",
 /**
  * The agents' own processes (queue HG, docs/design/security.md): any program on this machine can send a browser's
  * headers, so a write (and the read that hands out the access token) is also refused when the connection comes from a
- * process in an agent's job. Only the orchestrator's job may send the `nexus server` writes above. Off Windows, and
+ * process in an agent's job. Only the orchestrator's job may send the `nexus server` writes above. A loopback
+ * connection whose process has already ended (it sent its request and closed it or exited before the jobs were asked,
+ * LCF6) is refused too while agents run: whose it was cannot be told, and nobody waits for its answer. Off Windows, and
  * when a job host does not answer, the checks below stay the only guard.
  */
+const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/;
 app.use("/api/*", async (c, next) => {
   const read = c.req.method === "GET" || c.req.method === "HEAD";
   if (read && c.req.path !== "/api/remote") return next();
@@ -374,6 +377,11 @@ app.use("/api/*", async (c, next) => {
   if (socket.remotePort === undefined || socket.localPort === undefined) return next();
   const agent = await agentOwning(socket.remotePort, socket.localPort);
   if (agent === undefined || (agent === "orchestrator" && !read && ORCHESTRATOR_WRITES.has(c.req.path))) return next();
+  if (agent === ENDED_CLIENT) {
+    // Not a loopback connection: the jobs' table never names its owner (a device on the network, NEXUS_HOST).
+    if (!LOOPBACK.test(socket.remoteAddress ?? "")) return next();
+    return c.json({ error: "the process that sent this has ended before its owner could be told from an agent's; refused while agents run" }, 403);
+  }
   return c.json({ error: `an agent's process (${agent}) does not do the user's actions; agents use the nexus CLI` }, 403);
 });
 app.use("/api/*", async (c, next) => {

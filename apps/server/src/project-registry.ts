@@ -50,6 +50,13 @@ export interface RegistryParts {
   /** The capacity's grants changed (the dashboards are told). */
   capacityChanged(): void;
   push: typeof pushNotice;
+  /**
+   * Ends at once every agent's job still running (worker-process.ts endAgentJobs): release's last act, for an agent
+   * that did not exit in its wait. The successor never knew its job, so its write guard could not see such a process.
+   */
+  endAgents(): void;
+  /** How long release waits for the agents' exits before it ends their jobs (10 s; a test's shorter). */
+  exitWaitMs?: number;
 }
 
 export class ProjectRegistry {
@@ -128,7 +135,9 @@ export class ProjectRegistry {
   /**
    * The projects' side of an update's hand-over (the predecessor's release): no change waits, the watchers close, the
    * planner and the capacity stop writing, every agent stops (chat turns still running cut off and recorded first), and
-   * their exits are waited for (up to 10 s). The HTTP server is main.ts's.
+   * their exits are waited for (up to 10 s); then every agent's job still running is ended at once (LCF6: before, an
+   * agent that outlived the wait ran on beside the successor, whose write guard did not know its job). The HTTP server
+   * is main.ts's.
    */
   async release(): Promise<void> {
     const { projects, pending, watchers, planner } = this.p;
@@ -144,7 +153,8 @@ export class ProjectRegistry {
     for (const e of projects.values()) projectPart(e).shutdown();
     // An agent's exit is written to its runtime file: wait for those last writes.
     const alive = () => [...projects.values()].some((e) => e.engine.alive() || e.orchestrator.alive() || e.conversations.alive());
-    for (const until = Date.now() + 10_000; alive() && Date.now() < until;) await new Promise((r) => setTimeout(r, 100));
+    for (const until = Date.now() + (this.p.exitWaitMs ?? 10_000); alive() && Date.now() < until;) await new Promise((r) => setTimeout(r, 100));
+    this.p.endAgents();
   }
 
   /**
