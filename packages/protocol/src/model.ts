@@ -19,11 +19,11 @@ function fileKey(p: string): string {
 interface ReadFault { file: string; code: string; left: number; failed: number }
 let readFault: ReadFault | undefined;
 
-/** openSync for reading, through the test's read fault (store.ts, namesFile). */
-function openOnce(file: string): number {
+/** openSync for reading, through the test's read fault (store.ts, namesFile): the fault it met, if any. */
+function openOnce(file: string, met: { fault?: ReadFault }): number {
   const f = readFault;
   if (f && f.left > 0 && namesFile(file, f.file)) {
-    f.left--; f.failed++;
+    f.left--; met.fault = f;
     throw Object.assign(new Error(`${f.code}: injected read fault, open '${file}'`), { code: f.code });
   }
   return openSync(file, "r");
@@ -41,13 +41,17 @@ const OPEN_RETRY_MS = 200;
  */
 function openRead(file: string): number {
   const start = Date.now();
-  for (let wait = 5; ; wait = Math.min(wait * 2, 50)) {
-    try { return openOnce(file); }
-    catch (e) {
-      if (!transient(e) || Date.now() - start >= OPEN_RETRY_MS) throw e;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait);
+  // A test's fault counts the opens it refused (an open tried again within its wait counts once).
+  const met: { fault?: ReadFault } = {};
+  try {
+    for (let wait = 5; ; wait = Math.min(wait * 2, 50)) {
+      try { return openOnce(file, met); }
+      catch (e) {
+        if (!transient(e) || Date.now() - start >= OPEN_RETRY_MS) throw e;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait);
+      }
     }
-  }
+  } finally { if (met.fault) met.fault.failed++; }
 }
 
 /** The bytes before a log's position compared on each read (a file rewritten under it is read again whole). */
@@ -132,7 +136,8 @@ export class FileCache implements Reader {
   /**
    * Test seam (queue LH): the next `times` opens of the file named by its path's end (`file`: "applied.jsonl",
    * "queues/Q/queue.yaml") fail with `code` (EBUSY, EPERM, EMFILE: what Windows gives while another process holds a
-   * file), in this process and for every cache, until `clear`. `failed` counts the opens refused.
+   * file), in this process and for every cache, until `clear`. `failed` counts the opens refused: an open tried again
+   * within its wait (openRead) counts once, whether it got the file in the end or not.
    */
   static faultReads(o: { file: string; code?: string; times?: number }): { failed(): number; clear(): void } {
     const f: ReadFault = { file: o.file.replaceAll("\\", "/"), code: o.code ?? "EBUSY", left: o.times ?? 1, failed: 0 };
@@ -142,6 +147,38 @@ export class FileCache implements Reader {
 
   /** Stops hearing of this process's writes. */
   close(): void { this.unhook(); }
+
+  /**
+   * While a derivation runs (`within`), the files whose open was refused for a moment, with the error: each is opened
+   * (and waited for) once per derivation, not at each read of it (queue LCF; LC2 finding 5: a log stayed locked, and
+   * each derivation waited up to OPEN_RETRY_MS twice for it, synchronously).
+   */
+  private refused?: Map<string, unknown>;
+
+  /**
+   * Runs `f` as one derivation: a file refused for a moment in it is not opened again in it (`refused`). The state it
+   * derived lacks what such a file holds now (a log keeps what it read before): unless it is a log only, the version
+   * moves after it, so the next read derives again and tries the file once more, rather than keep that state until
+   * another file changes.
+   */
+  within<T>(f: () => T): T {
+    if (this.refused) return f();
+    const refused = (this.refused = new Map());
+    try { return f(); } finally {
+      this.refused = undefined;
+      if ([...refused.keys()].some((k) => !this.logOnly(k))) this.version++;
+    }
+  }
+
+  /** openRead, unless the file was refused already in this derivation: then that error again, at once. */
+  private open(file: string): number {
+    const k = fileKey(file);
+    if (this.refused?.has(k)) throw this.refused.get(k);
+    try { return openRead(file); } catch (e) {
+      if (this.refused && transient(e)) this.refused.set(k, e);
+      throw e;
+    }
+  }
 
   /** A file (or folder) under the root changed, was made or went: what is kept of it is read again when asked. */
   touched(path: string): void {
@@ -235,7 +272,7 @@ export class FileCache implements Reader {
     const k = fileKey(file);
     let p = this.parsedFiles.get(k);
     if (!p) {
-      try { p = { ok: true, value: freeze(parse(readWhole(file))) }; } catch (error) {
+      try { p = { ok: true, value: freeze(parse(readWhole(this.open(file)))) }; } catch (error) {
         // A read refused for a moment is not the file's content: not kept, read again at the next read (queue LH).
         if (transient(error)) throw error;
         p = { ok: false, error };
@@ -297,7 +334,7 @@ export class FileCache implements Reader {
   /** Whether the file has more than was read, or is not the file read (then it is read again whole). */
   private grew(log: Log): boolean {
     try {
-      const fd = openRead(log.file);
+      const fd = this.open(log.file);
       try {
         const st = fstatSync(fd, { bigint: true });
         return st.ino !== log.ino || Number(st.size) !== log.seen;
@@ -309,7 +346,7 @@ export class FileCache implements Reader {
   private readOn(log: Log, o: boolean): void {
     log.dirty = false;
     let fd: number;
-    try { fd = openRead(log.file); } catch (e) {
+    try { fd = this.open(log.file); } catch (e) {
       // Refused for a moment (queue LH): what was read is kept, and the log is read on at its next read.
       if (transient(e)) { log.dirty = true; return; }
       // Gone (or never there): nothing, as a read of a missing log gives.
@@ -374,8 +411,8 @@ function readAt(fd: number, from: number, length: number): Buffer {
   countWork("files"); countWork("bytes", got);
   return buf.subarray(0, got);
 }
-function readWhole(file: string): string {
-  const fd = openRead(file);
+/** The whole file open at `fd`, closed after. */
+function readWhole(fd: number): string {
   try { return readAt(fd, 0, Number(fstatSync(fd).size)).toString("utf8"); } finally { closeSync(fd); }
 }
 /** The clock has taken `at` up (or a later time). */
@@ -456,6 +493,11 @@ export class ProjectModel {
 
   /** The project's state now: derived again only when a file of it changed (or `changed` was called) since. */
   current(): ProjectState {
+    // One derivation (with the reads on before it): a file refused for a moment is waited for once in it.
+    return this.cache.within(() => this.derive());
+  }
+
+  private derive(): ProjectState {
     this.cache.sync(this.liveLogs().files);
     if (this.awayEnded() || this.templatesChanged()) this.changed();
     if (this.state?.version !== this.cache.version) {

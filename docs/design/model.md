@@ -145,6 +145,14 @@ the file's content (queue LH): the open is tried again for up to 200 ms, and if 
 read and is read on at its next read, and a YAML or JSON file is not kept (the error is thrown, the next read tries
 again). Before, such a log stayed empty and such a file a parse error until the file's next change.
 
+The wait is synchronous, so a file that stays locked is waited for once per derivation (queue LCF; LC2 finding 5):
+within one (`FileCache.within`, around `ProjectModel.current`), a file refused once gives that error again at once at
+its next open, where a running worker's log was opened twice (has it grown, then read on) and waited for up to 200 ms
+each time. A derivation that met such a refusal moves the version after it (unless only a log only was refused), so
+the next read of the state derives again and tries the file once more: before, a live log left unread by the refusal
+kept the state without its new lines until another file changed. The test counts the refused opens
+(`FileCache.faultReads`, an open tried again within its wait counting once), not the time.
+
 A YAML or JSON file rewritten is the ordinary case, not a contradiction: it is parsed again whole. A file whose stat
 did not change while the watcher reported a change is parsed again all the same (a write within the modification
 time's resolution).
