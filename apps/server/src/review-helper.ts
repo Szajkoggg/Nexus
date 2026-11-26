@@ -1,7 +1,7 @@
 // The review helper (queue RH; docs/design/review.md, "Routine reviews by a helper"; docs/protocol/review.md, "The review helper"): a
 // short-lived session that takes the orchestrator's routine review of one step, for one review round, on a model and
 // effort of its own (`review_helper`). It gets a fixed packet as its only message (packet.md, with the step's diff in
-// diff.patch beside it), reads, and decides with `nexus review accept|send-back|pass-on`; then its process ends. What
+// diff.patch beside it), reads, answers the review decisions that are a reviewer's (`nexus review decide`), and decides with `nexus review accept|send-back|pass-on` (or, at level 2, hands the user's decisions to the user with `nexus review ask-user`); then its process ends. What
 // it passes on (or what Nexus passes on without it) reaches the orchestrator as its review notice, with the reasons and
 // the helper's findings; what it accepts never reaches the orchestrator's chat.
 //
@@ -43,7 +43,7 @@ const HELPER_LIMIT_MS = 20 * 60_000;
 /** What a helper may run besides reading (H15); each on every shell tool. */
 const HELPER_TOOLS = ["Read", "Grep", "Glob", ...shellRules([
   "git log", "git status", "git diff", "git show", "nexus status", "nexus help", "nexus doc",
-  "nexus review accept", "nexus review send-back", "nexus review pass-on",
+  "nexus review accept", "nexus review send-back", "nexus review pass-on", "nexus review decide", "nexus review ask-user",
 ])];
 /** Never a helper's, whatever a project allows its workers. */
 const HELPER_DENIED = ["Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch"];

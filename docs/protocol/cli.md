@@ -33,6 +33,9 @@ nexus stats --reviews [--project <id>] [--since <date>]   # the reviews' quality
 nexus stats --switches [--project <id>] [--since <date>]  # steps after a context switch against those without one (see "Context care")
 nexus stats --flaky [--project <id>] [--since <date>]     # the flaky checks from the queues' checks.yaml, by failing test (below)
 nexus step done W3 --summary "No floating body on any fixture" [--commit 1a2b3c] [--activities feature,test]   # warns at an unclean end; --activities: what was actually done (refused: a name on no list)
+nexus decide W3 "Which layout?" --option A --option B [--recommend B] [--fix-option B] [--material layout@492]... [--for user|reviewer] [--why "..."] [--id D1]
+                                               # one review decision of the step (review.decision; see "Review decisions" in review.md): the worker's before step done, the orchestrator's (with --queue) while it holds the review; ids D1, D2, … by themselves, --id declares one again (a new version)
+nexus decide W3 --none "a refactoring: nothing is the user's" | --withdraw D2 --reason "..."   # the explicit none (review.decisions_none), or a decision off the list
 nexus step failed W3 --reason "..."
 nexus stop W3 --condition "user decision" --reason "..."   # the condition as the queue words it; the reason short (shown first)
 nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--recommend <option>] [--can-continue] [--step W3]
@@ -56,7 +59,9 @@ nexus doc agent-standards.md#2026-11-14        # a dated entry: every heading th
 nexus covers tags.md#2026-11-14 docs/ideas/plan.md#2026-11-15   # in a hand-over: the Decided entries it passes on (ideas.covered); the notes folder may be left out; each checked against the notes, a missing note or date refused with the note's dates
 # review helper only (and nexus status, nexus help, nexus doc; every other command is refused a helper)
 nexus review accept W W3 --note "what it checked"   # level 2 only; send-back as the orchestrator's (below); both only for its own step
-nexus review pass-on W W3 --why criterion,doubt --findings "what it checked and what it could not"   # to the orchestrator; reasons: criterion, deviation, question, limit, doubt, level
+nexus review pass-on W W3 --why criterion,doubt --findings "what it checked and what it could not"   # to the orchestrator; reasons: criterion, deviation, question, limit, doubt, level, decision, user_decision
+nexus review decide W W3 D2 --choice keep --reason "..."   # a reviewer's decision only (the user's are refused a helper); no verdict
+nexus review ask-user W W3 "the user's decisions: D1"   # level 2 only: the user's review decisions to the user, once every reviewer's one is answered
 # orchestrator only
 nexus queue draft <file.yaml|->                # a new queue, or a change to one: a new revision
 nexus queue set <queue> [--step <step>] skipped|finished|cancelled|propose-lift [--continued-in <refs>] --reason "..."   # housekeeping (see "The orchestrator"); done, approving and lifting are the user's
@@ -64,6 +69,7 @@ nexus review accept <queue> <step> [--note "..."]   # the orchestrator's decisio
 nexus review send-back <queue> <step> <what to fix>   # back to its worker
 nexus review ask-user <queue> <step> <why>     # hand the review to the user
 nexus review provisional <queue> <step> [--note "..."]   # level 3 (or 2 while the user is away): accept provisionally
+nexus review decide <queue> <step> <decision> [--choice <option>] --reason "..."   # an answer (review.decided): a reviewer's decision; a user's only at level 3 (or 2 while away), provisionally; no acceptance
 nexus run <queue> cancel-start --reason "..."   # takes a queue the orchestrator planned out of the plan
 nexus plan propose <queue> [--after <queue>]... --reason "..."   # propose to the user a new list of predecessors that changes ones the user set (see "The plan")
 nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF] [--maintenance survey|fix_small]   # writes .nexus/drafts/BF.yaml to complete and upload
@@ -144,6 +150,16 @@ nor the thinking partners' notes folder, `conversations.notes_dir`, since the ma
 notes), and a HEAD that moved since the step started (the round's `start` in `queues/<id>/git.yaml`) while no
 `--commit` is given. The warning names the files or the commits and says what to do; it is printed after `ok:` and
 recorded as `warning` on the `step.done` event (the session's own log). Nothing else changes: the step is done.
+It **refuses** one thing (queue RVD): in a project with `review_decisions_since`, a step that has neither a review
+decision nor the explicit none (`nexus decide <step> … | --none "<why>"`); the refusal says how, and nothing is
+recorded. A later round keeps the list it has.
+
+`nexus decide` and `nexus review decide` check what they write against the derivation's own rule before writing it
+(`decisionRefusal`: the writer's role, the step's state and round, the decision's version, the rights at that time), so
+what the derivation would ignore is refused with its reason instead. `nexus review accept` and `provisional` refuse an
+acceptance the decisions hold (`gate`, the rule the derivation applies), naming the open decisions; nothing is written.
+`nexus status` gives a step with decisions a line `review decisions: 2 decisions, 1 open (D1)` (a review with no list:
+`none declared`), and the orchestrator's overview adds `(review decisions: …)` to a step in review.
 
 `nexus help <topic>` prints one of Nexus's standards (needs no session or project, records nothing); `nexus help`
 alone prints the commands and the topics, as do `nexus --help` and `nexus` without a command. The topics live in `packages/cli/src/help.ts`:
@@ -151,6 +167,7 @@ alone prints the commands and the topics, as do `nexus --help` and `nexus` witho
 | Topic | The standard |
 |---|---|
 | `review` | Review material: formats, view keys, roles, pairing, rounds, captures, the process |
+| `decisions` | A step's review decisions: what the worker declares before `nexus step done` (concrete choices bound to material, or an explicit none, never a hidden one), and who answers them (the review helper, the orchestrator, the user) |
 | `summaries` | A step summary (`nexus step done --summary`) in four parts: what changed; how it was verified; what was left out or differs from the plan; what comes next, if anything |
 | `context` | A context summary (`nexus context`) in six parts: where the work stands (the step, committed, not committed); the decisions and why, with the ways tried and dropped; the traps found; the important files and why; what comes next; what the orchestrator or the user asked for or promised. It leaves out what a fresh session's seed gives anyway (the queue, the steps' summaries, the briefing, `nexus status`); about 1,000 to 2,000 words at most: `nexus context` records a longer one and prints a warning (`CONTEXT_SUMMARY_WORDS`, 2000 words) |
 | `questions` | A question (`nexus ask`) in three parts: what it blocks; the options; the asker's recommendation |

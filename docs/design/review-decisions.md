@@ -1,8 +1,16 @@
 # Required review decisions
 
 Part of [the design](../DESIGN.md). Queue RVD, step RVD1: the contract and the screens. **Status: a proposal for the
-user's review**; nothing here is built yet. The user decided D1–D4 on 2026-11-26, each as recommended (below). **Built so far**: RVD2, the protocol and the server (docs/protocol/review.md,
+user's review**. The user decided D1–D4 on 2026-11-26, each as recommended (below). **Built so far**: RVD2, the protocol and the server; RVD3, the commands, the briefings, the review helper's packet and the orchestrator's notice (docs/protocol/review.md,
 "Review decisions").
+
+**Found in RVD3.** The commands are `nexus decide` (with `--none`, `--withdraw`, `--id`) and `nexus review decide`, as
+proposed; `--for` defaults to `user`, so a decision the worker does not classify is never one a reviewer may settle. A
+review helper's answer was counted as its verdict (RVD2 put `review.decided` among `HELPER_VERDICTS`): a helper that
+answered and then ended without a verdict would have held the step; the verdicts and what a helper may write are now
+two sets. "Decisions from earlier reviews" is in every step opening, not in the fresh session's seed: the opening always
+follows the seed, so it would say the same twice. The fake runtimes declare none before every `nexus step done` that
+declared nothing (`FAKE-DECIDE` lines declare decisions): a server marks every project it starts, the test servers too.
 
 **Found in RVD2.** The mark `review_decisions_since` is written by the server from RVD3 on, not at RVD2's first start:
 until the CLI lets workers and reviewers declare a list, a mark would make every new step's list `missing` and hold the

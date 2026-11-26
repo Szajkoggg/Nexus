@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, INTEGRATION_CONDITION, REUSE_TOKENS, fileList, tokenCount, formatClock, formatDuration, latestCheckSet, reviewRound, openPlan, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type PassOnReason, type TagProposal, tagsText,
+  DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, INTEGRATION_CONDITION, REUSE_TOKENS, fileList, tokenCount, formatClock, formatDuration, latestCheckSet, reviewRound, openPlan, decisionLines, queueDecisions, settledDecisions, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type PassOnReason, type RightsNow, type TagProposal, tagsText,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -86,6 +86,7 @@ Report through the \`nexus\` command (on PATH; your session is set in the enviro
 - nexus check <step> <name> --ok|--fail [--summary "..."] [--duration <seconds>]   results of the step's checks, only where you run them: the step's opening always says whether Nexus runs them (also where it lists none); where it does, Nexus runs and records them itself after your \`nexus step done\`, and this is refused. Where it says Nexus does not, report each with how long it ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (\`nexus check <step> "npm test" --ok …\`, not "test"): a check reported under another name counts as not reported
 - nexus check <step> <name> --unrelated --evidence "..."   in a check-fix round, a failed check that is not your work's failure (it fails on the base too, a test you did not touch): Nexus runs it on the queue's base commit and decides by it; end your turn without \`nexus step done\`
 - nexus metric record <name> <value>                        a value of one of the project's metrics, when the step asks you to measure one (\`nexus metric list\` shows them); it is kept with your step and HEAD commit; a negative value goes after --: nexus metric record <name> -- -5
+- nexus decide <step> "<question>" --option "..." --option "..." [--recommend "..."] [--material <view key|path>] [--for user|reviewer]   each decision the step's review must answer, before nexus step done; or nexus decide <step> --none "<why>" when nothing is to be decided (nexus help decisions)
 - nexus step done <step> --summary "..." [--commit <sha>] [--activities a,b]   when the acceptance criteria are met; --activities names what you actually did, whatever was planned, by the names \`nexus tags\` lists (any other name refuses the command)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "<the stop condition met>" --reason "<what happened, short>"   when a stop condition is met (first commit what is consistent, see below); give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened and what you left out (the user sees the reason first, the condition behind "more")
@@ -97,6 +98,7 @@ Nexus's standards for the rest (the full texts: \`nexus help summaries\`, \`nexu
 - A step summary (nexus step done --summary) has four parts: what changed; how it was verified; what was left out or differs from the plan; what comes next, if anything.
 - A context summary (nexus context) has six: where the work stands (the step, what is committed, what is not); the decisions and why, with the ways tried and dropped; the traps found; the important files and why; what comes next; what the orchestrator or the user asked for or promised. It leaves out what the queue, the steps' summaries and nexus status say anyway; about 1,000 to 2,000 words at most.
 - A question (nexus ask) has three: what it blocks; the options (--option, one each); your recommendation (--recommend names the option, the text says why).
+- Review decisions (nexus decide; the full text: \`nexus help decisions\`): before nexus step done, declare each concrete choice the step's review must make (the user's judgement, a deviation from the plan, a choice between alternatives), with its options, your recommendation and the material that shows them; or --none with why, only when nothing is the user's to choose and nothing deviates from the plan. You propose and recommend; you never answer or accept them, and a real decision never hides in the summary's prose or behind a general "nothing to decide". They are not questions: they hold nothing while you work, and are answered in the review.
 - ${readingRules(runtime)}
 - ${shellCommands(runtime)}
 - When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, the shell after the edit tool); retry once in a simpler form at most (without chaining, for example), otherwise report what you needed and why.
@@ -155,14 +157,42 @@ export function stepOpening(o: {
     integration ? integrationText(step.id, integration, !!o.checksByNexus) : "",
     checksText(checks, !!o.checksByNexus),
     step.review?.prepare ? `\nReview to prepare: ${step.review.prepare}\nPrepare it by Nexus's standard: read \`nexus help review\` first (view keys, roles, the same conditions on both sides of a pair).` : "",
+    decisionsAsk(step),
     `\nStop conditions (meeting one ends the queue: report it with \`nexus stop\`):\n${[...q.stop_conditions, ...projectStopConditions].map((c) => `- ${c}`).join("\n") || "- none beyond your judgement"}`,
     notes.length ? `\nNotes from the user for this step:\n${notes.map((n) => `- ${n.body}`).join("\n")}` : "",
+    earlierDecisions(q, step.id),
     answers.length ? `\nAnswers to your questions about this step:\n${answers.map((x) => `- "${x.text}": ${x.answers.at(-1)?.text}`).join("\n")}` : "",
     languages ? `\n${languages}` : "",
     `\nBegin with \`nexus step start ${step.id}\`${mode === "continue" ? " (again is fine)" : ""}. End with \`nexus step done ${step.id} --summary "…"\`, \`nexus step failed\` or \`nexus stop\`, then write \`nexus context\` and end your turn. Do not start another step.`,
     last ? `\nThis is the queue's last step${!step.integration && q.steps.some((x) => x.integration) ? " before its integration step, which Nexus runs after it (without a model when the merge is clean)" : ""}. After it is done, write a short report of the whole queue (what each step achieved against its acceptance, checks, review material, open questions, a proposed next step) to ${report} (a folder for reports outside the working tree and any repository: never write it into the working tree, it would block the cleanup of a worktree) and register it with \`nexus report ${q.id} --file ${report} --summary "…"${q.maintenance ? " --findings <the number of findings>" : ""}\`, which copies it into the queue's folder and removes it from there.${q.maintenance ? ` This is a maintenance queue (${q.maintenance}): give the number of findings with --findings (0 when there were none); Nexus tells the orchestrator only when there are some.` : ""}` : "",
     q.maintenance === "survey" ? "\nThis is a survey: change nothing and commit nothing. When a step ends, Nexus checks that it left no commit and no changed tracked file, and stops the queue otherwise." : "",
   ].filter(Boolean).join("\n");
+}
+
+/**
+ * What the opening asks of the step's review decisions (queue RVD; docs/design/review-decisions.md, "Who writes the
+ * list, and when"): a design step concrete choices bound to material, any step a list or an explicit none.
+ */
+function decisionsAsk(step: StepView): string {
+  const design = step.tags.kind === "design" || !!step.review?.prepare;
+  const active = step.decisions.items.filter((d) => !d.withdrawn);
+  return [
+    `\nReview decisions: before \`nexus step done\`, declare with \`nexus decide ${step.id} …\` each choice the step's review must make, or \`nexus decide ${step.id} --none "<why>"\` (\`nexus help decisions\`).`,
+    design ? "This step prepares choices for the review: make each one a concrete decision between the alternatives you show (--option for each, --recommend yours, --material with the view keys or files that show them), not a general \"do you agree\"." : "",
+    active.length || step.decisions.none
+      ? `The step's list so far: ${active.length ? active.map((d) => `${d.id} (version ${d.version})`).join(", ") : `none (${step.decisions.none!.text})`}; it stays for this round: add or change only what this round changes.`
+      : "",
+  ].filter(Boolean).join(" ");
+}
+
+/**
+ * The answers earlier steps' accepted reviews gave (queue RVD, "What the next worker gets"): the step, the question and
+ * the answer, so a later step (and a fresh session, whose seed this opening follows) builds on them.
+ */
+function earlierDecisions(q: QueueView, step: string): string {
+  const settled = queueDecisions(q, step);
+  if (!settled.length) return "";
+  return `\nDecisions from earlier reviews (build on them):\n${settled.flatMap((x) => x.lines.map((l) => `- ${x.step}, ${l}`)).join("\n")}`;
 }
 
 /** The step's checks and who runs them, said in every opening (also for a step with none of its own). */
@@ -398,6 +428,7 @@ export function formatInbox(m: InboxView, state: ProjectState, released = false)
     return [
       ...lines,
       step?.acceptance.length ? `\nAcceptance criteria of the step:\n${step.acceptance.map((a) => `- ${a}`).join("\n")}` : "",
+      step ? sentBackAnswers(step, m.round - 1) : "",
       `\nWork on it in this step: \`nexus step start ${m.step}\`, then ${step?.checks_by === "nexus" ? "the fix (Nexus runs the checks again after your `nexus step done`)" : "the checks"}, review material for this round (\`nexus review add ${m.step} … --round ${m.round}\`, pictures with the same keys as before: \`nexus help review\`), and \`nexus step done ${m.step} --summary "…"\` (or \`nexus step failed\` / \`nexus stop\`), then \`nexus context\`, and end your turn.`,
     ].filter(Boolean).join("\n");
   }
@@ -412,6 +443,16 @@ export function formatInbox(m: InboxView, state: ProjectState, released = false)
     ].join("\n");
   }
   return `[Nexus] The ${m.from} asks you to stop now${m.text ? `: ${m.text}` : "."} Leave the work consistent and end your turn.`;
+}
+
+/**
+ * A send-back's answers so far (queue RVD): what the review answered in the round it ends, as information for the fix,
+ * not an acceptance. Every decision is open again in the new round; the list stays.
+ */
+function sentBackAnswers(step: StepView, round: number): string {
+  const lines = settledDecisions(step.decisions, round);
+  if (!lines.length) return "";
+  return `\nThe review's answers to your decisions in round ${round} (information for the fix, not an acceptance; they are open again in this round: change a decision with nexus decide --id only where the fix changes it):\n${lines.map((l) => `- ${l}`).join("\n")}`;
 }
 
 // ---------------------------------------------------------------- the orchestrator
@@ -461,6 +502,8 @@ Commands (\`nexus\` is on PATH; your session is set in the environment):
 - nexus review accept <queue> <step> [--note "..."]   accept a step waiting for your review; the run goes on (with the project's push_accepted on, Nexus pushes the commit the step was reviewed at; never push yourself)
 - nexus review send-back <queue> <step> "what to fix"   send it back to its worker, as the step's next round in the same session (beyond the project's limit of send-backs per step, 2 by default, the step goes to the user instead)
 - nexus review ask-user <queue> <step> "why"      hand its review to the user
+- nexus review decide <queue> <step> <decision> [--choice "<option>"] --reason "why"   answer one of the step's review decisions (the review notice lists them, with who answers each): a reviewer's always; a user's only at level 3 or level 2 while away, provisionally (the user confirms it), else hand it over with ask-user. An answer is no acceptance, and an acceptance with an open decision is refused. Never answer for the user where it is the user's
+- nexus decide <step> --queue <queue> "<question>" --option "..." --option "..." [--for user|reviewer] | --none "why" | --withdraw <Dn> --reason "why"   complete the list of a step you hold in review: add a decision the worker missed, raise a reviewer's to the user's (--id <Dn>, never the other way), withdraw one that is no decision, or declare none for a step that has no list (nexus help decisions)
 - nexus review audit <queue> <step> agree|disagree --reason "why"   your audit of a step the review helper accepted, when a notice asks for it; it does not reopen the step (a needed fix is a revision you draft)
 - nexus review provisional <queue> <step> --note "what the user should look at"   review level 3, or level 2 while away mode is on: accept it provisionally; the run goes on, and the step waits in the user's return batch, where the user confirms it or asks a fix (only the user confirms)
 - nexus server status                            the running Nexus version, the steps running in every project, and an update in progress
@@ -813,13 +856,14 @@ export function helperBriefing(p: Pick<ProjectFile, "name" | "languages">): stri
 What you may do:
 - Read the packet, the diff file it names, and the checkout (to check a criterion: a document that should say something, a test that should exist). Use read-only git (git log, git show, git diff, git status), nexus status, nexus help and nexus doc (a Markdown file's headings, or one section: nexus doc <file.md#section>).
 - Never run a build, a test or a check: the packet has the results of the checks (the ones Nexus ran, or those the worker reported where Nexus ran none). Never change a file.
-- Decide exactly once, with one of the commands the packet names (accept, send back, or pass on to the orchestrator; at review level 3 it names send back and pass on only). Then end your turn with a one-line reply.
+- Decide exactly once, with one of the commands the packet names (accept, send back, or pass on to the orchestrator; at review level 3 it names send back and pass on only; at level 2, for a step with decisions that are the user's, also hand it to the user). Then end your turn with a one-line reply. Answering a review decision (nexus review decide) is no verdict: decide after it.
 
 How to decide:
 - Judge the step against its acceptance criteria and review notes, one by one, from the packet and the checkout. Do not accept by default.
 - Send it back (nexus review send-back) when a criterion you can check is not met, saying exactly what to fix.
 - Pass it on (nexus review pass-on, --why with one or more reasons, comma-separated) when: a criterion cannot be settled from the packet and the checkout (the look, the feel, the user's judgement, a measurement nobody took): criterion; the worker's summary reports a deviation from the plan (in what it left out or what differs): deviation; the worker asked a question during the step: question; the send-back limit is reached: limit; you doubt your verdict: doubt; at review level 3, when the criteria you can check are met: level.
 - At review level 2, accept (nexus review accept, --note with your findings) when every criterion is checkable and met. At level 3 you never accept: the judgement is the orchestrator's.
+- Review decisions (the packet lists them, with who answers each): check that the list is complete; a choice the summary or the material leaves to the review that is not on it, a wrong one, or no list at all: pass on with decision. Answer a reviewer's decision you can settle from the evidence (nexus review decide, --choice and --reason with why); one you cannot settle: pass on with decision. A user's decision is never yours: at level 2, once every criterion you can check is met and every reviewer's decision is answered, hand the step to the user (nexus review ask-user, naming the user's decisions); at level 3 pass on with user_decision. Never accept with a decision open, and never answer for the user.
 - Your findings (--note, --findings, or the send-back's text) say briefly what you checked and what you could not, in ${working}: the orchestrator starts from them and does not check again what you found.
 - When an action is refused, do not work around it through another tool or command that reaches the same end: pass the step on with doubt, naming what you could not do (nexus help refusals).`;
 }
@@ -859,9 +903,10 @@ export function helperPacket(q: QueueView, st: StepView, c: HelperPacketContext)
   const range = c.range.round && (c.range.round.from !== c.range.from || c.range.round.to !== c.range.to)
     ? ` (this round's own change: ${c.range.round.from}..${c.range.round.to})` : "";
   const cmd = (x: string) => `nexus review ${x} ${q.id} ${st.id}`;
+  const userDecisions = st.decisions.items.some((d) => !d.withdrawn && d.for === "user");
   const decide = st.level === 3
-    ? `Review level 3: the judgement is the orchestrator's, and you never accept. When a criterion you can check fails: ${cmd("send-back")} "what to fix". Otherwise pass it on, with level among the reasons: ${cmd("pass-on")} --why <reasons, level among them> --findings "what you checked and what you could not". The reasons: criterion, deviation, question, limit, doubt, level.`
-    : `Review level 2. Every criterion checkable and met: ${cmd("accept")} --note "what you checked". A criterion you can check not met: ${cmd("send-back")} "what to fix". Otherwise: ${cmd("pass-on")} --why <reasons> --findings "what you checked and what you could not".`;
+    ? `Review level 3: the judgement is the orchestrator's, and you never accept. When a criterion you can check fails: ${cmd("send-back")} "what to fix". Otherwise pass it on, with level among the reasons: ${cmd("pass-on")} --why <reasons, level among them> --findings "what you checked and what you could not". The reasons: criterion, deviation, question, limit, doubt, level, decision, user_decision.`
+    : `Review level 2. Every criterion checkable and met${userDecisions ? "" : " and every decision answered"}: ${userDecisions ? `the user's decisions go to the user, once every reviewer's decision is answered: ${cmd("ask-user")} "what you checked; the user's decisions: …"` : `${cmd("accept")} --note "what you checked"`}. A criterion you can check not met: ${cmd("send-back")} "what to fix". Otherwise: ${cmd("pass-on")} --why <reasons> --findings "what you checked and what you could not". The reasons: criterion, deviation, question, limit, doubt, decision.`;
   return [
     `[Nexus] Review step ${st.id} of queue ${q.id}, round ${round}: "${st.title}".`,
     `Goal:\n${st.goal.trim() || "(none)"}`,
@@ -872,6 +917,7 @@ export function helperPacket(q: QueueView, st: StepView, c: HelperPacketContext)
     `The worker's summary:\n${st.summary?.trim() || "(none)"}`,
     ...(st.sent_back.length ? [`Sent back before:\n${list(st.sent_back.map((b) => `round ${b.round}, by the ${b.by === "helper" ? "review helper" : b.by}: ${b.text}`))}`] : []),
     `The step's change, ${c.range.from}..${c.range.to}${range}:\n${c.stat.trimEnd() || "(no change)"}\nThe whole diff: ${c.diff.replaceAll("\\", "/")} (read the parts you need).`,
+    ...decisionsBrief(st, round, { level: st.level, away: false, toUser: false }, cmd("decide")),
     decide,
   ].join("\n\n");
 }
@@ -1113,6 +1159,20 @@ export function serverCrashNotice(c: { at: string; error: string }): Notice {
   };
 }
 
+/**
+ * The step's review decisions as a reviewer reads them (queue RVD): each with its state and who answers it, and how to
+ * answer; nothing for a step without a list that needs none. `declare`: the command that writes the list (the
+ * orchestrator's), none for the review helper, which passes an incomplete list on.
+ */
+function decisionsBrief(st: StepView, round: number, rights: RightsNow, answer: string, declare?: string): string[] {
+  const lines = decisionLines(st.decisions, st.decision_list, round, rights);
+  if (!lines.length) return [];
+  const how = st.decision_list === "missing"
+    ? declare ? `Declare the list yourself after judging the step: ${declare} "<question>" --option … --option … for each, or ${declare} --none "<why>".` : "You do not declare a list: pass the step on with --why decision."
+    : st.decision_list === "none" ? "" : `Answer each decision that is yours with ${answer} <decision> [--choice "<option>"] --reason "<why>" (an answer is no acceptance; an acceptance with an open decision is refused).`;
+  return [`Review decisions:\n${(st.decision_list === "missing" ? lines.slice(1) : lines).join("\n") || "- none declared"}${how ? `\n${how}` : ""}`];
+}
+
 /** What the orchestrator needs to review a step: its acceptance, the checks and material of this round, its commits. */
 function reviewBrief(q: QueueView, st: StepView, away: AwayNow = { on: false }): string {
   const since = st.segments.at(-1)?.start ?? "";
@@ -1138,6 +1198,7 @@ ${list(metrics.map((m) => `${m.name}: ${metricValueText(m.value, m.unit)}${m.war
     `Review material:\n${list(items.map((i) => `${i.label ?? i.kind ?? "item"}: ${i.path ?? i.url ?? ""}`))}`,
     `Commits: ${commits.join(", ") || "none reported"}`,
     ...(st.sent_back.length ? [`Sent back before:\n${list(st.sent_back.map((b) => `round ${b.round}, by the ${b.by}: ${b.text}`))}`] : []),
+    ...decisionsBrief(st, round, { level: st.level, away: away.on, toUser: false }, `nexus review decide ${q.id} ${st.id}`, `nexus decide ${st.id} --queue ${q.id}`),
     levelNow(st.level, away) === 3
       ? `Review level 3${st.level === 2 ? " (level 2, reviewed as 3 while the user is away)" : ""}: judge all of it; the queue goes on. Decide with one of: nexus review accept ${q.id} ${st.id} [--note "..."] (nothing in it is the user's); nexus review provisional ${q.id} ${st.id} --note "what the user should look at" (something in it is the user's, such as the look: the run goes on, and the user confirms it or asks a fix on their return); nexus review send-back ${q.id} ${st.id} "what to fix" (beyond the limit of send-backs the step goes to the user and its queue waits); nexus review ask-user ${q.id} ${st.id} "why" (you cannot decide: the queue waits for the user). Do not accept by default: judge it against its acceptance criteria. Tell the user briefly what you decided.`
       : `Decide with one of: nexus review accept ${q.id} ${st.id} [--note "..."] (the run goes on); nexus review send-back ${q.id} ${st.id} "what to fix"; nexus review ask-user ${q.id} ${st.id} "why" (the user decides). Tell the user briefly what you decided.`,

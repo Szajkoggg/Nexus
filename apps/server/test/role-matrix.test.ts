@@ -98,6 +98,8 @@ const CALLS: [string, (root: string) => string[], string?][] = [
   ["nexus review pass-on", () => ["review", "pass-on", "Q", "Q1", "--why", "doubt", "--findings", "f"]],
   ["nexus review ask-user", () => ["review", "ask-user", "Q", "Q1", "Yours."]],
   ["nexus review provisional", () => ["review", "provisional", "Q", "Q1"]],
+  ["nexus review decide", () => ["review", "decide", "Q", "Q1", "D1", "--choice", "A", "--reason", "r"]],
+  ["nexus decide", () => ["decide", "Q1", "Which layout?", "--option", "A", "--option", "B"]],
   ["nexus run <queue> start|pause", () => ["run", "R", "pause", "--reason", "r"]],
   ["nexus run <queue> cancel-start", () => ["run", "R", "cancel-start", "--reason", "r"]],
   ["nexus plan propose", () => ["plan", "propose", "R", "--after", "Q", "--reason", "r"]],
@@ -137,7 +139,7 @@ function marked(block: string): Set<Who> | undefined {
 }
 
 /** What a review helper may run, as the help's helper rule says. */
-const helperMay = (args: string[]) => ["status", "help", "doc"].includes(args[0]!) || (args[0] === "review" && ["accept", "send-back", "pass-on"].includes(args[1]!));
+const helperMay = (args: string[]) => ["status", "help", "doc"].includes(args[0]!) || (args[0] === "review" && ["accept", "send-back", "pass-on", "decide", "ask-user"].includes(args[1]!));
 
 async function call(who: Who, args: string[], input?: string): Promise<CliResult> {
   const { root, store } = project();

@@ -476,6 +476,9 @@ test("the review helper's texts: its briefing, its packet, the notices after a p
   tr.section("H2: its packet, with the review notes, the checks reported and the diff's summary");
   event("w-h", { type: "step.started", queue: "QH", step: "H2" });
   event("w-h", { type: "check.result", queue: "QH", step: "H2", name: "npm test", ok: true, summary: "112 pass", duration: 95.2 });
+  // Its review decisions (queue RVD): the user's, bound to its pictures, and a reviewer's with an option asking a change.
+  event("w-h", { type: "review.decision", queue: "QH", step: "H2", decision: "D1", text: "Which palette?", options: [{ label: "calm" }, { label: "bright" }], recommended: "calm", material: ["palette@492"], why: "Every later screen uses it.", for: "user" });
+  event("w-h", { type: "review.decision", queue: "QH", step: "H2", decision: "D2", text: "Keep the old colour names?", options: [{ label: "keep" }, { label: "rename", effect: "fix" }], for: "reviewer" });
   event("w-h", { type: "step.done", queue: "QH", step: "H2", summary: "H2 done; the colours differ from the plan (left out: the dark theme).", commit: "bbb1111" });
   const state = loadProjectState(store);
   const qh = state.queues.find((q) => q.id === "QH")!;
@@ -490,6 +493,9 @@ test("the review helper's texts: its briefing, its packet, the notices after a p
   change();
 
   tr.section("H3: its packet at review level 3 (the helper never accepts)");
+  // H2's decisions answered first: the reviewer's by the orchestrator, the user's by the user; else its acceptance is ignored.
+  event(orch, { type: "review.decided", queue: "QH", step: "H2", decision: "D2", version: 1, round: 1, choice: "keep", text: "The names are used in the theme files." });
+  event(ensureUserSession(store).id, { type: "review.decided", queue: "QH", step: "H2", decision: "D1", version: 1, round: 1, choice: "calm" });
   event(orch, { type: "review.accepted", queue: "QH", step: "H2" });
   event("w-h", { type: "step.started", queue: "QH", step: "H3" });
   event("w-h", { type: "step.done", queue: "QH", step: "H3", summary: "H3 done.", commit: "ccc1111" });

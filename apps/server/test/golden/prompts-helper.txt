@@ -7,13 +7,14 @@ You are Nexus's review helper for the project "Pilot": a short-lived session tha
 What you may do:
 - Read the packet, the diff file it names, and the checkout (to check a criterion: a document that should say something, a test that should exist). Use read-only git (git log, git show, git diff, git status), nexus status, nexus help and nexus doc (a Markdown file's headings, or one section: nexus doc <file.md#section>).
 - Never run a build, a test or a check: the packet has the results of the checks (the ones Nexus ran, or those the worker reported where Nexus ran none). Never change a file.
-- Decide exactly once, with one of the commands the packet names (accept, send back, or pass on to the orchestrator; at review level 3 it names send back and pass on only). Then end your turn with a one-line reply.
+- Decide exactly once, with one of the commands the packet names (accept, send back, or pass on to the orchestrator; at review level 3 it names send back and pass on only; at level 2, for a step with decisions that are the user's, also hand it to the user). Then end your turn with a one-line reply. Answering a review decision (nexus review decide) is no verdict: decide after it.
 
 How to decide:
 - Judge the step against its acceptance criteria and review notes, one by one, from the packet and the checkout. Do not accept by default.
 - Send it back (nexus review send-back) when a criterion you can check is not met, saying exactly what to fix.
 - Pass it on (nexus review pass-on, --why with one or more reasons, comma-separated) when: a criterion cannot be settled from the packet and the checkout (the look, the feel, the user's judgement, a measurement nobody took): criterion; the worker's summary reports a deviation from the plan (in what it left out or what differs): deviation; the worker asked a question during the step: question; the send-back limit is reached: limit; you doubt your verdict: doubt; at review level 3, when the criteria you can check are met: level.
 - At review level 2, accept (nexus review accept, --note with your findings) when every criterion is checkable and met. At level 3 you never accept: the judgement is the orchestrator's.
+- Review decisions (the packet lists them, with who answers each): check that the list is complete; a choice the summary or the material leaves to the review that is not on it, a wrong one, or no list at all: pass on with decision. Answer a reviewer's decision you can settle from the evidence (nexus review decide, --choice and --reason with why); one you cannot settle: pass on with decision. A user's decision is never yours: at level 2, once every criterion you can check is met and every reviewer's decision is answered, hand the step to the user (nexus review ask-user, naming the user's decisions); at level 3 pass on with user_decision. Never accept with a decision open, and never answer for the user.
 - Your findings (--note, --findings, or the send-back's text) say briefly what you checked and what you could not, in English: the orchestrator starts from them and does not check again what you found.
 - When an action is refused, do not work around it through another tool or command that reaches the same end: pass the step on with doubt, naming what you could not do (nexus help refusals).
 == H2: its packet, with the review notes, the checks reported and the diff's summary
@@ -43,7 +44,18 @@ The step's change, aaa2222..bbb1111:
  1 file changed, 2 insertions(+), 2 deletions(-)
 The whole diff: <root>/sessions/h-3/diff.patch (read the parts you need).
 
-Review level 2. Every criterion checkable and met: nexus review accept QH H2 --note "what you checked". A criterion you can check not met: nexus review send-back QH H2 "what to fix". Otherwise: nexus review pass-on QH H2 --why <reasons> --findings "what you checked and what you could not".
+Review decisions:
+D1 (version 1, the user's, by the worker): Which palette?
+  options: "calm" (recommended), "bright"
+  material: palette@492
+  why it matters: Every later screen uses it.
+  open; the user's: only the user answers it (hand it over: nexus review ask-user)
+D2 (version 1, a reviewer's, by the worker): Keep the old colour names?
+  options: "keep", "rename" (asks for a change)
+  open; a reviewer's: the review helper or the orchestrator answers it (the user may answer it too)
+Answer each decision that is yours with nexus review decide QH H2 <decision> [--choice "<option>"] --reason "<why>" (an answer is no acceptance; an acceptance with an open decision is refused).
+
+Review level 2. Every criterion checkable and met: the user's decisions go to the user, once every reviewer's decision is answered: nexus review ask-user QH H2 "what you checked; the user's decisions: …". A criterion you can check not met: nexus review send-back QH H2 "what to fix". Otherwise: nexus review pass-on QH H2 --why <reasons> --findings "what you checked and what you could not". The reasons: criterion, deviation, question, limit, doubt, decision.
 == H2 passed on by the helper (a criterion, a deviation): the review notice, with H1's acceptance and its audit riding with it
 -- to orchestrator 1
 [Nexus] Queue QH revision 1 approved. It is not in the plan, so nothing starts it: start it now, or put it into the plan (nexus run QH start --after <queue>... --reason "..."; or --next, or --at), or tell the user why it waits.
@@ -66,6 +78,17 @@ Review material:
 - none
 
 Commits: bbb1111
+
+Review decisions:
+D1 (version 1, the user's, by the worker): Which palette?
+  options: "calm" (recommended), "bright"
+  material: palette@492
+  why it matters: Every later screen uses it.
+  open; the user's: only the user answers it (hand it over: nexus review ask-user)
+D2 (version 1, a reviewer's, by the worker): Keep the old colour names?
+  options: "keep", "rename" (asks for a change)
+  open; a reviewer's: the review helper or the orchestrator answers it (the user may answer it too)
+Answer each decision that is yours with nexus review decide QH H2 <decision> [--choice "<option>"] --reason "<why>" (an answer is no acceptance; an acceptance with an open decision is refused).
 
 Decide with one of: nexus review accept QH H2 [--note "..."] (the run goes on); nexus review send-back QH H2 "what to fix"; nexus review ask-user QH H2 "why" (the user decides). Tell the user briefly what you decided.
 
@@ -97,7 +120,7 @@ The step's change, bbb1111..ccc1111:
  1 file changed, 1 insertion(+), 1 deletion(-)
 The whole diff: <root>/sessions/h-4/diff.patch (read the parts you need).
 
-Review level 3: the judgement is the orchestrator's, and you never accept. When a criterion you can check fails: nexus review send-back QH H3 "what to fix". Otherwise pass it on, with level among the reasons: nexus review pass-on QH H3 --why <reasons, level among them> --findings "what you checked and what you could not". The reasons: criterion, deviation, question, limit, doubt, level.
+Review level 3: the judgement is the orchestrator's, and you never accept. When a criterion you can check fails: nexus review send-back QH H3 "what to fix". Otherwise pass it on, with level among the reasons: nexus review pass-on QH H3 --why <reasons, level among them> --findings "what you checked and what you could not". The reasons: criterion, deviation, question, limit, doubt, level, decision, user_decision.
 == H3 (level 3) passed on by Nexus without a helper: its runtime is beyond the usage threshold
 -- to orchestrator 1
 [Nexus] Step H3 of queue QH is done and waits for your review: H3 done. 

@@ -168,6 +168,42 @@ Example:
   two more days). I recommend vertical only, since the sketches show no inclined joints."
 `,
   },
+  decisions: {
+    summary: "a step's review decisions: what to declare before nexus step done, and who answers them",
+    text: `nexus help decisions: the review decisions of a step
+
+A review decision is one concrete question the step's review must answer before the step can be accepted: which
+layout, whether a deviation from the plan stands, which of two numbers. It is not a question (nexus ask): it never holds
+or wakes you, and it is answered after your step is done, by the user or a reviewer. Its answers go to the next steps.
+
+BEFORE nexus step done (worker): declare the list, or that there is none
+  nexus decide <step> "<question>" --option "<A>" --option "<B>" [--recommend "<A>"] [--material <view key|path>]...
+               [--for user|reviewer] [--why "<what follows from it>"] [--fix-option "<B>"]
+  nexus decide <step> --none "<why nothing is to be decided>"
+  - One command per decision; ids D1, D2, … come by themselves. --id D2 declares D2 again (a new version: answers to the
+    earlier one no longer count); --withdraw D2 --reason "…" takes it off the list.
+  - --for user (the default): the user's judgement: the look, the feel, the scope, a final number, what the project's
+    rules give the user. --for reviewer: decidable from the step's evidence (the diff, the checks, the material).
+  - Bind each decision to its material: the view keys (waiting-tab@492) or files that show the options, added with
+    nexus review add. A design step asks for concrete choices between drawn alternatives, not "do you like it".
+  - --fix-option marks an option that means the work must change (an answer choosing it holds the acceptance).
+  - A recommendation is not an answer: never answer your own decisions, and a required answer is no forced yes.
+  - --none only when nothing in the step is the user's to choose and nothing deviates from the plan. A real decision
+    never hides behind a general "nothing to decide", nor in the summary's prose ("for your decision: …").
+  - In a later round (sent back) the list stays: add or change a decision only where the round changed it.
+
+REVIEWERS (the review helper, the orchestrator)
+  nexus review decide <queue> <step> <decision> [--choice "<option>"] --reason "<why>"
+  - The review helper answers a reviewer's decision; one it cannot settle, or a list it finds incomplete or wrong, it
+    passes on (--why decision). At level 2 it hands the user's decisions to the user (nexus review ask-user) once the
+    reviewer's are answered; at level 3 it passes them on (--why user_decision).
+  - The orchestrator answers a reviewer's decision; a user's only at level 3 (or 2 while the user is away), and then
+    provisionally: the user confirms it on their return. Otherwise it hands the step over (nexus review ask-user). It may
+    add a decision the worker missed, raise a reviewer's to the user's, or withdraw one that is no decision
+    (nexus decide <step> --queue <queue> …), never lower a user's.
+  - An answer is no acceptance: accept, send back or hand over as before; an acceptance with an open decision is refused.
+`,
+  },
   refusals: {
     summary: "what to do when an action is refused",
     text: `nexus help refusals: when an action is refused

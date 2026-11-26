@@ -84,7 +84,11 @@
 // (the first round only, accept after), passon:<reasons> (nexus review pass-on --why <reasons>), none (no verdict),
 // hang (no verdict, held by FAKE_RELEASE like a slow step), refused (an action its permissions refuse, then nexus ask,
 // which the CLI refuses a helper, then a pass-on with doubt naming both). Without one: accept at level 2, pass on
-// (level) at level 3. Each verdict's text starts "fake helper".
+// (level) at level 3; decide (it answers each reviewer's decision the packet lists with its first option, tries the
+// user's, which the CLI refuses it, then hands the user's to the user, or accepts without any), decidenone (it answers,
+// then ends without a verdict). Each verdict's text starts "fake helper".
+// Review decisions (queue RVD): each "FAKE-DECIDE: [args]" line of a step's goal is `nexus decide <step> <args>` at the
+// step's start; before `nexus step done` a step declares none ("fake: nothing to decide"), refused where it has a list.
 // Claude's fake keeps the conversations it saved (fakeSaved below) and refuses, as Claude Code does, to resume one it
 // never saved or to start a saved one anew; FAKE_START_MS: it reads its input only after that long (Claude Code's
 // start-up), so a test can end it before it saved anything; FAKE_REFUSE: it refuses every start, each in its way;
@@ -278,11 +282,19 @@ async function holdingInput<T>(fake: Fake, call: () => Promise<T>): Promise<T> {
   if (hold) stdin.pause();
   try { return await call(); } finally { if (hold) stdin.resume(); }
 }
+/**
+ * Before `nexus step done` a worker declares the step's review decisions, or that it has none (queue RVD): a step that
+ * declared none of its own (FAKE-DECIDE) declares none here; the CLI refuses it where the step has a list, which is fine.
+ */
+async function declareNone(fake: Fake, args: string[]): Promise<void> {
+  if (args[0] !== "step" || args[1] !== "done" || !args[2]) return;
+  await (await cli()).cliRun(["decide", args[2], "--none", "fake: nothing to decide"], { env: fake.io.env, cwd: fake.io.cwd });
+}
 const callNexus = async (fake: Fake, args: string[]): Promise<void> => {
-  await holdingInput(fake, async () => (await cli()).cliOut(args, { env: fake.io.env, cwd: fake.io.cwd }));
+  await holdingInput(fake, async () => { await declareNone(fake, args); await (await cli()).cliOut(args, { env: fake.io.env, cwd: fake.io.cwd }); });
 };
 const callNexusOut = async (fake: Fake, args: string[], input?: string): Promise<string> => {
-  const r = await holdingInput(fake, async () => (await cli()).cliRun(args, { env: fake.io.env, cwd: fake.io.cwd, input }));
+  const r = await holdingInput(fake, async () => { await declareNone(fake, args); return (await cli()).cliRun(args, { env: fake.io.env, cwd: fake.io.cwd, input }); });
   return r.status === 0 ? r.stdout.trim() : `nexus failed: ${r.stderr.trim()}`;
 };
 
@@ -621,6 +633,11 @@ async function answer(fake: Fake, text: string, tool: (command: string) => void,
     let behaviour = /FAKE: (\w+)/.exec(text)?.[1] ?? (closing ? env.FAKE_CLOSING : undefined) ?? (integration ? env.FAKE_INTEGRATE ?? "merge" : undefined) ?? "done";
     await nexus("step", "start", step);
     tool(`nexus step start ${step}`);
+    // "FAKE-DECIDE: [args]" lines (queue RVD): the step's review decisions, each `nexus decide <step> <args>`.
+    for (const d of text.matchAll(/FAKE-DECIDE: (\[.*\])/g)) {
+      await nexus("decide", step, ...(JSON.parse(d[1]!) as string[]));
+      tool(`nexus decide ${step}`);
+    }
     // Real OS descendants under the fake runtime: one direct sleeper and an orphaned grandchild. The intermediate
     // exits before the turn reports its outcome, which a process-list snapshot cannot reliably reconstruct.
     if (behaviour.startsWith("proc")) {
@@ -863,6 +880,19 @@ async function reviewAsHelper(fake: Fake, text: string, queue: string, step: str
   const run = (args: string[]) => { tool(`nexus ${args.join(" ")}`); return callNexusOut(fake, args); };
   if (verdict === "none") return "fake helper: no verdict";
   if (verdict === "hang") { await work(fake, step); return "fake helper: no verdict after work"; }
+  // "decide" (queue RVD): it answers every reviewer's decision the packet lists with its first option, tries the user's
+  // (which the CLI refuses it), then hands the user's to the user, or accepts when there are none; "decidenone": it
+  // answers, then ends without a verdict.
+  if (verdict === "decide" || verdict === "decidenone") {
+    const outs: string[] = [];
+    for (const d of text.matchAll(/^(D\d+) \(version (\d+), (the user's|a reviewer's)[^\n]*\n {2}options: "([^"]+)"/gm)) {
+      outs.push(await run(["review", "decide", queue, step, d[1]!, "--choice", d[4]!, "--reason", `fake helper: ${d[1]} settled by the evidence`]));
+    }
+    if (verdict === "decidenone") return outs.join("\n");
+    const user = /^D\d+ \(version \d+, the user's/m.test(text);
+    outs.push(await run(user ? ["review", "ask-user", queue, step, "fake helper: the user's decisions are open"] : ["review", "accept", queue, step, "--note", `fake helper checked round ${round}`]));
+    return outs.join("\n");
+  }
   if (verdict === "accept" || (verdict === "sendback1" && round > 1)) return await run(["review", "accept", queue, step, "--note", `fake helper checked round ${round}`]);
   if (verdict === "sendback" || verdict === "sendback1") return await run(["review", "send-back", queue, step, `fake helper: fix round ${round}`]);
   if (verdict.startsWith("passon:")) return await run(["review", "pass-on", queue, step, "--why", verdict.slice(7), "--findings", `fake helper findings for ${step}`]);

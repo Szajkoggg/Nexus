@@ -77,8 +77,13 @@ export type StepStatus = z.infer<typeof StepStatus>;
  */
 export const PassOnReason = z.enum(["criterion", "deviation", "question", "limit", "doubt", "level", "decision", "user_decision", "no_verdict", "unavailable"]);
 export type PassOnReason = z.infer<typeof PassOnReason>;
-/** The events that are a review helper's verdict: the only events a helper session writes. */
-export const HELPER_VERDICTS: ReadonlySet<string> = new Set(["review.accepted", "review.sent_back", "review.passed_on", "review.decided", "review.asked_user"]);
+/** The events that are a review helper's verdict: each ends its review (its process ends after the turn). */
+export const HELPER_VERDICTS: ReadonlySet<string> = new Set(["review.accepted", "review.sent_back", "review.passed_on", "review.asked_user"]);
+/**
+ * The only events a helper session writes: its verdicts, and its answers to review decisions (queue RVD), which are no
+ * verdict: a helper that answered and then ended without one is passed on like any other.
+ */
+export const HELPER_EVENTS: ReadonlySet<string> = new Set([...HELPER_VERDICTS, "review.decided"]);
 /** The reasons only Nexus gives (its `nexus` session), never a helper. */
 export const NEXUS_PASS_ON: ReadonlySet<PassOnReason> = new Set(["no_verdict", "unavailable"]);
 

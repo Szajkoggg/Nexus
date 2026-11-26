@@ -2,12 +2,12 @@
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
 import { errorText } from "./errors.ts";
 import { applyCheckSets, enterAcceptedReview, lastDone, reviewRound, verdictBeforeReview } from "./checks.ts";
-import { applyAnswer, applyDecision, applyMaterial, applyNone, decisionGate, emptyDecisions, helperHandOverRefusal, listState, type Acceptor, type DecisionContext, type DecisionsView, type ListState } from "./review-decisions.ts";
-import { CONVERSATION_ONLY, DECISION_LIST, HELPER_VERDICTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
+import { applyAnswer, applyDecision, applyMaterial, applyNone, decisionGate, emptyDecisions, helperHandOverRefusal, listState, settledDecisions, type Acceptor, type DecisionContext, type DecisionsView, type ListState } from "./review-decisions.ts";
+import { CONVERSATION_ONLY, DECISION_LIST, HELPER_EVENTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, countRebuild, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
-import { inFileOrder } from "./clock.ts";
+import { inFileOrder, now } from "./clock.ts";
 import { isOpenQuestion, questionBarrier, reviewedByOrchestrator, runEnded, runGoing, runHoldsCheckout, stepWaits, waitsForUserReview } from "./status-rules.ts";
 import { stopPlace } from "./attention.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
@@ -383,7 +383,7 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
         if (e.session !== id) { warnings.push(`session ${id}: event ${e.id} claims session ${e.session}; ignored`); continue; }
         // The server's own session (queue MI) accepts the integration steps it ran without a model.
         // A review helper writes only its verdicts (queue RH); Nexus passes a step on too.
-        if (s.role === "helper" && !HELPER_VERDICTS.has(e.type)) { warnings.push(`session ${id}: ${e.type} is not a review helper's; ignored`); continue; }
+        if (s.role === "helper" && !HELPER_EVENTS.has(e.type)) { warnings.push(`session ${id}: ${e.type} is not a review helper's; ignored`); continue; }
         if (e.type === "review.passed_on" && s.role !== "helper" && s.role !== "nexus") { warnings.push(`session ${id}: review.passed_on is a review helper's; ignored`); continue; }
         if (ORCHESTRATOR_ONLY.has(e.type) && s.role !== "orchestrator" && s.role !== "user" && s.role !== "helper" && !(s.role === "nexus" && e.type === "review.accepted")) {
           warnings.push(`session ${id}: ${e.type} is for orchestrators; ignored`); continue;
@@ -1156,6 +1156,48 @@ function applyChange(q: QueueView, c: StatusChange): void {
  */
 export function gate(q: Pick<QueueView, "check_runs">, st: StepView, acceptor: Acceptor, project: Pick<ProjectFile, "review_decisions_since">): string | undefined {
   return decisionGate(st, reviewRound(q, st), acceptor, listState(st.decisions, project.review_decisions_since, lastDone(st)?.at));
+}
+
+/** A review decision event as a command means to write it: its type and fields, without the envelope. */
+export type DecisionEventInput =
+  | Omit<Extract<Event, { type: "review.decision" }>, "v" | "id" | "at" | "session">
+  | Omit<Extract<Event, { type: "review.decisions_none" }>, "v" | "id" | "at" | "session">
+  | Omit<Extract<Event, { type: "review.decided" }>, "v" | "id" | "at" | "session">;
+
+/**
+ * Why a review decision event of session `s` would not count if written now, or undefined when it would: the
+ * derivation's own rule (review-decisions.ts) applied to a copy of the step, so the CLI refuses what the derivation would
+ * ignore (docs/design/review-decisions.md, "Rights: who answers what": a save is checked when it is made). Away mode is
+ * read as it is now.
+ */
+export function decisionRefusal(state: Pick<ProjectState, "queues" | "away">, s: Pick<SessionFile, "id" | "role" | "about">, input: DecisionEventInput, at = now()): string | undefined {
+  const q = state.queues.find((x) => x.id === input.queue);
+  const st = q?.steps.find((x) => x.id === input.step);
+  if (!q || !st) return `unknown step ${input.queue}/${input.step}`;
+  if (input.type === "review.decided" && s.role !== "orchestrator" && s.role !== "helper" && s.role !== "user") return `a ${s.role}'s session does not answer review decisions: the reviewer (the review helper, the orchestrator) or the user does`;
+  if (input.type !== "review.decided" && s.role !== "worker" && s.role !== "orchestrator") return `a ${s.role === "helper" ? "review helper" : `${s.role}'s session`} does not change a decision list: pass the step on (--why decision) when the list is incomplete or wrong`;
+  const copy: StepView = { ...st, decisions: structuredClone(st.decisions) };
+  const e = { v: 1, id: "decision-check", at, session: s.id, ...input } as Event;
+  const away = state.away.on && state.away.since && state.away.until ? { current: { since: state.away.since, until: state.away.until }, past: [] } : { past: [] };
+  const c: DecisionContext = {
+    role: s.role, reviewRound: reviewRound(q, st), away, reviewedByOrchestrator: reviewedByOrchestrator(st),
+    helperRefusal: s.role === "helper" ? helperRefusal(s, q, st) : undefined,
+  };
+  const why = e.type === "review.decision" ? applyDecision(copy, e, c) : e.type === "review.decisions_none" ? applyNone(copy, e, c) : e.type === "review.decided" ? applyAnswer(copy, e, c) : undefined;
+  return why?.replace(/^event decision-check: /, "");
+}
+
+/**
+ * The decisions earlier steps' accepted reviews settled, for the next steps' openings (docs/design/review-decisions.md,
+ * "What the next worker gets"): each done step before `before` with answers, its lines (settledDecisions).
+ */
+export function queueDecisions(q: QueueView, before: string): { step: string; title: string; lines: string[] }[] {
+  const at = q.steps.findIndex((x) => x.id === before);
+  return q.steps.slice(0, at < 0 ? q.steps.length : at).flatMap((st) => {
+    if (st.status !== "done" || !st.accepted && !st.provisional) return [];
+    const lines = settledDecisions(st.decisions, reviewRound(q, st), st.provisional?.confirmed ? "confirmed" : st.provisional ? "pending" : undefined);
+    return lines.length ? [{ step: st.id, title: st.title, lines }] : [];
+  });
 }
 
 /** A review helper's `about` (its step and round), or none for any other session. */

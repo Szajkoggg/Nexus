@@ -90,6 +90,9 @@ export class ProjectRegistry {
       // Steps done before review levels keep the meaning they had (docs/protocol/review.md, "Before review levels").
       try { if (files.markReviewLevels()) console.log(`project ${p.id}: steps done from now on are reviewed by level`); }
       catch (err) { console.error(`project ${p.id}: review levels not marked: ${errorText(err)}`); }
+      // Steps done from now on declare review decisions; those done before need no list (docs/protocol/review.md, "Review decisions").
+      try { if (files.markReviewDecisions()) console.log(`project ${p.id}: steps done from now on declare review decisions`); }
+      catch (err) { console.error(`project ${p.id}: review decisions not marked: ${errorText(err)}`); }
       // A deploy planned after a step or queue of this project holds the run at that step's end (src/deploy-plan.ts); so
       // does Nexus merging a worktree queue back into the run's checkout (src/merger.ts), until its fast-forward.
       let merger: Merger | undefined;

@@ -238,3 +238,78 @@ export function helperHandOverRefusal(st: Pick<DecisionStep, "decisions">, round
   const open = active.filter((d) => d.for === "reviewer" && !currentAnswer(d, round));
   return open.length ? `the reviewer's decisions ${open.map((d) => d.id).join(", ")} are not answered yet` : undefined;
 }
+
+// ---------------------------------------------------------------- text (nexus status, the notices, the packet, openings)
+
+/** Who may answer a decision now: the step's level, the user's away mode now, whether the user took the review. */
+export interface RightsNow { level: number; away: boolean; toUser: boolean }
+
+/**
+ * Who answers the decision now, as the notices and the packet say it (docs/design/review-decisions.md, "Rights: who
+ * answers what"). A reviewer's decision: the review helper, the orchestrator, the user; a user's: the user, or at level 3
+ * (2 while away) the orchestrator provisionally.
+ */
+export function answerRights(d: Pick<DecisionView, "for">, r: RightsNow): string {
+  if (r.toUser || r.level === 1) return "only the user answers it now";
+  if (d.for === "reviewer") return "a reviewer's: the review helper or the orchestrator answers it (the user may answer it too)";
+  return r.level === 3 || r.away
+    ? "the user's: the orchestrator answers it provisionally, with why; the user confirms it on their return"
+    : "the user's: only the user answers it (hand it over: nexus review ask-user)";
+}
+
+const answerText = (a: DecisionAnswer) =>
+  `${a.choice ? `"${a.choice}"` : "none of the options"}${a.text ? `: ${a.text}` : ""} (${a.by === "helper" ? "the review helper" : `the ${a.by}`}${a.provisional ? ", provisional" : ""})`;
+
+/** One decision's state in round `round`, in words: its current answer, or why it is open. */
+export function decisionState(d: DecisionView, round: number): string {
+  const a = currentAnswer(d, round);
+  if (a) return `answered ${answerText(a)}${asksFix(d, a) ? "; it asks for a change" : ""}`;
+  const older = d.answers.findLast((x) => x.round === round);
+  if (older) return `open: answered for an earlier version (${older.choice ? `"${older.choice}"` : "words"}); the question changed`;
+  const earlier = d.answers.findLast((x) => x.round < round);
+  return `open${earlier ? ` (round ${earlier.round}: ${answerText(earlier)})` : ""}`;
+}
+
+/**
+ * The decision list as lines, for nexus status, the orchestrator's review notice and the review helper's packet: each
+ * decision (id, version, whose, the question, options with the recommendation and those asking a change, material,
+ * why), its state and who answers it; a missing list said as such. `rights` undefined: who answers is left out.
+ */
+export function decisionLines(d: DecisionsView, list: ListState, round: number, rights?: RightsNow): string[] {
+  if (list === "missing") return ["The worker declared no decision list: declare its decisions (nexus decide) or that it has none (nexus decide <step> --none \"why\") before accepting it."];
+  if (list === "legacy" && !d.items.length) return [];
+  if (d.none && !activeDecisions(d).length) return [`No decisions (declared by the ${d.none.by}): ${d.none.text}`];
+  return activeDecisions(d).map((x) => {
+    const options = x.options.map((o) => `"${o.label}"${o.label === x.recommended ? " (recommended)" : ""}${o.effect === "fix" ? " (asks for a change)" : ""}`).join(", ");
+    return [
+      `${x.id} (version ${x.version}, ${x.for === "user" ? "the user's" : "a reviewer's"}, by the ${x.by}): ${x.text}`,
+      `  options: ${options}`,
+      ...(x.material.length ? [`  material: ${x.material.join(", ")}`] : []),
+      ...(x.why ? [`  why it matters: ${x.why}`] : []),
+      `  ${decisionState(x, round)}${rights ? `; ${answerRights(x, rights)}` : ""}`,
+    ].join("\n");
+  });
+}
+
+/** "2 decisions, 1 open (D2)", or undefined for a step with no decision on its list. */
+export function decisionsCount(d: DecisionsView, round: number): string | undefined {
+  const active = activeDecisions(d);
+  if (!active.length) return undefined;
+  const open = active.filter((x) => !currentAnswer(x, round));
+  return `${active.length} decision${active.length === 1 ? "" : "s"}, ${open.length ? `${open.length} open (${open.map((x) => x.id).join(", ")})` : "all answered"}`;
+}
+
+/**
+ * The answers a step's accepted review settled (its final round's current answers), for the next steps' openings: the
+ * decision, its question, the answer and who gave it; `confirmation`: whether the user confirmed the step's
+ * provisional acceptance yet (left out: the answers are said as given, as in a send-back).
+ */
+export function settledDecisions(d: DecisionsView, round: number, confirmation?: "pending" | "confirmed"): string[] {
+  return activeDecisions(d).flatMap((x) => {
+    const a = currentAnswer(x, round);
+    if (!a) return [];
+    const mark = !a.provisional ? "" : confirmation === "pending" ? ", provisional: the user has not confirmed it yet" : confirmation === "confirmed" ? ", confirmed by the user" : ", provisional";
+    const who = a.by === "user" ? "the user" : `${a.by === "helper" ? "the review helper" : "the orchestrator"}${mark}`;
+    return [`${x.id} "${x.text}": ${a.choice ? `"${a.choice}"` : "none of the options"}${a.text ? ` (${a.text})` : ""}, by ${who}`];
+  });
+}

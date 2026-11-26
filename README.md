@@ -964,6 +964,16 @@ default; a project may have its own, with Global · Own like the other settings)
 `nexus stats --reviews` shows how the reviews went: your Fix its, rejections and returned provisional acceptances,
 the send-backs by who sent them, how often the helper passed steps on, and what the audits found.
 
+**Review decisions.** Before a step ends, its worker lists what the review has to decide (`nexus decide`): each a
+concrete question with options, its recommendation and the pictures or files that show them, marked as yours (the
+look, the feel, the scope) or a reviewer's (decidable from the evidence); or it says, with why, that there is nothing to
+decide. A step cannot be accepted, by you or by a reviewer, while one of its decisions is open, and an answer is never
+an acceptance: you answer, then accept (or Fix it, or Reject, which need no answer). The review helper answers the
+reviewer's decisions and hands yours to you; the orchestrator answers a decision of yours only at level 3 or while you
+are away, provisionally, and you confirm it with the step. The answers go to the queue's later steps. In
+`nexus status` a step shows "review decisions: 2 decisions, 1 open (D1)". (The dashboard's decision cards come with
+RVD4; until then a decision of yours is answered through the review API.)
+
 **Away mode**: "Away…" at the foot of the sidebar (in Settings on a phone) turns it on until a time (08:00 by default,
 the next such time); "Away until 08:00" then shows there and at the top of the right rail (in the header on a phone),
 with Turn off. Meanwhile level-2 steps run as level 3, so the queues go on and what is yours waits in the batch;

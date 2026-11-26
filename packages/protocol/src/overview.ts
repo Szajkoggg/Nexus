@@ -2,6 +2,8 @@
 // what a fresh orchestrator session starts from (apps/server/src/orchestrator.ts). Pure: it reads a derived state.
 import { stopPlace } from "./attention.ts";
 import { openPlan } from "./plan.ts";
+import { reviewRound } from "./checks.ts";
+import { decisionsCount } from "./review-decisions.ts";
 import { formatDuration } from "./times.ts";
 import { trainText } from "./train.ts";
 import type { BasePull } from "./schemas.ts";
@@ -82,6 +84,13 @@ export function acceptedOn(a: { runtime?: string; model?: string; effort?: strin
  * A review helper on the step (queue RH, H17): it reviews it now, or it accepted it (on which runtime, model and
  * effort). Empty otherwise, so what the orchestrator and the user saw before helpers stays as it was.
  */
+/** A step in review: its decisions (queue RVD), " (review decisions: 3, 1 open (D2))", or a list nobody declared. */
+function reviewDecisionsText(q: QueueView, x: StepView): string {
+  const count = decisionsCount(x.decisions, reviewRound(q, x));
+  if (count) return ` (review decisions: ${count})`;
+  return x.decision_list === "missing" ? " (no review decision list declared)" : "";
+}
+
 export function helperText(x: Pick<StepView, "status" | "helper" | "accepted">): string {
   if (x.status === "review" && x.helper?.state === "running") return " (the review helper reviews it)";
   const a = x.accepted;
@@ -151,7 +160,7 @@ Queues (${queues.length - done.length} open; finished: ${finished})`);
     out.push(`- ${q.id} [${q.status}] ${q.title}: revision ${q.revision}, ${q.approved ? "approved" : "not approved"}${run}`);
     // A revision waiting for approval comes first: nothing runs and no planned start fires until the user approves it.
     if (!q.approved) out.push(`  needs approval (revision ${q.revision})${(q.start && !q.start.failed) || openPlan(q) ? ": its planned start below waits for it" : ""}`);
-    out.push(`  steps: ${q.steps.map((x) => `${x.id} ${x.status}${x.continued ? ` → ${x.continued.in.join(", ")}` : ""} (level ${x.level}${x.level_from === "user" ? ", set by the user" : ""})${provisionalText(x)}${helperText(x)}${x.closing && x.status === "skipped" ? ` (${closingSkipped(q)})` : ""}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}${x.tags.kind || x.tags.size ? ` {${[x.tags.kind, x.tags.size].filter(Boolean).join(" ")}}` : ""}`).join(", ")}`);
+    out.push(`  steps: ${q.steps.map((x) => `${x.id} ${x.status}${x.continued ? ` → ${x.continued.in.join(", ")}` : ""} (level ${x.level}${x.level_from === "user" ? ", set by the user" : ""})${provisionalText(x)}${helperText(x)}${x.closing && x.status === "skipped" ? ` (${closingSkipped(q)})` : ""}${x.review_with ? ` (for ${x.review_with === "user" ? "the user" : "you"})` : ""}${x.status === "review" ? reviewDecisionsText(q, x) : ""}${stepValuesText(x) ? ` [on ${stepValuesText(x)}]` : ""}${x.tags.kind || x.tags.size ? ` {${[x.tags.kind, x.tags.size].filter(Boolean).join(" ")}}` : ""}`).join(", ")}`);
     if (q.status_reason && q.status !== "running") out.push(`  why: ${q.status_reason.replace(/\s+/g, " ").slice(0, 300)}`);
     for (const line of stopLines(q)) out.push(line);
     for (const line of planLines(q)) out.push(line);

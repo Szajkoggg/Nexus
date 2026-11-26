@@ -18,6 +18,7 @@ import {
   NoteMeta, Role, Runtime, type PictureRole, type ReviewItem, type SessionFile,
   noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, ideaStatuses, reportSourceHash,
   capacityLines, latestCheckSet, stepChecks, readCapacity, reviewStats, reviewStatsText, switchReport, switchReportText, helperAbout, helperText, NEXUS_PASS_ON, PassOnReason, isUnreadableFile,
+  decisionRefusal, decisionsCount, gate, helperHandOverRefusal, reviewRound, type DecisionEventInput,
 } from "@nexus/protocol";
 import { checkRules, describeRules } from "@nexus/protocol/rules";
 import { importMarkdownQueues } from "./import-md.ts";
@@ -28,7 +29,7 @@ import { CONTEXT_SUMMARY_WORDS, HELP_TOPICS, topicList } from "./help.ts";
 const HELP = `nexus — report to and manage Nexus (protocol 1)
 
 Agent commands (session from NEXUS_SESSION or --session; a --session other than a set NEXUS_SESSION is refused;
-a review helper's session runs only nexus status, nexus help, nexus doc and its nexus review accept|send-back|pass-on):
+a review helper's session runs only nexus status, nexus help, nexus doc and its nexus review accept|send-back|pass-on|decide|ask-user):
   nexus status [--all] [--queue <id>]           current queue, step, notes and open questions (without a
                                                 session: the queues at work, then the approved ones not running).
                                                 An orchestrator's or a thinking partner's: the open queues, the finished ones counted, the
@@ -67,6 +68,12 @@ a review helper's session runs only nexus status, nexus help, nexus doc and its 
                                       steps, when last, which check
   nexus stop <step> --condition <text> --reason <text>   the condition met, as the queue words it; the reason, short
   nexus ask <text|-> [--step <step>] [--option <text>]... [--recommend <option>] [--can-continue]
+  nexus decide <step> <question|-> --option <text> --option <text>... [--recommend <option>] [--fix-option <option>]...
+                    [--material <view key|path>]... [--for user|reviewer] [--why <text>] [--id <Dn>]
+  nexus decide <step> --none <why> | --withdraw <Dn> --reason <text>
+                    the step's review decisions (worker: every one before nexus step done, which refuses a step with
+                    neither decisions nor --none; the orchestrator, with --queue: while it holds the review); a worker
+                    proposes and recommends, it never answers (nexus help decisions)
   nexus withdraw <qid> --reason <text>   an open question of this session's (or of the one it took over from); an
                     unknown, answered, withdrawn or another session's question is refused
   nexus context <text|-> [--topics a,b] [--files a,b] [--step <step>]
@@ -115,8 +122,15 @@ a review helper's session runs only nexus status, nexus help, nexus doc and its 
   nexus review audit <queue> <step> agree|disagree --reason <text>   (orchestrator only) an audit of the review
                                       helper's acceptance a notice gave you; a disagreement does not reopen the step
   nexus review pass-on <queue> <step> --why <reasons> --findings <text>   (the step's review helper only) to the
-                                      orchestrator; reasons: criterion, deviation, question, limit, doubt, level
-  nexus review ask-user <queue> <step> <why>                      (orchestrator only) hand the review to the user
+                                      orchestrator; reasons: criterion, deviation, question, limit, doubt, level,
+                                      decision, user_decision
+  nexus review decide <queue> <step> <decision> [--choice <option>] --reason <text>   (orchestrator, or the step's review
+                                      helper) an answer to a review decision, no acceptance: the helper a reviewer's
+                                      decision; the orchestrator a reviewer's, a user's only at level 3 or 2 while the
+                                      user is away, provisionally
+  nexus review ask-user <queue> <step> <why>                      (orchestrator, or the step's review helper at level 2
+                                      for the user's review decisions, once the reviewer's are answered) hand the review
+                                      to the user
   nexus review provisional <queue> <step> [--note <text>]        (orchestrator only) a step at review level 3 (or at
                                       level 2 while the user is away): accept provisionally; the run goes on, the
                                       user confirms it or asks a fix on their return
@@ -219,6 +233,8 @@ const parseLine = (argv: string[]) => commandLine(argv, {
     unit: { type: "string" }, show: { type: "string" }, target: { type: "string" }, "warn-above": { type: "string" }, "warn-below": { type: "string" },
     set: { type: "string", multiple: true }, template: { type: "string" }, every: { type: "string" }, "after-queues": { type: "string" },
     maintenance: { type: "string" }, findings: { type: "string" }, why: { type: "string" }, "continued-in": { type: "string" },
+    none: { type: "string" }, withdraw: { type: "string" }, choice: { type: "string" }, for: { type: "string" },
+    material: { type: "string", multiple: true }, "fix-option": { type: "string", multiple: true },
     help: { type: "boolean", short: "h" }, full: { type: "boolean" }, all: { type: "boolean" }, reviews: { type: "boolean" }, switches: { type: "boolean" }, flaky: { type: "boolean" }, key: { type: "string" }, note: { type: "string" }, before: { type: "string" }, now: { type: "boolean" }, ref: { type: "string" },
 });
 
@@ -463,25 +479,39 @@ export async function waitApplied(
 async function reviewDecision(action: "accept" | "send-back" | "ask-user" | "provisional"): Promise<void> {
   const st = store(); const s = session(st);
   // A review helper accepts and sends back the step it was started for; the rest is the orchestrator's (queue RH).
-  if (s.role === "helper" && action !== "accept" && action !== "send-back") throw new UsageError(`a review helper does not ${action}: accept, send back, or pass it on (nexus review pass-on)`);
+  // At level 2 it also hands the user's review decisions to the user (ask-user), once the reviewer's are answered (queue RVD).
+  if (s.role === "helper" && action !== "accept" && action !== "send-back" && action !== "ask-user") throw new UsageError(`a review helper does not ${action}: accept, send back, or pass it on (nexus review pass-on)`);
   if (s.role !== "helper" && s.role !== "orchestrator") throw new UsageError("only an orchestrator session may do this");
   const queue = need(args()[2], "<queue>"); const step = need(args()[3], "<step>");
   checkStep(st, queue, step);
   const state = loadProjectState(st);
   const view = stepView(state, queue, step);
+  const q = state.queues.find((x) => x.id === queue)!;
   if (view.status !== "review") throw new UsageError(`step ${queue}/${step} is not waiting for review (it is ${view.status})`);
   if (view.review_with !== "orchestrator") throw new UsageError(`step ${queue}/${step} waits for the user's review, not yours`);
   if (s.role === "helper") {
     helperStep(state, s, queue, step);
     if (action === "accept" && view.level !== 2) throw new UsageError(`step ${queue}/${step} is at review level ${view.level}: its judgement is the orchestrator's. Send it back if a criterion you can check fails, else pass it on: nexus review pass-on ${queue} ${step} --why level --findings "..."`);
+    if (action === "ask-user") {
+      if (view.level !== 2) throw new UsageError(`step ${queue}/${step} is at review level ${view.level}: pass the user's decisions on to the orchestrator (nexus review pass-on ${queue} ${step} --why user_decision --findings "...")`);
+      const why = helperHandOverRefusal(view, reviewRound(q, view));
+      if (why) throw new UsageError(`${why}: a review helper hands a step to the user only for the user's review decisions, once every reviewer's decision is answered (else pass it on)`);
+    }
   }
+  // Every acceptance waits for the step's decisions: the same rule the derivation applies (decisionGate).
+  const decided = (acceptor: "orchestrator" | "helper" | "provisional") => {
+    const held = gate(q, view, acceptor, state.project);
+    if (held) throw new UsageError(`step ${queue}/${step} cannot be accepted yet: ${held}. Answer what is yours (nexus review decide ${queue} ${step} <decision> --choice "…" --reason "…"), hand the user's decisions over (nexus review ask-user), or send it back`);
+  };
   if (action === "accept") {
+    decided(s.role === "helper" ? "helper" : "orchestrator");
     emit(st, s, { type: "review.accepted", queue, step, text: o().note?.trim() || undefined });
     say(`ok: ${queue}/${step} accepted; the run goes on`);
     return;
   }
   if (action === "provisional") {
     if (levelNow(view.level, state.away) !== 3) throw new UsageError(`step ${queue}/${step} is at review level ${view.level}${view.level === 2 ? " and away mode is off" : ""}: a provisional acceptance is for level 3 (or 2 while the user is away). Accept it, send it back, or hand it to the user`);
+    decided("provisional");
     emit(st, s, { type: "review.provisional", queue, step, text: o().note?.trim() || undefined });
     say(`ok: ${queue}/${step} accepted provisionally; the run goes on, and the step waits in the user's return batch`);
     return;
@@ -523,6 +553,90 @@ function passOn(): void {
   say(`ok: ${queue}/${step} passed on to the orchestrator; end your turn now`);
 }
 
+/** Writes a review decision event after the derivation's own check (decisionRefusal): what it would ignore is refused. */
+function decisionEmit(st: ProjectStore, s: SessionFile, input: DecisionEventInput): Event {
+  const refused = decisionRefusal(loadProjectState(st), s, input);
+  if (refused) throw new UsageError(refused);
+  return emit(st, s, input);
+}
+
+/**
+ * `nexus decide <step> "<question>" --option … --option … [--recommend …] [--fix-option …] [--material …]… [--for
+ * user|reviewer] [--why …] [--id Dn]`, `nexus decide <step> --none "<why>"`, `nexus decide <step> --withdraw Dn --reason
+ * …`: the step's decision list (docs/protocol/review.md, "Review decisions"). The step's worker while it works, the
+ * orchestrator (with --queue) while it holds the review; a worker proposes, it never answers.
+ */
+function decideList(): void {
+  const st = store(); const s = session(st);
+  if (s.role !== "worker" && s.role !== "orchestrator") throw new UsageError("only the step's worker (before nexus step done) or the orchestrator holding its review writes a decision list");
+  const step = need(args()[1], "<step>");
+  const queue = queueFor(st, s, step);
+  checkStep(st, queue, step);
+  noMore(3, "nexus decide <step> \"<question>\"");
+  const view = stepView(loadProjectState(st), queue, step);
+  const none = o().none?.trim(); const withdraw = o().withdraw?.trim();
+  if (none !== undefined || withdraw !== undefined) {
+    if (args()[2] !== undefined || o().option?.length) throw new UsageError("--none and --withdraw go without a question and options");
+    if (none !== undefined && withdraw !== undefined) throw new UsageError("--none or --withdraw, not both");
+  }
+  if (none !== undefined) {
+    if (!none) throw new UsageError("--none says why nothing in the step is to be decided (nothing is the user's to choose, nothing deviates from the plan)");
+    decisionEmit(st, s, { type: "review.decisions_none", queue, step, text: readText(none) });
+    say(`ok: ${queue}/${step} has no review decisions`);
+    return;
+  }
+  if (withdraw !== undefined) {
+    const old = view.decisions.items.find((x) => x.id === withdraw);
+    if (!old) throw new UsageError(`step ${queue}/${step} has no decision ${withdraw}`);
+    const reason = need(o().reason?.trim(), "--reason: why it is not a decision");
+    decisionEmit(st, s, { type: "review.decision", queue, step, decision: old.id, text: old.text, options: old.options, for: old.for, withdrawn: reason });
+    say(`ok: decision ${old.id} of ${queue}/${step} withdrawn`);
+    return;
+  }
+  const text = readText(need(args()[2], "\"<question>\" (or --none \"<why>\")").trim());
+  const labels = (o().option ?? []).map((x) => x.trim()).filter(Boolean);
+  if (labels.length < 2) throw new UsageError("a decision has two or more options, one --option each (an answer may still choose none of them, with words)");
+  if (new Set(labels).size !== labels.length) throw new UsageError("an option is given twice");
+  const fix = (o()["fix-option"] ?? []).map((x) => x.trim());
+  const unknown = [o().recommend, ...fix].filter((x): x is string => x !== undefined && !labels.includes(x));
+  if (unknown.length) throw new UsageError(`--recommend and --fix-option name one of the options (${labels.map((x) => `"${x}"`).join(", ")}), not ${unknown.map((x) => `"${x}"`).join(", ")}`);
+  const whose = o().for ?? "user";
+  if (whose !== "user" && whose !== "reviewer") throw new UsageError(`--for is user (the user's judgement: the look, the feel, the scope) or reviewer (decidable from the step's evidence), not ${whose}`);
+  let id = o().id?.trim();
+  if (id !== undefined && !view.decisions.items.some((x) => x.id === id)) throw new UsageError(`step ${queue}/${step} has no decision ${id}: a new decision gets its id by itself (leave --id out)`);
+  id ??= `D${view.decisions.items.length + 1}`;
+  const material = (o().material ?? []).map((x) => x.trim()).filter(Boolean);
+  decisionEmit(st, s, {
+    type: "review.decision", queue, step, decision: id, text, options: labels.map((label) => (fix.includes(label) ? { label, effect: "fix" as const } : { label })),
+    for: whose, ...(o().recommend ? { recommended: o().recommend } : {}), ...(material.length ? { material } : {}), ...(o().why?.trim() ? { why: o().why!.trim() } : {}),
+  });
+  const version = view.decisions.items.find((x) => x.id === id)?.version;
+  say(`ok: decision ${id} of ${queue}/${step}${version ? ` (version ${version + 1}: its earlier answers no longer count)` : ""}, ${whose === "user" ? "the user's" : "a reviewer's"}`);
+}
+
+/**
+ * `nexus review decide <queue> <step> <decision> [--choice <option>] --reason <why>`: a reviewer's answer to one review
+ * decision (review.decided), by the rights at its time: the review helper a reviewer's decision; the orchestrator a
+ * reviewer's, and a user's only at level 3 (2 while away), provisionally. An answer is no acceptance and wakes nobody.
+ */
+function reviewDecide(): void {
+  const st = store(); const s = session(st);
+  if (s.role !== "orchestrator" && s.role !== "helper") throw new UsageError(`only the review helper or the orchestrator answers a review decision here (the user in the dashboard)${s.role === "worker" ? "; a worker proposes decisions (nexus decide), it never answers them" : ""}`);
+  const queue = need(args()[2], "<queue>"); const step = need(args()[3], "<step>"); const id = need(args()[4], "<decision> (D1, D2, …)");
+  noMore(5, "nexus review decide <queue> <step> <decision>");
+  checkStep(st, queue, step);
+  const state = loadProjectState(st);
+  const q = state.queues.find((x) => x.id === queue)!;
+  const view = stepView(state, queue, step);
+  if (s.role === "helper") helperStep(state, s, queue, step);
+  const d = view.decisions.items.find((x) => x.id === id);
+  if (!d) throw new UsageError(`step ${queue}/${step} has no decision ${id}${view.decisions.items.length ? ` (it has ${view.decisions.items.map((x) => x.id).join(", ")})` : ""}`);
+  const choice = o().choice?.trim();
+  const reason = need(o().reason?.trim(), "--reason: why (the user and the next worker read it)");
+  decisionEmit(st, s, { type: "review.decided", queue, step, decision: d.id, version: d.version, round: reviewRound(q, view), ...(choice ? { choice } : {}), text: reason });
+  say(`ok: ${d.id} of ${queue}/${step} answered${choice ? ` "${choice}"` : ""}${d.for === "user" ? " provisionally (the user confirms it)" : ""}; this is no acceptance: decide the review as before`);
+}
+
 /**
  * `nexus review audit <queue> <step> agree|disagree --reason <text>`: the orchestrator's audit of a review helper's
  * acceptance it was given in a notice (review.audited; docs/protocol/review.md, "The review helper"). It does not reopen the step.
@@ -555,8 +669,8 @@ function helperGate(cmd: string): void {
   let role: string | undefined;
   try { role = store().readSession(sid).role; } catch { return; }
   if (role !== "helper") return;
-  if (cmd === "status" || cmd === "help" || cmd === "doc" || (cmd === "review" && ["accept", "send-back", "pass-on"].includes(args()[1] ?? ""))) return;
-  throw new UsageError(`a review helper only reads and decides its review (nexus status, nexus help, nexus doc, nexus review accept|send-back|pass-on), not nexus ${[cmd, args()[1]].filter(Boolean).join(" ")}; pass the step on with --why doubt, naming what you could not do`);
+  if (cmd === "status" || cmd === "help" || cmd === "doc" || (cmd === "review" && ["accept", "send-back", "pass-on", "decide", "ask-user"].includes(args()[1] ?? ""))) return;
+  throw new UsageError(`a review helper only reads and decides its review (nexus status, nexus help, nexus doc, nexus review accept|send-back|pass-on|decide|ask-user), not nexus ${[cmd, args()[1]].filter(Boolean).join(" ")}; pass the step on with --why doubt, naming what you could not do`);
 }
 
 function report(r: { ok: boolean; message: string } | undefined): void {
@@ -671,6 +785,12 @@ function stepDone(stepArg: string | undefined): void {
     if (!activities.length) throw new UsageError("--activities takes a comma-separated list, e.g. --activities feature,test");
     const issues = tagIssues({ activities }, st.readTags());
     if (issues.length) throw new UsageError(`${issues.join("; ")} (nexus tags lists the activities)`);
+  }
+  // The step's review decisions, or the explicit none, before it ends (queue RVD; the user's decision D3: every step).
+  const state = loadProjectState(st);
+  const view = stepView(state, queue, step);
+  if (state.project.review_decisions_since && !view.decisions.items.length && !view.decisions.none) {
+    throw new UsageError(`Record the review's decisions first: nexus decide ${step} "<question>" --option "…" --option "…" [--recommend "…"] [--material <key|path>] [--for user|reviewer] for each, or nexus decide ${step} --none "<why>" when nothing in the step is the user's to choose and nothing deviates from the plan (nexus help decisions)`);
   }
   const warning = stepEndWarning(st, s, queue, step, o().commit);
   emit(st, s, { type: "step.done", queue, step, summary, commit: o().commit, ...(activities ? { activities } : {}), ...(warning ? { warning } : {}) });
@@ -855,6 +975,10 @@ const commands: Record<string, () => void | Promise<void>> = {
         else if (step.status === "running" && step.check_fix) say(`        check-fix round ${step.check_fix} of ${state.project.defaults.check_fix_limit}${step.check_limit ? " (beyond the limit)" : ""}`);
         const checks = checksLine(step.checks);
         if (checks) say(`        checks: ${checks}`);
+        // The step's review decisions (queue RVD): how many, which are open; a review without a list says so.
+        const decisions = decisionsCount(step.decisions, reviewRound(q, step));
+        if (decisions) say(`        review decisions: ${decisions}`);
+        else if (step.status === "review" && step.decision_list === "missing") say("        review decisions: none declared (the reviewer declares them, or none, before accepting)");
       }
       const open = q.questions.filter(isOpenQuestion);
       for (const x of open) say(`  question ${x.qid} [${x.state}]: ${x.text}`);
@@ -890,6 +1014,8 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (state.warnings.length) say(`\n${state.warnings.length} warning(s); first: ${state.warnings[0]}`);
   },
 
+  decide() { return decideList(); },
+
   step() {
     const sub = args()[1];
     if (sub === "start" || sub === "done" || sub === "failed") noMore(3, `nexus step ${sub} <step>`);
@@ -906,7 +1032,8 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (sub === "accept" || sub === "send-back" || sub === "ask-user" || sub === "provisional") return reviewDecision(sub);
     if (args()[1] === "pass-on") return passOn();
     if (args()[1] === "audit") return reviewAudit();
-    if (args()[1] !== "add") throw new UsageError("nexus review add <step> <path|url>... (orchestrators: nexus review accept|send-back|ask-user|provisional <queue> <step>)");
+    if (args()[1] === "decide") return reviewDecide();
+    if (args()[1] !== "add") throw new UsageError("nexus review add <step> <path|url>... (orchestrators: nexus review accept|send-back|ask-user|provisional|decide <queue> <step>)");
     const st = store(); const s = session(st);
     const step = need(args()[2], "<step>");
     const queue = queueFor(st, s, step);

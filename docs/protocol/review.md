@@ -112,8 +112,7 @@ user is ignored (with a warning); the user may accept either. Workers may write 
 
 ## Review decisions
 
-**Status: protocol and server in effect** (queue RVD, RVD2); the commands (`nexus decide`, `nexus review decide`), the
-briefings, the review helper's packet and the dashboard come in RVD3 and RVD4. The design and the user's decisions are
+**Status: protocol, server, commands and briefings in effect** (queue RVD, RVD2 and RVD3); the dashboard comes in RVD4. The design and the user's decisions are
 in DESIGN.md, ["Required review decisions"](../design/review-decisions.md).
 
 A step's review carries a **decision list**: the questions its review must answer before the step can be accepted
@@ -126,12 +125,17 @@ A step's review carries a **decision list**: the questions its review must answe
   `review.decisions_none` (`text`) says there is nothing to decide; refused while a decision is on the list. Only the
   step's own worker writes them, while the step is at work (its round: the one its step.done will end), and the
   orchestrator while it holds the review (the current round); any other session's is ignored with a warning. The
-  orchestrator may make a `reviewer` decision `user`, never a `user` one `reviewer`.
+  orchestrator may make a `reviewer` decision `user`, never a `user` one `reviewer`. The commands: `nexus decide <step>
+  "<question>" --option … --option … [--recommend …] [--fix-option …] [--material …] [--for user|reviewer] [--why …]
+  [--id Dn]` (`--for` defaults to `user`; a new id comes by itself, `--id` declares an existing one again), `nexus
+  decide <step> --none "<why>"`, `nexus decide <step> --withdraw Dn --reason "<why>"`; the orchestrator adds `--queue`
+  (docs/protocol/cli.md).
 - **What the list is** (`decision_list` on the derived step, with `decisions`: `items`, each with `version`, `round`,
   `by`, `versions` and every valid answer, and `none`): `declared`, `none`, `missing`, or `legacy`: a project without
   `review_decisions_since` in `project.yaml`, or a step whose latest step.done came before it. The server writes the
-  mark once, from RVD3 on, when the CLI lets agents declare a list; until then every project reads `legacy` where it has
-  no list, so nothing old is held.
+  mark once, at its first start with RVD3 (where it marks `review_levels_since`); from then on `nexus step done`
+  refuses a step with neither decisions nor none, and a step.done without one (an older CLI's, one written by hand) is
+  `missing`.
 - **Versions.** A new declaration of the id, or review material added during the review under a key, path or URL the
   decision names, makes a new version. An answer counts only for the version and the review round it names
   (`review.decided`'s `version`, `round`); an earlier one stays in the decision's `answers` as history. A send-back opens
@@ -151,10 +155,26 @@ A step's review carries a **decision list**: the questions its review must answe
   server's Accept (`POST …/accept`) is refused (409) before anything is written, and also when the answers the page saw
   (`decisions`) are not the current ones. Nexus's own acceptance of an integration (MI) waits for open decisions too.
   Fix it, Reject, a send-back and a hand-over need no answer.
-- **The review helper** answers `reviewer` decisions (`review.decided`), and hands the step to the user
-  (`review.asked_user`) only while some decision is `user` and every `reviewer` one is answered. Its new reasons to
-  pass on are `decision` (a decision it cannot settle, or a list it finds incomplete) and `user_decision` (the user's
-  decisions, at level 3).
+- **The review helper** answers `reviewer` decisions (`review.decided`, `nexus review decide`), and hands the step to the
+  user (`review.asked_user`, `nexus review ask-user`, at level 2) only while some decision is `user` and every
+  `reviewer` one is answered. Its new reasons to pass on are `decision` (a decision it cannot settle, or a list it finds
+  incomplete) and `user_decision` (the user's decisions, at level 3). An answer is no verdict: a helper that answered
+  and ended without a verdict is passed on (`no_verdict`) like any other (`HELPER_VERDICTS` leaves `review.decided`
+  out; `HELPER_EVENTS`, what a helper may write, has it).
+- **The reviewers' commands.** `nexus review decide <queue> <step> <decision> [--choice <option>] --reason <why>` writes
+  `review.decided` for the decision's current version and the step's current round; the CLI refuses it a worker (which
+  proposes, never answers), and anything the derivation would ignore (`decisionRefusal`). `nexus review accept` and
+  `provisional` refuse, before writing, an acceptance that `decisionGate` holds.
+- **What the agents are told.** The worker's briefing and every step opening ask for the list or the explicit none
+  before `nexus step done` (a design step, `tags.kind: design` or one with `review.prepare`: concrete choices bound to
+  material), with the list so far in a later round. The review helper's packet and the orchestrator's review notice
+  list each decision (its version, whose it is, the options with the recommendation and those that ask for a change,
+  material, why), its state (open, answered and by whom, answered for an earlier version) and who answers it now; a
+  `missing` list is said as such (`decisionLines`, `answerRights` in review-decisions.ts). A send-back's message gives
+  the answers of the round it ends, as information. Every later step's opening of the queue (so also a fresh
+  session's, whose seed the opening follows) has "Decisions from earlier reviews": each accepted step's current answers
+  with the question and who answered, an orchestrator's provisional one marked until the user confirms the step
+  (`queueDecisions`, `settledDecisions`). `nexus help decisions` is the standard.
 - **The user's answer**: `POST …/steps/:s/decisions/:d/answer` (`version`, `round`, `choice?`, `text?`; 409 when either
   moved; the same answer twice writes once). **Confirm all**: `POST …/provisional/confirm` (`steps`, each with the
   provisional acceptance seen), all or nothing. Both in api.md.
@@ -208,7 +228,8 @@ starts, their only writer:
   `review.prepare`; the checks of the round's latest set from `checks.yaml` (each name, `ok`, `flaky`, `duration`, the
   summary, the log's path; a check accepted as unrelated marked so); the round's review material (label, key, role,
   the copy's path under `.nexus/queues/<q>/review/<step>/`, the pair it belongs to); the worker's summary of the
-  round; the step's earlier send-backs (round, `by`, text); the diff's `--stat` and the path of `diff.patch`.
+  round; the step's earlier send-backs (round, `by`, text); the diff's `--stat` and the path of `diff.patch`; the
+  step's review decisions, with their state and who answers each (see "Review decisions").
 - `diff.patch`: `git diff` from the step's first round's `start` (`git.yaml`) to the commit the round's `step.done`
   named (else the checkout's HEAD), with the latest round's own range named in the packet **(H4)**.
 
@@ -232,13 +253,14 @@ chain: the orchestrator is the fallback (H8).
 
 **Rights** **(H15)**. Claude Code: `--permission-mode dontAsk`, allowed `Read`, `Grep`, `Glob`, read-only git
 (`git log`, `git status`, `git diff`, `git show`), `nexus status`, `nexus help`, `nexus doc`, `nexus review accept`, `nexus review
-send-back` and `nexus review pass-on`, each on both shell tools (`Bash(nexus review accept:*)` and
+send-back`, `nexus review pass-on`, `nexus review decide` and `nexus review ask-user` (queue RVD), each on both shell tools (`Bash(nexus review accept:*)` and
 `PowerShell(nexus review accept:*)`, and so on); not the project's `runtimes.claude.allowed_tools`; `Edit` and `Write`
 never. Codex: its session folder as the working directory in a `workspace-write` sandbox whose only writable root it
 is (for the CLI's events), approval `never`, without the user's own Codex tools; it reads the checkout by absolute path.
-The CLI takes the three review commands from a helper session only for the step in its `about`, while the step's
-`helper` is that session and `running`; it refuses a helper every command but `nexus status`, `nexus help`, `nexus doc` and those
-three (`nexus review ask-user`, `provisional`, `add`, `nexus ask`, `nexus step …`: "a review helper only reads and
+The CLI takes the review commands from a helper session only for the step in its `about`, while the step's
+`helper` is that session and `running` (`ask-user` only at level 2 and for the user's review decisions, once every
+reviewer's one is answered); it refuses a helper every command but `nexus status`, `nexus help`, `nexus doc` and those
+five (`nexus review provisional`, `add`, `nexus decide`, `nexus ask`, `nexus step …`: "a review helper only reads and
 decides its review"). A refused action is
 recorded in its `refusals.jsonl` like any session's; its briefing asks it to report the refusal in its verdict (pass on
 with `doubt`, naming what it could not do), never to work around it. The dashboard lists a helper's refusals without

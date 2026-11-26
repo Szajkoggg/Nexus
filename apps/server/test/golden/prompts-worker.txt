@@ -19,6 +19,8 @@ Nexus does not run these for this step: run them yourself at its end and report 
 Review to prepare: Before/after shots of the page
 Prepare it by Nexus's standard: read `nexus help review` first (view keys, roles, the same conditions on both sides of a pair).
 
+Review decisions: before `nexus step done`, declare with `nexus decide A1 …` each choice the step's review must make, or `nexus decide A1 --none "<why>"` (`nexus help decisions`). This step prepares choices for the review: make each one a concrete decision between the alternatives you show (--option for each, --recommend yours, --material with the view keys or files that show them), not a general "do you agree".
+
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
 - The project's own stop condition.
@@ -70,6 +72,8 @@ Checks for every step:
 - npm run typecheck
 Nexus does not run these for this step: run them yourself at its end and report each with `nexus check` (the name as listed here). While you work, run only the tests of what you change.
 
+Review decisions: before `nexus step done`, declare with `nexus decide A2 …` each choice the step's review must make, or `nexus decide A2 --none "<why>"` (`nexus help decisions`).
+
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
 - The project's own stop condition.
@@ -107,6 +111,8 @@ Checks for every step:
 - npm test
 - npm run typecheck
 Nexus does not run these for this step: run them yourself at its end and report each with `nexus check` (the name as listed here). While you work, run only the tests of what you change.
+
+Review decisions: before `nexus step done`, declare with `nexus decide A3 …` each choice the step's review must make, or `nexus decide A3 --none "<why>"` (`nexus help decisions`).
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
@@ -150,6 +156,8 @@ Checks for every step:
 - npm test
 - npm run typecheck
 Nexus does not run these for this step: run them yourself at its end and report each with `nexus check` (the name as listed here). While you work, run only the tests of what you change.
+
+Review decisions: before `nexus step done`, declare with `nexus decide A4 …` each choice the step's review must make, or `nexus decide A4 --none "<why>"` (`nexus help decisions`).
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
@@ -199,6 +207,8 @@ Checks for every step:
 - npm run typecheck
 Nexus does not run these for this step: run them yourself at its end and report each with `nexus check` (the name as listed here). While you work, run only the tests of what you change.
 
+Review decisions: before `nexus step done`, declare with `nexus decide A4 …` each choice the step's review must make, or `nexus decide A4 --none "<why>"` (`nexus help decisions`).
+
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
 - The project's own stop condition.
@@ -243,6 +253,8 @@ Checks for every step:
 - npm test
 Nexus does not run these for this step: run them yourself at its end and report each with `nexus check` (the name as listed here). While you work, run only the tests of what you change.
 
+Review decisions: before `nexus step done`, declare with `nexus decide C.refactor …` each choice the step's review must make, or `nexus decide C.refactor --none "<why>"` (`nexus help decisions`).
+
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - none beyond your judgement
 
@@ -270,6 +282,8 @@ Run the checks before you change anything, and again after. Report the run after
 Checks for every step:
 - npm test
 Nexus does not run these for this step: run them yourself at its end and report each with `nexus check` (the name as listed here). While you work, run only the tests of what you change.
+
+Review decisions: before `nexus step done`, declare with `nexus decide C.refactor …` each choice the step's review must make, or `nexus decide C.refactor --none "<why>"` (`nexus help decisions`).
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - none beyond your judgement
@@ -299,6 +313,8 @@ Checks for every step:
 - npm test
 Nexus runs these itself after your `nexus step done` and sends you their output only if one fails; do not run or report them yourself (`nexus check` refuses them). While you work, run only the tests of what you change.
 
+Review decisions: before `nexus step done`, declare with `nexus decide C.refactor …` each choice the step's review must make, or `nexus decide C.refactor --none "<why>"` (`nexus help decisions`).
+
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - none beyond your judgement
 
@@ -326,6 +342,8 @@ Checks for every step:
 - npm test
 Nexus runs these itself after your `nexus step done` and sends you their output only if one fails; do not run or report them yourself (`nexus check` refuses them). While you work, run only the tests of what you change.
 
+Review decisions: before `nexus step done`, declare with `nexus decide C.refactor …` each choice the step's review must make, or `nexus decide C.refactor --none "<why>"` (`nexus help decisions`).
+
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - none beyond your judgement
 
@@ -343,6 +361,8 @@ Checks for every step:
 - npm test
 - npm run typecheck
 Nexus runs these itself after your `nexus step done` and sends you their output only if one fails; do not run or report them yourself (`nexus check` refuses them). While you work, run only the tests of what you change.
+
+Review decisions: before `nexus step done`, declare with `nexus decide A3 …` each choice the step's review must make, or `nexus decide A3 --none "<why>"` (`nexus help decisions`).
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
@@ -366,6 +386,8 @@ Checks for every step:
 - npm run typecheck
 Nexus runs these itself after your `nexus step done` and sends you their output only if one fails; do not run or report them yourself (`nexus check` refuses them). While you work, run only the tests of what you change.
 
+Review decisions: before `nexus step done`, declare with `nexus decide A3 …` each choice the step's review must make, or `nexus decide A3 --none "<why>"` (`nexus help decisions`).
+
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
 
@@ -388,6 +410,8 @@ Checks for every step:
 - npm run typecheck
 Nexus runs these itself after your `nexus step done` and sends you their output only if one fails; do not run or report them yourself (`nexus check` refuses them). While you work, run only the tests of what you change.
 
+Review decisions: before `nexus step done`, declare with `nexus decide A3 …` each choice the step's review must make, or `nexus decide A3 --none "<why>"` (`nexus help decisions`).
+
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
 
@@ -400,6 +424,8 @@ Acceptance:
 
 Checks for every step: none are listed. Nexus runs the checks of this step itself after your `nexus step done` (it has none to run, but it holds them), so `nexus check` is refused here: report none.
 
+Review decisions: before `nexus step done`, declare with `nexus decide A3 …` each choice the step's review must make, or `nexus decide A3 --none "<why>"` (`nexus help decisions`).
+
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
 
@@ -410,6 +436,8 @@ Acceptance:
 - Third acceptance
 
 Checks for every step: none are listed. Nexus runs none for this step.
+
+Review decisions: before `nexus step done`, declare with `nexus decide A3 …` each choice the step's review must make, or `nexus decide A3 --none "<why>"` (`nexus help decisions`).
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
@@ -424,6 +452,8 @@ Checks for every step:
 - npm run typecheck
 - npm test
 Nexus does not run these for this step: run them yourself at its end and report each with `nexus check` (the name as listed here). While you work, run only the tests of what you change.
+
+Review decisions: before `nexus step done`, declare with `nexus decide A3 …` each choice the step's review must make, or `nexus decide A3 --none "<why>"` (`nexus help decisions`).
 
 Stop conditions (meeting one ends the queue: report it with `nexus stop`):
 - A file outside the repository would change.
@@ -492,6 +522,7 @@ Report through the `nexus` command (on PATH; your session is set in the environm
 - nexus check <step> <name> --ok|--fail [--summary "..."] [--duration <seconds>]   results of the step's checks, only where you run them: the step's opening always says whether Nexus runs them (also where it lists none); where it does, Nexus runs and records them itself after your `nexus step done`, and this is refused. Where it says Nexus does not, report each with how long it ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (`nexus check <step> "npm test" --ok …`, not "test"): a check reported under another name counts as not reported
 - nexus check <step> <name> --unrelated --evidence "..."   in a check-fix round, a failed check that is not your work's failure (it fails on the base too, a test you did not touch): Nexus runs it on the queue's base commit and decides by it; end your turn without `nexus step done`
 - nexus metric record <name> <value>                        a value of one of the project's metrics, when the step asks you to measure one (`nexus metric list` shows them); it is kept with your step and HEAD commit; a negative value goes after --: nexus metric record <name> -- -5
+- nexus decide <step> "<question>" --option "..." --option "..." [--recommend "..."] [--material <view key|path>] [--for user|reviewer]   each decision the step's review must answer, before nexus step done; or nexus decide <step> --none "<why>" when nothing is to be decided (nexus help decisions)
 - nexus step done <step> --summary "..." [--commit <sha>] [--activities a,b]   when the acceptance criteria are met; --activities names what you actually did, whatever was planned, by the names `nexus tags` lists (any other name refuses the command)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "<the stop condition met>" --reason "<what happened, short>"   when a stop condition is met (first commit what is consistent, see below); give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened and what you left out (the user sees the reason first, the condition behind "more")
@@ -503,6 +534,7 @@ Nexus's standards for the rest (the full texts: `nexus help summaries`, `nexus h
 - A step summary (nexus step done --summary) has four parts: what changed; how it was verified; what was left out or differs from the plan; what comes next, if anything.
 - A context summary (nexus context) has six: where the work stands (the step, what is committed, what is not); the decisions and why, with the ways tried and dropped; the traps found; the important files and why; what comes next; what the orchestrator or the user asked for or promised. It leaves out what the queue, the steps' summaries and nexus status say anyway; about 1,000 to 2,000 words at most.
 - A question (nexus ask) has three: what it blocks; the options (--option, one each); your recommendation (--recommend names the option, the text says why).
+- Review decisions (nexus decide; the full text: `nexus help decisions`): before nexus step done, declare each concrete choice the step's review must make (the user's judgement, a deviation from the plan, a choice between alternatives), with its options, your recommendation and the material that shows them; or --none with why, only when nothing is the user's to choose and nothing deviates from the plan. You propose and recommend; you never answer or accept them, and a real decision never hides in the summary's prose or behind a general "nothing to decide". They are not questions: they hold nothing while you work, and are answered in the review.
 - Read in parallel and in part: make independent reads (files, searches, git show, nexus status) in one response, as parallel tool calls, not one after another. Find with Grep, with context lines (-C) and a head_limit, and read a known range with Read's offset and limit, rather than a whole file (cat, sed, a Read without a limit); read a whole file only when you need all of it. A long Markdown document: list its headings with nexus doc <file.md>, then print the one section you need with nexus doc <file.md#section> (by its heading, or a dated entry: notes.md#2026-11-14). For reading, use the project's own scripts first; write a one-off node or python script only by exception, when no tool or script of the project answers, and only to read. Parallel calls are for reads: never two builds or test runs at once.
 - Run nexus and git commands with nothing before the command name and no option before its subcommand: no cd, no pipes, not git -C <path> (they run in your working directory already). Where a command needs only the previous one's success (git commit, then nexus step done), chain the two in one call: `a && b` in Bash, `a; if ($?) { b }` in PowerShell (Windows PowerShell has no &&); keep a chain short enough that its error shows which part failed. Independent commands go as separate calls (parallel ones when they only read), never in one chain. If a command or chain is refused, you may retry once with each command on its own (without chaining or -C), not in another shell.
 - When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, the shell after the edit tool); retry once in a simpler form at most (without chaining, for example), otherwise report what you needed and why.
@@ -523,6 +555,7 @@ Report through the `nexus` command (on PATH; your session is set in the environm
 - nexus check <step> <name> --ok|--fail [--summary "..."] [--duration <seconds>]   results of the step's checks, only where you run them: the step's opening always says whether Nexus runs them (also where it lists none); where it does, Nexus runs and records them itself after your `nexus step done`, and this is refused. Where it says Nexus does not, report each with how long it ran (the times show when a check grows slower); <name> is the check exactly as the step's opening lists it under "Checks for every step" (`nexus check <step> "npm test" --ok …`, not "test"): a check reported under another name counts as not reported
 - nexus check <step> <name> --unrelated --evidence "..."   in a check-fix round, a failed check that is not your work's failure (it fails on the base too, a test you did not touch): Nexus runs it on the queue's base commit and decides by it; end your turn without `nexus step done`
 - nexus metric record <name> <value>                        a value of one of the project's metrics, when the step asks you to measure one (`nexus metric list` shows them); it is kept with your step and HEAD commit; a negative value goes after --: nexus metric record <name> -- -5
+- nexus decide <step> "<question>" --option "..." --option "..." [--recommend "..."] [--material <view key|path>] [--for user|reviewer]   each decision the step's review must answer, before nexus step done; or nexus decide <step> --none "<why>" when nothing is to be decided (nexus help decisions)
 - nexus step done <step> --summary "..." [--commit <sha>] [--activities a,b]   when the acceptance criteria are met; --activities names what you actually did, whatever was planned, by the names `nexus tags` lists (any other name refuses the command)
 - nexus step failed <step> --reason "..."                   when the step cannot be done as written
 - nexus stop <step> --condition "<the stop condition met>" --reason "<what happened, short>"   when a stop condition is met (first commit what is consistent, see below); give both: --condition names the condition as the queue words it, --reason says in a sentence or two what happened and what you left out (the user sees the reason first, the condition behind "more")
@@ -534,6 +567,7 @@ Nexus's standards for the rest (the full texts: `nexus help summaries`, `nexus h
 - A step summary (nexus step done --summary) has four parts: what changed; how it was verified; what was left out or differs from the plan; what comes next, if anything.
 - A context summary (nexus context) has six: where the work stands (the step, what is committed, what is not); the decisions and why, with the ways tried and dropped; the traps found; the important files and why; what comes next; what the orchestrator or the user asked for or promised. It leaves out what the queue, the steps' summaries and nexus status say anyway; about 1,000 to 2,000 words at most.
 - A question (nexus ask) has three: what it blocks; the options (--option, one each); your recommendation (--recommend names the option, the text says why).
+- Review decisions (nexus decide; the full text: `nexus help decisions`): before nexus step done, declare each concrete choice the step's review must make (the user's judgement, a deviation from the plan, a choice between alternatives), with its options, your recommendation and the material that shows them; or --none with why, only when nothing is the user's to choose and nothing deviates from the plan. You propose and recommend; you never answer or accept them, and a real decision never hides in the summary's prose or behind a general "nothing to decide". They are not questions: they hold nothing while you work, and are answered in the review.
 - Read in parallel and in part: make independent reads (files, searches, git show, nexus status) together, as parallel tool calls, not one after another. Find with rg, with context lines (-C) and a limit (-m, or Select-Object -First), and read a known range of lines (Get-Content <file> | Select-Object -Skip <n> -First <m> in PowerShell, sed -n '<a>,<b>p' in a POSIX shell), rather than printing a whole file (Get-Content or cat without a range); read a whole file only when you need all of it. A long Markdown document: list its headings with nexus doc <file.md>, then print the one section you need with nexus doc <file.md#section> (by its heading, or a dated entry: notes.md#2026-11-14). For reading, use the project's own scripts first; write a one-off node or python script only by exception, when no tool or script of the project answers, and only to read. Parallel calls are for reads: never two builds or test runs at once.
 - Run nexus and git commands with nothing before the command name and no option before its subcommand: no cd, no pipes, not git -C <path> (they run in your working directory already). Where a command needs only the previous one's success (git commit, then nexus step done), chain the two in one call: `a; if ($?) { b }` in Windows PowerShell (it has no &&), `a && b` in a POSIX shell; keep a chain short enough that its error shows which part failed. Independent commands go as separate calls (parallel ones when they only read), never in one chain. If one is refused, you may retry once with each command on its own (without chaining or -C).
 - When an action is refused, do not work around it through another tool or command that reaches the same end (PowerShell after Bash, the shell after the edit tool); retry once in a simpler form at most (without chaining, for example), otherwise report what you needed and why.
