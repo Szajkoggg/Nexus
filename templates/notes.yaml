@@ -23,8 +23,8 @@ description: |
   ({{ideas_dir}}) and the project documents ({{docs}}) against {{code}}. It reports what is stale, unmarked or untrue;
   the report becomes a queue the user approves. In survey mode nothing is changed or committed; the ideas survey
   does propose the missing and wrong links between the ideas notes and the queues (`nexus ideas propose`), which the
-  user accepts or declines. In fix_small mode only the clear typos in the project documents are fixed: the memory notes (the orchestrator's) and the ideas notes
-  (the idea partner's) are only reported, in every mode.
+  user accepts or declines. In fix_small mode only the clear typos in the project documents are fixed: the memory
+  notes (the orchestrator's) and the ideas notes (the idea partner's) are only reported, in every mode.
   The report ends with a section "Recommended additions" (see the last survey step).
 coding: true
 origin: maintenance
