@@ -1,17 +1,32 @@
 import { useState } from "react";
 import type { IdeaStatusAction } from "@nexus/protocol";
 import type { IdeaEntryView, IdeasResponse } from "@nexus/protocol/ideas";
-import { dispositionOf, implementationOf, workOf } from "../ideasView.ts";
+import { dispositionOf, implementationOf, queuesDone, workOf } from "../ideasView.ts";
 import { formatDate, t, type Key } from "../i18n.ts";
 import { DecisionPicker, IdeaField, IdeaSaveState, ideaButton, ideaCard, ideaInput, useIdeaSave } from "./IdeaForms.tsx";
 
+/**
+ * One signal for the states the user asked to tell apart (queue IWS, decision D1): every linked queue done but the
+ * implementation not confirmed (amber, a hollow dot: the user's part is missing), partially and fully implemented
+ * (the user's own assessments).
+ */
+export function Signal({ kind }: { kind: "queues_done" | "partial" | "full" }) {
+  const tone = kind === "queues_done" ? "bg-warn/15 text-warn" : kind === "full" ? "bg-ok/15 text-ok" : "bg-info/15 text-info";
+  const dot = kind === "queues_done" ? "shadow-[inset_0_0_0_2px_currentColor]" : kind === "full" ? "bg-current" : "bg-[linear-gradient(90deg,currentColor_50%,transparent_50%)] shadow-[inset_0_0_0_1.5px_currentColor]";
+  return <span data-idea-signal={kind} className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 text-xs font-semibold leading-5 ${tone}`}>
+    <span aria-hidden className={`size-[7px] shrink-0 rounded-full ${dot}`} />{t(kind === "queues_done" ? "ideas.queuesDone" : `ideas.${kind}`)}
+  </span>;
+}
+
 export function EntryState({ entry, compact = false }: { entry: IdeaEntryView; compact?: boolean }) {
   const disposition = dispositionOf(entry), implementation = implementationOf(entry);
+  if (disposition === "active" && queuesDone(entry)) return <Signal kind="queues_done" />;
+  if (disposition === "active" && (implementation === "full" || implementation === "partial")) return <Signal kind={implementation} />;
   const label = implementation === "needs_review" && entry.effective?.assessment?.kind === "full" ? "previousFull" : implementation === "unconfirmed" ? "notConfirmed" : implementation;
   return <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs leading-relaxed">
     {disposition !== "active" ? <span className="text-fg-3">{t(`ideas.${disposition}`)}</span> : <>
       {(!compact || implementation === "unconfirmed") && <span className="text-accent">{t(`ideas.work.${workOf(entry)}`)}</span>}
-      {(!compact || implementation !== "unconfirmed") && <span className={implementation === "full" ? "text-ok" : implementation === "needs_review" ? "text-warn" : "text-fg-3"}>{t(`ideas.${label}` as Key)}</span>}
+      {(!compact || implementation !== "unconfirmed") && <span className={implementation === "needs_review" ? "text-warn" : "text-fg-3"}>{t(`ideas.${label}` as Key)}</span>}
     </>}
   </span>;
 }
@@ -22,7 +37,9 @@ export function IdeaStatusForm({ project, entry, data, undo, onSaved, onCancel }
   project: string; entry: IdeaEntryView; data: IdeasResponse; undo?: IdeaStatusAction; onSaved: () => void; onCancel: () => void;
 }) {
   const e = entry.effective!;
-  const [operation, setOperation] = useState<(typeof operations)[number]>(e.disposition === "active" ? "partial" : "reopen");
+  // With every linked queue done and nothing in the way, the form opens on the confirmation (IWS, decision D2).
+  const [operation, setOperation] = useState<(typeof operations)[number]>(e.disposition !== "active" ? "reopen"
+    : queuesDone(entry) && !e.blockers.length && !e.caveats.length ? "confirm" : "partial");
   const [reason, setReason] = useState("");
   const [target, setTarget] = useState("");
   const [references, setReferences] = useState("");

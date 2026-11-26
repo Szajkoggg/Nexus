@@ -7,19 +7,21 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { HistoryItem, IdeaEntryView, IdeaNoteView, IdeasResponse } from "@nexus/protocol/ideas";
 import { projectUrl, useQuery } from "../api.ts";
 import { formatClock, formatDate, formatDay, rich, t, type Key } from "../i18n.ts";
-import { groupByArea, filterCounts, shownNotes, dispositionOf, IDEA_FILTERS, type IdeaFilter, type ShownNote } from "../ideasView.ts";
+import { groupByArea, filterCounts, shownNotes, dispositionOf, implementationOf, queuesDone, IDEA_FILTERS, type IdeaFilter, type ShownNote } from "../ideasView.ts";
 import { layerValue } from "../layers.ts";
 import { nav, useNav } from "../nav.ts";
 import { usePage } from "../page.ts";
 import { ActionBar, Button, PanelBody, PanelHeader, ReadError, statusWord } from "./ui.tsx";
 
-import { EntryState, IdeaStatusForm, IdeaStatusHistory } from "./IdeaStatus.tsx";
+import { EntryState, IdeaStatusForm, IdeaStatusHistory, Signal } from "./IdeaStatus.tsx";
 import { ideaButton, ideaCard } from "./IdeaForms.tsx";
 import { IdeaActions, IdeaActivity } from "./IdeaOnward.tsx";
 export { IdeasMatching } from "./IdeaLinks.tsx";
 
 function NoteState({ note }: { note: IdeaNoteView }) {
   const value = note.implementation ?? (note.entries.length ? "unconfirmed" : "worked_out");
+  if (value === "queues_done" || value === "partial" || value === "full") return <span className="inline-flex flex-wrap items-baseline gap-x-2 text-xs text-fg-3">
+    <Signal kind={value} />{note.needs_attention ? <span>{t("ideas.attention", { count: note.needs_attention })}</span> : null}</span>;
   const key = value === "worked_out" ? "ideas.status.worked_out" : value === "unconfirmed" ? "ideas.notConfirmed" : `ideas.${value}`;
   return <span className="text-xs text-fg-3">{t(key as Key)}{note.needs_attention ? ` / ${t("ideas.attention", { count: note.needs_attention })}` : ""}</span>;
 }
@@ -92,7 +94,7 @@ export function IdeasOverview({ project, areas, phone, top }: { project: string;
           <div className="flex flex-wrap gap-1" role="group" aria-label={t("ideas.filterLabel")}>
             {IDEA_FILTERS.filter((f) => f === "all" || f === "attention" || counts[f] > 0).map((f) => (
               <button key={f} onClick={() => { setFilter(f); remember({ filter: f }); }} aria-pressed={filter === f}
-                className={filterButton(filter === f)}>
+                className={`${filterButton(filter === f)} ${f === "queues_done" && filter !== f ? "text-warn hover:text-warn" : ""}`}>
                 {t(`ideas.filter.${f}`)}<span className={`ml-1.5 font-normal ${filter === f ? "text-fg-2" : "text-fg-3"}`}>{counts[f]}</span>
               </button>
             ))}
@@ -165,12 +167,11 @@ function EntryLine({ e, phone }: { e: IdeaEntryView; phone?: boolean }) {
     <span data-idea-entry={e.ref} className={`mt-1 grid items-baseline gap-2.5 text-xs ${phone ? "grid-cols-[2.75rem_minmax(0,1fr)]" : "grid-cols-[3.25rem_minmax(0,1fr)] pl-3"}`}>
       <span className={`tabular-nums text-fg-3 ${off ? "opacity-60" : ""}`}>{day(e.date)}</span>
       <span className={`text-fg-2 ${off ? "opacity-60" : ""}`}>{e.lead}<span className="text-fg-3"> · {e.decisions}</span></span>
-      <span className="col-span-2"><EntryState entry={e} /></span>
-      {!phone && (
-        <span className="col-span-2 font-mono text-[11.5px] text-accent">
+      <span className="col-span-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1"><EntryState entry={e} />
+        {!phone && (q || replacement) && <span className="font-mono text-[11.5px] text-accent">
           {q ? <>{e.queues.map((x) => x.id).join(", ")}<span className="font-sans text-fg-3"> · {statusWord(q.status)}</span></> : replacement ? <span className="font-sans text-fg-3">→ {replacement.replace(/^.*\//, "")}</span> : null}
-        </span>
-      )}
+        </span>}
+      </span>
     </span>
   );
 }
@@ -235,18 +236,38 @@ function NoteBody({ project, note, data }: { project: string; note: IdeaNoteView
 
 function EntryCard({ e, data }: { e: IdeaEntryView; data: IdeasResponse }) {
   const change = (action?: string) => nav.open(`idea-status:${JSON.stringify([e.ref, action])}`);
+  const done = dispositionOf(e) === "active" && queuesDone(e);
   return <article className={ideaCard} data-box={`Decision ${e.date}`} data-decision={e.ref}>
     <div className="flex flex-wrap items-baseline justify-between gap-2"><b className="text-[13px]">{formatDayYear(e.date)}</b><EntryState entry={e} compact /></div>
     <p className="text-[12.5px] text-fg-2">{e.lead} / {t("ideas.decisions", { count: e.decisions })}</p>
-    <EntryState entry={e} />
+    <EntryFacts e={e} />
     {e.effective?.diagnostics.map((d) => <p key={d} className="text-xs text-warn">{d}</p>)}
-    <div className="flex flex-wrap gap-3 text-xs"><button className="text-accent underline" onClick={() => change()}>{t(e.effective?.work.state === "finished" ? "ideas.reviewImplementation" : "ideas.changeStatus")}</button>
+    <div className="flex flex-wrap items-center gap-3 text-xs">{done
+      ? <button className={ideaButton} data-review-confirm onClick={() => change()}>{t("ideas.reviewAndConfirm")}</button>
+      : <button className="text-accent underline" onClick={() => change()}>{t(e.effective?.work.state === "finished" && !["full", "partial"].includes(implementationOf(e)) ? "ideas.reviewImplementation" : "ideas.changeStatus")}</button>}
       <details className="min-w-0 flex-1"><summary className="text-accent">{t("ideas.history")}</summary>
         <ol className="mt-2 space-y-1">{e.history.map((h, i) => <HistoryLine key={i} h={h} />)}</ol>
         {e.effective && <IdeaStatusHistory data={data} entry={e} onUndo={(action) => change(action.id)} />}
       </details></div>
     <details className="text-xs text-fg-3"><summary>{t("ideas.decisionText")}</summary><pre className="mt-2 whitespace-pre-wrap font-sans leading-relaxed">{e.content}</pre></details>
   </article>;
+}
+
+/**
+ * What an entry card says under its lead: with every linked queue done and no confirmation, the queues and that only
+ * the user confirms; with the user's assessment, who assessed it when and why, then the queues; else the work and
+ * assessment words as before (IWS).
+ */
+function EntryFacts({ e }: { e: IdeaEntryView }) {
+  const effective = e.effective, implementation = implementationOf(e);
+  const queues = effective?.work.queues ?? [];
+  const linked = queues.length ? t("ideas.linkedQueues", { queues: queues.map((q) => `${q.id} ${statusWord(q.status)}`).join(", "),
+    done: queues.filter((q) => q.status === "done").length, count: queues.length }) : "";
+  if (dispositionOf(e) === "active" && queuesDone(e)) return <p className="text-xs text-fg-2">{linked} {t("ideas.onlyYouConfirm")}</p>;
+  const a = effective?.assessment;
+  if (dispositionOf(e) === "active" && a && (implementation === "full" || implementation === "partial")) return <p className="text-xs text-fg-2">
+    {t(implementation === "full" ? "ideas.confirmedBy" : "ideas.assessedBy", { date: day(a.at.slice(0, 10)), reason: a.reason })} {linked}</p>;
+  return <EntryState entry={e} />;
 }
 
 function RelatedWork({ project, note, data }: { project: string; note: IdeaNoteView; data: IdeasResponse }) {

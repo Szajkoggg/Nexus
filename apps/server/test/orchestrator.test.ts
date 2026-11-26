@@ -2,7 +2,7 @@
 // question, and being told when the run finishes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ProjectStore, applyDraft, approveQueue, loadProjectState, routeAnswers, withdrawApproval } from "@nexus/protocol";
@@ -49,9 +49,13 @@ function setup(again?: string, push?: (n: UserNotice) => void) {
 }
 
 test("the orchestrator drafts a queue, runs it, answers the worker and hears that it finished", async () => {
-  const { store, orchestrator, state, until, stop } = setup();
+  const { root, store, orchestrator, state, until, stop } = setup();
+  // The note the queue's source names (queue IWS: the finish notice names its ideas' states).
+  store.updateProject((p) => ({ ...p, conversations: { ...p.conversations, notes_dir: "docs/ideas" } }));
+  mkdirSync(join(root, "docs/ideas"), { recursive: true });
+  writeFileSync(join(root, "docs/ideas/plan.md"), "# Plan\n\n## Decided\n\n### 2026-11-14\n\n- **Plan in the chat.**\n");
   try {
-    orchestrator.say(`FAKE-DRAFT:\n${QUEUE}`);
+    orchestrator.say(`FAKE-DRAFT:\n${QUEUE.replace("title: Planned in the chat\n", "title: Planned in the chat\nsource: [docs/ideas/plan.md#2026-11-14]\n")}`);
     await until("the drafted queue", () => state().queues.some((q) => q.id === "R"));
     const r = state().queues.find((q) => q.id === "R")!;
     assert.equal(r.status, "proposed");
@@ -75,7 +79,8 @@ test("the orchestrator drafts a queue, runs it, answers the worker and hears tha
 
     await until("the finish notice", () => orchestrator.view().chat.some((c) => c.from === "nexus" && /Queue R finished/.test(c.text)), LONGER.run);
     const chat = orchestrator.view().chat;
-    assert.ok(chat.some((c) => c.from === "user"));
+    const finish = chat.find((c) => c.from === "nexus" && /Queue R finished/.test(c.text))!.text;
+    assert.ok(finish.includes("Ideas linked to R:\n- docs/ideas/plan.md#2026-11-14: every linked queue is done (R); implementation not confirmed."), finish);    assert.ok(chat.some((c) => c.from === "user"));
     assert.ok(chat.some((c) => c.from === "nexus" && /A worker asked a question in queue R, step R1/.test(c.text)));
   } finally { stop(); }
 });

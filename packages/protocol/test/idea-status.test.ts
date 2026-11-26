@@ -262,3 +262,37 @@ test("a legacy drop followed by a file revert cannot reactivate an observed asse
   assert.equal(f.entry().implementation, "needs_review");
   assert.deepEqual(f.entry().stale_reasons, ["Legacy disposition changed"]);
 });
+
+test("queues done, not confirmed: named for an active entry whose every linked queue is done and that the user has not assessed (IWS)", (t) => {
+  const f = fixture(t);
+  assert.equal(f.entry().implementation_signal, undefined, "no linked work");
+  f.queue("Q"); f.queue("R", "proposed");
+  assert.equal(f.entry().work.state, "some_finished");
+  assert.equal(f.entry().implementation_signal, undefined, "R is not done");
+  f.queue("R");
+  assert.equal(f.entry().work.state, "finished");
+  assert.equal(f.entry().implementation_signal, "queues_done_unconfirmed");
+  assert.equal(f.entry().implementation, "unconfirmed", "the signal never confirms anything");
+  f.act({ operation: "partial" });
+  assert.equal(f.entry().implementation_signal, undefined, "the user's assessment is the statement");
+  f.act({ operation: "confirm" });
+  assert.equal(f.entry().implementation, "full");
+  assert.equal(f.entry().implementation_signal, undefined);
+  f.act({ operation: "drop" });
+  assert.equal(f.entry().implementation_signal, undefined, "not for a dropped entry");
+});
+
+test("the note's roll-up: unconfirmed without finished work, then queues done, then partial, then full (IWS)", (t) => {
+  const f = fixture(t);
+  const note = () => projectIdeas(f.store, loadProjectState(f.store)).notes[0]!;
+  f.queue("Q");
+  assert.equal(note().implementation, "unconfirmed", "the second date has no work");
+  f.act({ ref: OTHER, operation: "partial" });
+  assert.equal(note().implementation, "queues_done", "the first date: Q done, not confirmed");
+  writeFileSync(f.note, TEXT.replace("Other.", "Other, changed."));
+  f.observe();
+  assert.equal(note().implementation, "unconfirmed", "the second date's assessment needs review and it has no work");
+  f.act({ ref: OTHER, operation: "confirm", evidence_refs: ["external:review"] });
+  f.act({ operation: "partial" });
+  assert.equal(note().implementation, "partial");
+});

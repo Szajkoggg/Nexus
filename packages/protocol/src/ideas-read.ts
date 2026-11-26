@@ -10,7 +10,7 @@ import { ideaOutcome } from "./idea-outcomes.ts";
 import { queueView } from "./actions.ts";
 import type { ProjectStore } from "./store.ts";
 import type { ProjectState } from "./state.ts";
-import { deriveIdeaStatuses } from "./idea-status.ts";
+import { deriveIdeaStatuses, queuesDoneUnconfirmed } from "./idea-status.ts";
 import type { IdeaStatusesFile } from "./schemas.ts";
 
 /** The notes of a project: `notesDir` is relative to its root (conversations.notes_dir); none without a folder. */
@@ -115,8 +115,9 @@ export function projectIdeas(store: ProjectStore, state: ProjectState): IdeasRes
     const active = note.entries.flatMap((e) => e.effective?.disposition === "active" ? [e.effective] : []);
     note.implementation = !note.entries.length ? "worked_out" : !active.length
       ? note.entries.some((e) => e.effective?.disposition === "dropped") ? "dropped" : "replaced"
-      : active.some((e) => e.implementation !== "full" && e.implementation !== "partial") ? "unconfirmed"
-        : active.some((e) => e.implementation === "partial") ? "partial" : "full";
+      : active.some((e) => e.implementation !== "full" && e.implementation !== "partial" && !queuesDoneUnconfirmed(e)) ? "unconfirmed"
+        : active.some(queuesDoneUnconfirmed) ? "queues_done"
+          : active.some((e) => e.implementation === "partial") ? "partial" : "full";
     note.needs_attention = note.entries.filter((e) => e.effective && (e.effective.diagnostics.length || e.effective.blockers.length || e.effective.caveats.length || e.effective.stale_reasons.length)).length;
   }
   const open = ideaMatches(store, state, notes).items.filter((m) => !m.decision);

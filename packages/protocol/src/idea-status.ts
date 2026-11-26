@@ -11,6 +11,11 @@ export interface IdeaStatusView {
   marker: NonNullable<IdeaStatusRecord["disposition"]>["marker"];
   marker_status: "legacy" | "overridden" | "current" | "conflict";
   implementation: "unconfirmed" | "partial" | "full" | "needs_review" | "suspended";
+  /**
+   * The combination of the other axes the user asked to see by itself (queue IWS): an active entry whose every linked
+   * queue is done, with no assessment of the user. It names that combination; it never confirms anything.
+   */
+  implementation_signal?: "queues_done_unconfirmed";
   assessment?: IdeaStatusRecord["assessment"];
   stale_reasons: string[];
   diagnostics: string[];
@@ -49,6 +54,14 @@ function queueEvidence(q: QueueView, outcome?: IdeaOutcome) {
       provisional: s.provisional, rounds: s.timeline.filter((e) => e.type === "step.done" || e.type.startsWith("review.")) })),
     merge: { base: q.git?.base, merged: q.git?.merged, merge: q.git?.merge },
     report: outcome?.report, accepted: outcome?.accepted };
+}
+
+/**
+ * Whether an entry waits for the user's confirmation with all its linked queues done: no assessment yet, or one that
+ * needs review again. The overview's filter and the note's roll-up use it; the badge only for the first.
+ */
+export function queuesDoneUnconfirmed(v: Pick<IdeaStatusView, "disposition" | "implementation" | "work">): boolean {
+  return v.disposition === "active" && v.work.state === "finished" && (v.implementation === "unconfirmed" || v.implementation === "needs_review");
 }
 
 export function assessmentChanges(before: IdeaAssessmentSnapshot, after: IdeaAssessmentSnapshot): string[] {
@@ -102,10 +115,11 @@ export function deriveIdeaStatuses(file: IdeaStatusesFile, state: ProjectState, 
     const stale_reasons = [...new Set(assessment ? [...assessmentChanges(assessment.snapshot, snapshot),
       ...file.invalidations.filter((i) => i.assessment === assessment.id).flatMap((i) => i.reasons)] : [])];
     const finished = queues.filter((q) => q.status === "done").length;
-    return { ref, disposition, ...(replacement ? { replacement } : {}), marker, marker_status,
-      implementation: !assessment ? "unconfirmed" : disposition !== "active" ? "suspended" : stale_reasons.length ? "needs_review" : assessment.kind,
-      ...(assessment ? { assessment } : {}), stale_reasons, diagnostics, blockers, caveats, snapshot,
-      work: { state: !queues.length ? "none" : finished === queues.length ? "finished" : finished ? "some_finished" : "linked", queues } };
+    const implementation = !assessment ? "unconfirmed" : disposition !== "active" ? "suspended" : stale_reasons.length ? "needs_review" : assessment.kind;
+    const work = { state: !queues.length ? "none" as const : finished === queues.length ? "finished" as const : finished ? "some_finished" as const : "linked" as const, queues };
+    return { ref, disposition, ...(replacement ? { replacement } : {}), marker, marker_status, implementation,
+      ...(disposition === "active" && implementation === "unconfirmed" && work.state === "finished" ? { implementation_signal: "queues_done_unconfirmed" as const } : {}),
+      ...(assessment ? { assessment } : {}), stale_reasons, diagnostics, blockers, caveats, snapshot, work };
   });
   const missing = file.records.filter((r) => !all.has(r.ref)).map((r) => r.ref);
   return { revision: ideaHash({ file, entries, notes, links: links.revision }), entries, history: file.history, invalidations: file.invalidations, missing };

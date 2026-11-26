@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, Effort, acceptedByNexus, contextLimit, acceptedOn, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView,
+  ActionError, DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, Effort, acceptedByNexus, ideaStatuses, contextLimit, acceptedOn, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView,
 } from "@nexus/protocol";
 import { reachable, type AgentProcess } from "./agent.ts";
 import type { CodexPermissions } from "./codex.ts";
@@ -21,7 +21,7 @@ import type { CrashRecord } from "./crash.ts";
 import type { PlanNotice } from "./deploy-plan.ts";
 import {
   acceptedNoteNotice, approvalNotice, orchestratorStopText, checkAcceptedNotice, checkDecisionNotice, checkNotCommandNotice, cleanupWaitNotice, discardNotice, liftNotice, mergedNotice, mergeWaitNotice, missedStartNotice, noticeText, orchestratorBriefing, pausedNotice,
-  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, tokenText, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, maintenanceFindingsNotice, staticAnalysisNotice, serverCrashNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
+  carriedMessages, formatInbox, orchestratorFreshSeed, orchestratorRuntimeSeed, orchestratorSummaryRequest, summaryLists, tokenText, questionNotice, rejectionNotice, restartedNotice, fixAskedNotice, levelToUserNotice, reviewNotice, awayOnNotice, awayEndNotice, awayStuckNotice, planDecisionNotice, planHeldNotice, runEndNotice, type QueueIdeas, maintenanceFindingsNotice, staticAnalysisNotice, serverCrashNotice, stepNoteNotice, tagDecisionNotice, fallbackNotice, metricNotice, userMessage, withdrawalNotice,
 } from "./prompts.ts";
 import { shellRules } from "./shell-rules.ts";
 import { ReviewHelpers, audited, type HelperOptions } from "./review-helper.ts";
@@ -866,6 +866,20 @@ ${n.text}` });
     return !!full;
   }
 
+  /**
+   * The ideas of a finished queue for its notice (IWS): read only when a finish is told, since the derivation reads the
+   * notes. A read that fails leaves the notice as it was without them.
+   */
+  private queueIdeas(state: ProjectState, q: QueueView): QueueIdeas | undefined {
+    try {
+      const linked = ideaStatuses(this.store, state).entries.filter((e) => e.work.queues.some((x) => x.id === q.id));
+      const dir = state.project.conversations.notes_dir?.replaceAll("\\", "/").replace(/\/$/, "");
+      const escaped = dir?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const named = escaped ? [...new Set(`${q.title}\n${q.description ?? ""}`.match(new RegExp(`${escaped}/[\\w./-]+\\.md`, "g")) ?? [])] : [];
+      return { linked, mentioned: named.filter((n) => !n.endsWith("/README.md")) };
+    } catch (e) { console.warn(`nexus: the ideas of ${q.id} for its notice: ${errorText(e)}`); return undefined; }
+  }
+
   private notify(state: ProjectState, s: SessionFile, updateOnly = false): void {
     // A fresh session that goes on from earlier ones (context care) is told what none of them was told, since the first.
     const line = this.lineage(s);
@@ -1021,7 +1035,7 @@ ${n.text}` });
         if ((q.report?.findings ?? 0) > 0) items.push({ key: `notify:findings:${q.id}`, ...maintenanceFindingsNotice(q) });
         continue;
       }
-      items.push({ key: `notify:run:${q.id}:${r.state}:${r.updated_at}`, ...runEndNotice(q, r) });
+      items.push({ key: `notify:run:${q.id}:${r.state}:${r.updated_at}`, ...runEndNotice(q, r, r.state === "finished" ? this.queueIdeas(state, q) : undefined) });
     }
     const fresh = items.filter((i) => !told.has(i.key));
     if (!fresh.length) return;

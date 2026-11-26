@@ -268,7 +268,7 @@ export interface IdeaEntryView extends IdeaEntry {
 }
 
 export interface IdeaNoteView extends Omit<IdeaNote, "entries"> {
-  implementation?: "worked_out" | "dropped" | "replaced" | "unconfirmed" | "partial" | "full";
+  implementation?: "worked_out" | "dropped" | "replaced" | "unconfirmed" | "queues_done" | "partial" | "full";
   needs_attention?: number;
   status: TopicStatus;
   /** Where its area comes from: its Area line, or the areas its queues' steps carry most. */

@@ -28,12 +28,17 @@ the chosen model does not take are refused before saving, with the ones it takes
 **What became of the ideas.** The Ideas panel's switch at the top (**Conversations** | **Overview**) shows the notes
 the partners keep, grouped by area and the project's sub-groups (each note's `**Area:**` line; a note without one is
 under Unsorted). Each dated decision separates its disposition, linked work and your implementation assessment.
-**Linked work finished** means the associated work finished; full implementation still needs your explicit review
-of the entire date. Old **built** data does not supply that confirmation. Filters and counts use the same effective
+When every queue linked to a date is done but you have not confirmed it, the date shows an amber **Queues done · not
+confirmed**: done queues do not show that the decision is implemented; only you confirm that. The filter **Queues
+done, not confirmed** lists those dates, and when such a queue finishes the orchestrator offers you the
+confirmation. Confirmed and partially implemented dates show **Fully implemented** / **Partially implemented**, with
+when and why you said so. Old **built** data does not supply that confirmation. Filters and counts use the same effective
 state as the entry, including **Needs attention**. The overview keeps its search, filter and scroll position on Back.
 
 Open a note for **Summary**, expanded **Open** questions, **Decided** dates and a closed **Related work** section.
-Each date has **Change status** (or **Review implementation**) and **History**. You can drop, replace, reopen,
+Each date has **Change status** (or **Review implementation**; on a date whose queues are done and not confirmed, the
+button **Review and confirm…**, which opens with Confirm fully implemented chosen when nothing blocks it) and
+**History**. You can drop, replace, reopen,
 assess partial/full implementation, revoke an assessment and undo an action with a reason. A replacement selects
 an existing note/date. These decisions do not start, stop or approve queues, and do not edit the note. Changes to
 the dated decision, effective links or accepted work make earlier assessments need review; Summary/Open edits

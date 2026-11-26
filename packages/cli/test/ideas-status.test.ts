@@ -34,7 +34,7 @@ test("nexus ideas status summarizes each note's entries: reference, effective de
   const r = await run();
   assert.ok(r.ok, r.out);
   const lines = r.out.trimEnd().split("\n");
-  assert.equal(lines[0], "3 decided entries in 2 note(s): 1 active, 1 dropped, 1 replaced; 2 with problems; 1 user action(s)");
+  assert.equal(lines[0], "3 decided entries in 2 note(s): 1 active, 1 dropped, 1 replaced; 0 queues done but not confirmed; 2 with problems; 1 user action(s)");
   assert.match(lines[1]!, /nexus ideas status <file>\.md#<date>.*nexus doc <file>\.md#<date>.*nexus ideas status --full/);
   assert.deepEqual(lines.slice(2), [
     "",
@@ -75,4 +75,28 @@ test("nexus ideas status <ref> narrows the JSON to one entry, or to a note; an u
   assert.match(unknown.out, /docs\/ideas\/tags\.md has no Decided entry #2026-11-30 \(its dates: 2026-11-14, 2026-11-15\)/);
   assert.match((await run("none.md")).out, /no note docs\/ideas\/none\.md with Decided entries/);
   assert.match((await run("tags.md", "--full")).out, /either a reference or --full/);
+});
+
+test("the summary names queues done but not confirmed, a confirmation with its date, and a partial assessment as the user's (IWS)", async () => {
+  const { ideaStatusSummary } = await import("../src/ideas-summary.ts");
+  const base = { disposition: "active", marker: {}, marker_status: "legacy", stale_reasons: [], diagnostics: [], blockers: [], caveats: [],
+    snapshot: { content: "", links: [], evidence: "" } } as const;
+  const done = (id: string) => ({ state: "finished" as const, queues: [{ id, status: "done", issues: [] }] });
+  const assessment = (kind: "partial" | "full") => ({ id: "a", kind, at: "2026-11-26T10:00:00.000Z", reason: "Reviewed" }) as never;
+  const s = { revision: "r", history: [], invalidations: [], missing: [], entries: [
+    { ...base, ref: "docs/ideas/deploy.md#2026-11-13", implementation: "full", assessment: assessment("full"), work: done("PD") },
+    { ...base, ref: "docs/ideas/deploy.md#2026-11-14", implementation: "unconfirmed", implementation_signal: "queues_done_unconfirmed", work: done("PD") },
+    { ...base, ref: "docs/ideas/work.md#2026-11-15", implementation: "partial", assessment: assessment("partial"), work: done("PW") },
+  ] } as unknown as IdeaStatusesResponse;
+  assert.deepEqual(ideaStatusSummary(s).split("\n"), [
+    "3 decided entries in 2 note(s): 3 active, 0 dropped, 0 replaced; 1 queues done but not confirmed; 0 with problems; 0 user action(s)",
+    "One entry in full: nexus ideas status <file>.md#<date>; its text: nexus doc <file>.md#<date>; everything: nexus ideas status --full (JSON, large)",
+    "",
+    "docs/ideas/deploy.md",
+    "  #2026-11-13  active; fully implemented (confirmed by the user 2026-11-26); queues PD done",
+    "  #2026-11-14  active; queues done, not confirmed; queues PD done",
+    "",
+    "docs/ideas/work.md",
+    "  #2026-11-15  active; partially implemented (the user's assessment); queues PW done",
+  ]);
 });

@@ -4,7 +4,7 @@
 // (src/conversations.ts). Agents rely on them (a change to one carries an `Agents:` line in its commit), so each is
 // covered by a snapshot test: test/prompts.test.ts compares what the agents' processes receive with golden files.
 import {
-  DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, INTEGRATION_CONDITION, REUSE_TOKENS, fileList, tokenCount, formatClock, formatDuration, latestCheckSet, reviewRound, openPlan, decisionLines, queueDecisions, settledDecisions, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type PassOnReason, type RightsNow, type TagProposal, tagsText,
+  DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, INTEGRATION_CONDITION, REUSE_TOKENS, fileList, tokenCount, formatClock, formatDuration, latestCheckSet, reviewRound, openPlan, decisionLines, queueDecisions, settledDecisions, formatSeconds, isCheckMetric, languageName, levelNow, metricValueText, releasedText, runIsOlder, stepChecks, type CheckSet, type MetricValue, type AwayNow, type PlanDecision, type ConversationWeb, type InboxView, type LanguageCode, type ProjectFile, type ProjectState, type QuestionView, type QueueView, type SessionView, type StepView, type PassOnReason, type RightsNow, type TagProposal, tagsText, queuesDoneUnconfirmed, type IdeaStatusView,
 } from "@nexus/protocol";
 import type { ClosingContext } from "./closing.ts";
 import type { IntegrationContext } from "./integration.ts";
@@ -555,7 +555,7 @@ steps:
     size: M                    # S, M or L, as you plan it
     origin: user               # user, maintenance, orchestrator, fix or ci
 
-Before planning from ideas, run nexus ideas status (read only: a summary per note and dated entry with the effective decision, the linked queues and the problems; one entry's full JSON: nexus ideas status <file>.md#<date>), then read the dated entry with nexus doc <file>.md#<date> (not the whole note) together with .nexus/idea-statuses.yaml and .nexus/idea-matches.yaml when present. A UI disposition overrides the legacy note marker; later marker changes are a visible conflict, not silent permission. An assessment is valid only for its saved content, links and evidence, with no recorded invalidation. Open/Ideas are undecided. Only the user can change relationships or confirm implementation in the dashboard; never write either Nexus file.
+Before planning from ideas, run nexus ideas status (read only: a summary per note and dated entry with the effective decision, the linked queues and the problems; one entry's full JSON: nexus ideas status <file>.md#<date>), then read the dated entry with nexus doc <file>.md#<date> (not the whole note) together with .nexus/idea-statuses.yaml and .nexus/idea-matches.yaml when present. A UI disposition overrides the legacy note marker; later marker changes are a visible conflict, not silent permission. An assessment is valid only for its saved content, links and evidence, with no recorded invalidation. Open/Ideas are undecided. Only the user can change relationships or confirm implementation in the dashboard; never write either Nexus file. "queues done, not confirmed" means every linked queue is done and the user has not confirmed the implementation: offer the user the confirmation (Ideas → the note → the date → Review and confirm…), never treat it as implemented.
 
 A direct idea handoff is a server-composed snapshot of one exact note and selected Decided dates, recorded in .nexus/idea-handoffs.yaml. Its delivery time means enqueued and visible, not read, approved or implemented. Follow its purpose: Context only does not request reimplementation of full, dropped or replaced decisions. Discuss / plan next work is not approval or permission to start a queue. Neither purpose changes a start plan or lifts a start prohibition. Recheck current effective state before proposing work; the snapshot may now be historical. Do not expand its scope to other chat topics or see-also notes, and never write the handoff file.
 
@@ -1113,11 +1113,43 @@ export function pausedNotice(q: QueueView, r: { step?: string }): Notice {
   };
 }
 
-/** The queue's run halted or finished. */
-export function runEndNotice(q: QueueView, r: { state: string; step?: string; reason?: string }): Notice {
-  return r.state === "halted"
-    ? { fact: `The run of queue ${q.id} halted ${r.step ? `at step ${r.step}` : "before it opened a step"}: ${r.reason ?? "no reason given"}.`, todo: "Tell the user briefly, with what you propose." }
-    : { fact: `Queue ${q.id} finished.${q.report ? ` Report: ${q.report.summary}` : " It has no report."}${integrationLine(q)}`, todo: "Tell the user briefly, with what you propose next." };
+/**
+ * The ideas a finished queue is linked to (queue IWS): the dated entries whose linked work includes it, each with its
+ * state after this finish; or, with none linked, the notes its description names.
+ */
+export interface QueueIdeas { linked: IdeaStatusView[]; mentioned: string[] }
+
+/** The queue's run halted or finished; a finished one with its ideas' states and the offer to confirm them. */
+export function runEndNotice(q: QueueView, r: { state: string; step?: string; reason?: string }, ideas?: QueueIdeas): Notice {
+  if (r.state === "halted") return { fact: `The run of queue ${q.id} halted ${r.step ? `at step ${r.step}` : "before it opened a step"}: ${r.reason ?? "no reason given"}.`, todo: "Tell the user briefly, with what you propose." };
+  const fact = `Queue ${q.id} finished.${q.report ? ` Report: ${q.report.summary}` : " It has no report."}${integrationLine(q)}`;
+  const todo = "Tell the user briefly, with what you propose next.";
+  if (ideas?.linked.length) {
+    const offer = ideas.linked.some(queuesDoneUnconfirmed);
+    return {
+      fact: `${fact}\nIdeas linked to ${q.id}:\n${ideas.linked.map((e) => `- ${e.ref}: ${ideaLine(e)}`).join("\n")}\n`,
+      todo: offer
+        ? `${todo} For each entry whose linked queues are all done, offer the confirmation: only the user confirms, in the dashboard (Ideas → the note → the date → Review and confirm…); you cannot. If the report or the steps show that part of the decision was left out, say what, and suggest "Mark partially implemented" instead. Do not offer it for an entry with linked work still open.`
+        : `${todo} Name the linked entries' states in a few words; none waits for a confirmation yet.`,
+    };
+  }
+  if (ideas?.mentioned.length) return {
+    fact: `${fact} No idea is linked to ${q.id}; its description names ${ideas.mentioned.join(", ")}.`,
+    todo: `${todo} If it implements a decision there, tell the user: the link is theirs to add (Ideas → Manage links → Add link).`,
+  };
+  return { fact, todo };
+}
+
+/** A linked entry's state in a notice line: the user's assessment first, then whether its queues are all done. */
+function ideaLine(e: IdeaStatusView): string {
+  if (e.disposition === "dropped") return "dropped by the user.";
+  if (e.disposition === "replaced") return `replaced by ${e.replacement ?? "another entry"}.`;
+  const open = e.work.queues.filter((x) => x.status !== "done");
+  const work = open.length ? `linked work open: ${open.map((x) => `${x.id} ${x.status}`).join(", ")}` : `every linked queue is done (${e.work.queues.map((x) => x.id).join(", ")})`;
+  if (e.implementation === "full") return `fully implemented (confirmed by the user); ${work}.`;
+  if (e.implementation === "partial") return `partially implemented (the user's assessment); ${work}.`;
+  if (e.implementation === "needs_review") return `${work}; the user's earlier assessment needs review.`;
+  return open.length ? `${work}.` : `${work}; implementation not confirmed.`;
 }
 
 /** The integration step's outcome, after the report (its summary; whether Nexus ran it without a model and accepted it). */
@@ -1225,7 +1257,7 @@ export function partnerBriefing(p: ProjectFile, notes: string | undefined, runti
 How to be useful here:
 - Explore, ask, challenge, and propose alternatives with their trade-offs. Do not rush to a plan; a good question is often worth more than an answer.
 - Ground what you say in the project: read its design documents, notes, decisions and history before you state anything about it, and say where you found it.
-- Run nexus ideas status for the read-only effective state: a summary per note and dated entry with the effective decision, the linked queues and the problems (one entry's full JSON: nexus ideas status <file>.md#<date>). Read a dated entry with nexus doc <file>.md#<date> (a note's headings: nexus doc <file>.md) together with .nexus/idea-statuses.yaml and .nexus/idea-matches.yaml when present. UI dispositions override legacy markers; report later note/decision conflicts. Assessments cover their saved content, links and evidence only, and recorded invalidations require a new user check. Only the user can change relationships or confirm implementation in the dashboard; never write these Nexus files. Linked work finishing is not full implementation confirmation.
+- Run nexus ideas status for the read-only effective state: a summary per note and dated entry with the effective decision, the linked queues and the problems (one entry's full JSON: nexus ideas status <file>.md#<date>). Read a dated entry with nexus doc <file>.md#<date> (a note's headings: nexus doc <file>.md) together with .nexus/idea-statuses.yaml and .nexus/idea-matches.yaml when present. UI dispositions override legacy markers; report later note/decision conflicts. Assessments cover their saved content, links and evidence only, and recorded invalidations require a new user check. Only the user can change relationships or confirm implementation in the dashboard; never write these Nexus files. Linked work finishing is not full implementation confirmation. "queues done, not confirmed" names exactly that: every linked queue done, no confirmation by the user.
 - New idea chats receive the whole note with the first actual request and an updated snapshot when it changes: Summary, all Decided dates with current states and relationships, and separately undecided Open/Ideas. Historical dated chats retain their original scope. A direct idea handoff is composed and recorded by the server from the user's date-selection preview, independently of your current reply; do not turn an ordinary answer into a handoff summary or write .nexus/idea-handoffs.yaml. It grants no queue approval or start permission.
 - Keep the user's decisions apart from ideas. Never write a proposal down as if it were decided.
 

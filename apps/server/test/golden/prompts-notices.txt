@@ -131,6 +131,22 @@ Log: checks/N1-1/npm-test.log (in the queue's folder); it ends: not ok 1 - empty
 [Nexus] The run of queue QN halted at step N1: step N1 failed: no disk. Tell the user briefly, with what you propose.
 == runEndNotice: finished
 [Nexus] Queue QN finished. It has no report. Tell the user briefly, with what you propose next.
+== runEndNotice: finished, ideas linked
+[Nexus] Queue QN finished. It has no report.
+Ideas linked to QN:
+- docs/ideas/overview.md#2026-11-24: every linked queue is done (QN); implementation not confirmed.
+- docs/ideas/overview.md#2026-11-26: linked work open: QX running.
+- docs/ideas/deploy.md#2026-11-13: fully implemented (confirmed by the user); every linked queue is done (QN).
+- docs/ideas/work.md#2026-11-15: partially implemented (the user's assessment); every linked queue is done (QN).
+- docs/ideas/old.md#2026-11-10: dropped by the user.
+ Tell the user briefly, with what you propose next. For each entry whose linked queues are all done, offer the confirmation: only the user confirms, in the dashboard (Ideas → the note → the date → Review and confirm…); you cannot. If the report or the steps show that part of the decision was left out, say what, and suggest "Mark partially implemented" instead. Do not offer it for an entry with linked work still open.
+== runEndNotice: finished, linked work still open
+[Nexus] Queue QN finished. It has no report.
+Ideas linked to QN:
+- docs/ideas/overview.md#2026-11-26: linked work open: QX running.
+ Tell the user briefly, with what you propose next. Name the linked entries' states in a few words; none waits for a confirmation yet.
+== runEndNotice: finished, a note named but nothing linked
+[Nexus] Queue QN finished. It has no report. No idea is linked to QN; its description names docs/ideas/overview.md. Tell the user briefly, with what you propose next. If it implements a decision there, tell the user: the link is theirs to add (Ideas → Manage links → Add link).
 == maintenanceFindingsNotice: 
 [Nexus] Maintenance queue QN (fix_small) finished with 2 findings. Report: <root>/.nexus/queues/QN/report.md Read the report and propose to the user a queue that deals with the findings it did not fix itself (a draft they approve), or say why none is needed.
 == staticAnalysisNotice: 

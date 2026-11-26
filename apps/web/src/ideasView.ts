@@ -4,18 +4,25 @@
 import type { IdeaEntryView, IdeaNoteView } from "@nexus/protocol/ideas";
 
 /** A status filter of the list: all, one status of an entry (dropped with replaced), or the topics with no entry yet. */
-export const IDEA_FILTERS = ["all", "worked_out", "unconfirmed", "partial", "full", "decided", "handed_over", "queued", "built", "dropped", "attention"] as const;
+export const IDEA_FILTERS = ["all", "queues_done", "worked_out", "unconfirmed", "partial", "full", "decided", "handed_over", "queued", "built", "dropped", "attention"] as const;
 export type IdeaFilter = (typeof IDEA_FILTERS)[number];
 
 const needsAttention = (e: IdeaEntryView) => !!e.effective && !!(e.effective.diagnostics.length || e.effective.blockers.length || e.effective.caveats.length || e.effective.stale_reasons.length);
 export const dispositionOf = (e: IdeaEntryView) => e.effective?.disposition ?? (e.status === "dropped" || e.status === "replaced" ? e.status : "active");
 export const implementationOf = (e: IdeaEntryView) => e.effective?.implementation ?? "unconfirmed";
+/**
+ * Every linked queue done, the implementation not confirmed (queue IWS): the badge's case (no assessment), and for the
+ * filter also an earlier assessment that needs review again. The server names the first (`implementation_signal`).
+ */
+export const queuesDone = (e: IdeaEntryView) => e.effective?.implementation_signal === "queues_done_unconfirmed";
+const queuesDoneOrStale = (e: IdeaEntryView) => queuesDone(e) || (implementationOf(e) === "needs_review" && e.effective?.work.state === "finished");
 export const workOf = (e: IdeaEntryView) => e.effective?.work.state ?? (e.status === "built" ? "finished" : e.queues.length ? "linked" : "none");
 const inFilter = (e: IdeaEntryView, f: IdeaFilter) => {
   if (f === "all") return true;
   if (f === "attention") return needsAttention(e);
   if (f === "dropped") return dispositionOf(e) !== "active";
   if (dispositionOf(e) !== "active") return false;
+  if (f === "queues_done") return queuesDoneOrStale(e);
   if (f === "full" || f === "partial") return implementationOf(e) === f;
   if (f === "unconfirmed") return !["full", "partial"].includes(implementationOf(e));
   if (f === "built") return workOf(e) === "finished";

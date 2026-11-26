@@ -585,6 +585,21 @@ test("every notice of prompts.ts, rendered from fixtures, matches the golden fil
   show("pausedNotice", "", prompts.pausedNotice(q, { step: "N1" }));
   show("runEndNotice", "halted", prompts.runEndNotice(q, { state: "halted", step: "N1", reason: "step N1 failed: no disk" }));
   show("runEndNotice", "finished", prompts.runEndNotice(q, { state: "finished" }));
+  {
+    // Queue IWS: a finished queue's ideas, each with its state; the offer only for an entry whose queues are all done.
+    const idea = (ref: string, implementation: string, queues: [string, string][], more = {}) => ({ ref, disposition: "active", implementation,
+      work: { state: queues.every(([, s]) => s === "done") ? "finished" : "some_finished", queues: queues.map(([id, status]) => ({ id, status, issues: [] })) }, ...more }) as never;
+    show("runEndNotice", "finished, ideas linked", prompts.runEndNotice(q, { state: "finished" }, { mentioned: [], linked: [
+      idea("docs/ideas/overview.md#2026-11-24", "unconfirmed", [["QN", "done"]], { implementation_signal: "queues_done_unconfirmed" }),
+      idea("docs/ideas/overview.md#2026-11-26", "unconfirmed", [["QN", "done"], ["QX", "running"]]),
+      idea("docs/ideas/deploy.md#2026-11-13", "full", [["QN", "done"]]),
+      idea("docs/ideas/work.md#2026-11-15", "partial", [["QN", "done"]]),
+      idea("docs/ideas/old.md#2026-11-10", "suspended", [["QN", "done"]], { disposition: "dropped" }),
+    ] }));
+    show("runEndNotice", "finished, linked work still open", prompts.runEndNotice(q, { state: "finished" }, { mentioned: [], linked: [
+      idea("docs/ideas/overview.md#2026-11-26", "unconfirmed", [["QN", "done"], ["QX", "running"]])] }));
+    show("runEndNotice", "finished, a note named but nothing linked", prompts.runEndNotice(q, { state: "finished" }, { linked: [], mentioned: ["docs/ideas/overview.md"] }));
+  }
   show("maintenanceFindingsNotice", "", prompts.maintenanceFindingsNotice({ ...q, maintenance: "fix_small", report: { path: "<root>/.nexus/queues/QN/report.md", summary: "Two outdated packages.", findings: 2 } } as never));
   show("staticAnalysisNotice", "", prompts.staticAnalysisNotice());
   show("serverCrashNotice", "", prompts.serverCrashNotice({ at: "2026-01-01 09:00", error: "TypeError: x is undefined" }));

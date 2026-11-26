@@ -9,7 +9,18 @@ export const noteOf = (ref: string): string => (ref.includes("#") ? ref.slice(0,
 /** An entry's effective decision: its disposition (with what replaces it) and the user's implementation assessment. */
 function decision(e: IdeaStatusView): string {
   const d = e.disposition === "replaced" ? `replaced by ${e.replacement ?? "?"}` : e.disposition;
-  return `${d}; ${e.implementation.replace("_", " ")}`;
+  return `${d}; ${implementation(e)}`;
+}
+
+/**
+ * The user's assessment in words, with the one combination of work and assessment the user asked to see by itself
+ * (queue IWS): every linked queue done, the implementation not confirmed. A confirmed entry says who and when.
+ */
+function implementation(e: IdeaStatusView): string {
+  if (e.implementation_signal === "queues_done_unconfirmed") return "queues done, not confirmed";
+  if (e.implementation === "full" && e.assessment) return `fully implemented (confirmed by the user ${e.assessment.at.slice(0, 10)})`;
+  if (e.implementation === "partial") return "partially implemented (the user's assessment)";
+  return e.implementation.replace("_", " ");
 }
 
 /** An entry's problems: a stale assessment, a broken reference, a conflict, and what its work still lacks. */
@@ -29,8 +40,9 @@ export function ideaStatusSummary(s: IdeaStatusesResponse): string {
   for (const e of s.entries) notes.set(noteOf(e.ref), [...(notes.get(noteOf(e.ref)) ?? []), e]);
   const count = (d: IdeaStatusView["disposition"]) => s.entries.filter((e) => e.disposition === d).length;
   const troubled = s.entries.filter((e) => problems(e).length).length;
+  const done = s.entries.filter((e) => e.implementation_signal === "queues_done_unconfirmed").length;
   const lines = [
-    `${s.entries.length} decided entr${s.entries.length === 1 ? "y" : "ies"} in ${notes.size} note(s): ${count("active")} active, ${count("dropped")} dropped, ${count("replaced")} replaced; ${troubled} with problems; ${s.history.length} user action(s)`,
+    `${s.entries.length} decided entr${s.entries.length === 1 ? "y" : "ies"} in ${notes.size} note(s): ${count("active")} active, ${count("dropped")} dropped, ${count("replaced")} replaced; ${done} queues done but not confirmed; ${troubled} with problems; ${s.history.length} user action(s)`,
     "One entry in full: nexus ideas status <file>.md#<date>; its text: nexus doc <file>.md#<date>; everything: nexus ideas status --full (JSON, large)",
   ];
   for (const [note, entries] of notes) {

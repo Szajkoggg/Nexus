@@ -19,7 +19,7 @@ const notes = [
 ];
 
 test("the filters' counts: entries by status (replaced with dropped), topics with no entry", () => {
-  assert.deepEqual(filterCounts(notes), { all: 7, worked_out: 1, unconfirmed: 4, partial: 0, full: 0, attention: 0, decided: 1, handed_over: 1, queued: 1, built: 1, dropped: 2 });
+  assert.deepEqual(filterCounts(notes), { all: 7, queues_done: 0, worked_out: 1, unconfirmed: 4, partial: 0, full: 0, attention: 0, decided: 1, handed_over: 1, queued: 1, built: 1, dropped: 2 });
 });
 
 test("a status filter keeps the entries with that status and their notes; worked_out the empty topics", () => {
@@ -49,13 +49,15 @@ test("effective user decisions drive all filters; legacy built cannot imply full
       work: { state: "finished", queues: [] }, snapshot: { content: "hash", links: [], evidence: "hash" }, ...patch },
   });
   const examples = [note("Effective", [
-    effective("2026-11-10", {}), effective("2026-11-11", { implementation: "full" }),
+    effective("2026-11-10", { implementation_signal: "queues_done_unconfirmed" }), effective("2026-11-11", { implementation: "full" }),
     effective("2026-11-12", { implementation: "partial" }),
     effective("2026-11-13", { implementation: "needs_review", stale_reasons: ["Decision changed"] }),
     effective("2026-11-14", { disposition: "dropped", implementation: "suspended" }),
     effective("2026-11-15", { disposition: "replaced", diagnostics: ["Missing target"] }),
   ])];
-  assert.deepEqual(filterCounts(examples), { all: 6, worked_out: 0, unconfirmed: 2, partial: 1, full: 1, decided: 0, handed_over: 0, queued: 0, built: 4, dropped: 2, attention: 2 });
+  assert.deepEqual(filterCounts(examples), { all: 6, queues_done: 2, worked_out: 0, unconfirmed: 2, partial: 1, full: 1, decided: 0, handed_over: 0, queued: 0, built: 4, dropped: 2, attention: 2 });
+  // Queues done, not confirmed (IWS): the server's signal, and a finished entry whose assessment needs review again.
+  assert.deepEqual(shownNotes(examples, "queues_done")[0]!.entries.map((e) => e.date), ["2026-11-10", "2026-11-13"]);
   assert.deepEqual(shownNotes(examples, "full")[0]!.entries.map((e) => e.date), ["2026-11-11"]);
   assert.deepEqual(shownNotes(examples, "attention")[0]!.entries.map((e) => e.date), ["2026-11-13", "2026-11-15"]);
 });

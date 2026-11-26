@@ -179,7 +179,20 @@ explanation and snapshot. `stale_reasons`, `diagnostics`, full-confirmation `blo
 separate. `work.state` is `none|linked|some_finished|finished`, with each queue's exact status (or `missing`) and
 issues. Cancelled work is retained and never counted finished. Notes exclude dropped/replaced dates from progress,
 roll up the least assessment (unconfirmed before partial before full), and retain a separate attention count even
-when all dates are inactive. No dated entries: `worked_out`; no active dates: Dropped if any, otherwise Replaced.
+when all dates are inactive.
+
+**Queues done, not confirmed (IWS).** An active entry whose `work.state` is `finished` and whose `implementation` is
+`unconfirmed` carries `implementation_signal: "queues_done_unconfirmed"`: a name for that combination, never a
+confirmation. The note's roll-up gets the value `queues_done` between `unconfirmed` and `partial`: `unconfirmed` while
+an active entry is neither assessed nor done-but-unconfirmed (an entry without finished work), else `queues_done` while
+one is every-queue-done with no valid assessment (`needs_review` with finished work counts here), else `partial`, else
+`full`. The dashboard's filter **Queues done, not confirmed** keeps the same entries. `nexus ideas status` prints the
+entry's implementation as `queues done, not confirmed`, a confirmed one as `fully implemented (confirmed by the user
+<date>)`, a partial one as `partially implemented (the user's assessment)`, and counts the first in its head line.
+When a queue linked to entries finishes, the orchestrator's run-finished notice lists each linked entry with its state
+("Ideas linked to <queue>:") and asks it to offer the user the confirmation for an entry whose linked queues are all
+done; with no entry linked, it names the notes the queue's title or description mentions. A maintenance queue's
+finish notice has no such lines. No dated entries: `worked_out`; no active dates: Dropped if any, otherwise Replaced.
 
 `nexus ideas status --full` prints the same effective statuses as JSON, read-only from files; without it, a short text summary (or, given a reference, that entry's JSON: see ["The `nexus` CLI"](cli.md#the-nexus-cli)). There is no CLI status-write
 operation. Partner/orchestrator briefings and conversation handoffs require this effective state together with the
