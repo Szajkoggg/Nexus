@@ -2,12 +2,14 @@
 // that takes time or times out and a kill that comes late (gated-cleanup.ts's delayMs and timeoutMs, in-process-runtime's
 // ProcessEnds; survey LC3, F5/F17, queue LCK). Without them an in-process cleanup resolves in a microtask, so the
 // barrier never lasts and never fails off Windows. A timed-out cleanup is asked once more within the same barrier;
-// only a second timeout halts the run (the user's decision with queue LCK, F5).
+// only a second timeout halts the run (the user's decision with queue LCK, F5). A pending barrier keeps the engine
+// from being idle, so an update's drain waits for its outcome; one that fails during the drain leaves the run held
+// (D1 with queue LCG, survey LC4 finding 1; worker-cleanup-restart.test.ts has the same against a real job host).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AgentProcess } from "../src/agent.ts";
 import type { Launch } from "../src/agent-host.ts";
-import { FAST, activityOf, setup } from "./engine-setup.ts";
+import { FAST, activityOf, restart, setup } from "./engine-setup.ts";
 import { gatedCleanup } from "./gated-cleanup.ts";
 import { inProcessRuntime, letEnd, type ProcessEnds } from "./in-process-runtime.ts";
 import { LONGER } from "./wait.ts";
@@ -131,4 +133,54 @@ test("a Resume asked while the first cleanup times out waits for the second one,
     assert.deepEqual(g.calls.slice(0, 2).map((c) => c.outcome), ["failed", "done"]);
     assert.deepEqual(x.queue().steps.map((s) => s.status), ["done", "done"]);
   } finally { g.release(); x.engine.shutdown(); }
+});
+
+test("a pending cleanup keeps the engine from being idle: cleaningSessions names its session until the outcome, then the engine is idle again", async () => {
+  const g = gatedCleanup({ make: inProcessRuntime() });
+  g.hold();
+  const x = setup(["done"], { ...FAST, spawn: g.spawn });
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the cleanup at the gate", () => g.held() > 0, LONGER.run);
+    const session = x.queue().run!.session;
+    assert.deepEqual(x.engine.cleaningSessions(), [session], "the pending barrier is the session's");
+    assert.equal(x.engine.idle(), false, "a pending cleanup is waited for, as a turn is");
+    g.release();
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+    assert.deepEqual(x.engine.cleaningSessions(), []);
+    assert.equal(x.engine.idle(), true);
+  } finally { g.release(); x.engine.shutdown(); }
+});
+
+test("an update's drain while a cleanup is pending: the engine stays busy until its outcome; a failure leaves the run held (no halt), says so in the activity and ends the process; the next server goes on by itself in a new process, Q2 once", async () => {
+  const { seen, wrap } = watched();
+  const g = gatedCleanup({ make: inProcessRuntime({ wrap }) });
+  g.hold();
+  const x = setup(["done", "done"], { ...FAST, spawn: g.spawn });
+  let next: ReturnType<typeof restart> | undefined;
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the cleanup at the gate", () => g.held() > 0, LONGER.run);
+    assert.deepEqual(x.engine.drainForUpdate(false), ["Q"], "the update holds the run");
+    const held = x.store.readRun("Q")!;
+    assert.deepEqual([held.state, held.resume_after_restart], ["paused", true]);
+    assert.equal(x.engine.idle(), false, "the drain waits for the pending cleanup");
+    g.fail("a member refused to end");
+    await x.until("the failed cleanup's process exited", () => seen.exitedAt !== undefined && !x.engine.alive());
+    assert.deepEqual(x.store.readRun("Q"), held, "the run stays held for the update: no halt");
+    assert.equal(x.engine.idle(), true, "the drain may finish now");
+    assert.deepEqual(g.calls.map((c) => c.outcome), ["failed"]);
+    const errors = activityOf(x.store, held.session).filter((e) => e.kind === "error" && e.text.includes("a member refused to end"));
+    assert.equal(errors.length, 1, "the failure is in the session's activity");
+    assert.match(errors[0]!.text, /stays held for the Nexus update/);
+    // The update's hand-over: this server stops, the next one starts on the same files.
+    x.engine.shutdown();
+    g.release();
+    next = restart(x.store, { ...FAST, spawn: g.spawn });
+    await x.until("the queue finishes", () => x.queue().run?.state === "finished", LONGER.run);
+    const [q1, q2] = x.queue().steps;
+    assert.equal(q1!.timeline.filter((e) => e.type === "step.started").length, 1, "Q1 not repeated");
+    assert.equal(q2!.timeline.filter((e) => e.type === "step.started").length, 1, "Q2 once");
+    assert.equal(seen.spawned, 2, "Q2 ran in a new process");
+  } finally { g.release(); x.engine.shutdown(); next?.shutdown(); }
 });

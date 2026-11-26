@@ -30,6 +30,17 @@ counts as in a turn (`AgentHost.idle`, `AgentProcess.settling`): Claude Code may
 of its own, and a restart in that moment would lose it (queue LS, finding 14). So the drain waits for the late turn to
 run and end, or for the moment to pass without one (`test/update-drain-settling.test.ts`, queue LCF).
 
+**The drain waits for a pending cleanup too** (decided 2026-11-27, queue LCG, survey LC4 finding 1, D1). A worker's
+process between two steps is idle, but while its cleanup barrier is pending (the job host ending the step's descendants,
+docs/design/engine.md) no new process may start for the session. Before, the drain counted it as idle and could end at
+once; the release's wait for the old processes (10 s, `stopAgents` in `src/project-registry.ts`) could then run out
+while the cleanup still held the old job, and the successor's resumed run started beside it. Now `Engine.idle()` is
+false while a barrier is pending (`Engine.cleaningSessions()`), so a rare update waits at most two cleanups (about
+30 s: a first that times out and the one retry); a project's removal waits the same way, and the dashboard's update panel
+shows the project as working meanwhile. A cleanup that fails during the drain does not halt the run the drain holds: it
+stays held (`resume_after_restart`), the failure goes to the session's activity, the worker's process is ended, and the
+next server goes on in a new one (`test/cleanup-barrier.test.ts`, `test/worker-cleanup-restart.test.ts`).
+
 **The chats during an update** (decided 2026-11-15, queue OP). Before, the drain waited for every agent's turn and
 refused the user's chat messages, so a deploy that waited an hour for a step closed the orchestrator's chat and the
 conversations for that hour, with nothing gained: a chat turn starts no work, and a run start stays refused anyway. Now

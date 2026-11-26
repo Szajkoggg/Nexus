@@ -116,14 +116,21 @@ update's hand-over, the server's own shutdown, its sudden death (`crashAt` with 
 host ends its runtime by its own Process object) and a restart for changed settings at the held wait, and starts the
 next server on the files. The workers are shared with WHR4 (`apps/server/test/worker-gate-fixture.ts`); the gate counts,
 for every host it starts, how many earlier ones still ran, so "no new process beside the old job" is asserted, not
-inferred. What building it showed, pinned and not changed: an update's drain counts a held cleanup as idle (it is no
-turn), and main.ts's release then waits for the old processes, which end only after the cleanup; a server killed at the
+inferred. What building it showed, pinned and not changed: a server killed at the
 held wait takes the job with it at once (Node's own kill-on-close job holds the host), before any next server; a
 runtime crash under the cleanup races two of the host's threads (the control thread sends C after releasing the
 cleanup's lock, the monitor ends the host once it has it), so the engine either opens the next step in the dead
 process and retries it once, or takes the host's end as the process's exit; the work runs once either way. A helper
 whose exit Node already sees may hold its directory a moment longer, and a dying runtime's helper may outlive the
 2000 ms wait on a busy machine: the tests wait for the directory and the helper, not only for a PID.
+
+What it showed and was changed later (queue LCG, survey LC4 finding 1, the user's decision D1): an update's drain
+counted a held cleanup as idle (it is no turn), so the drain ended at once and the release's bounded wait (10 s) could
+run out while the cleanup still held the old job, the successor's host then starting beside it. Now `Engine.idle()` is
+false while a cleanup barrier is pending (`Engine.cleaningSessions()` names them), and the hand-over tests run the
+release as main.ts does: the drain is over once the engine is idle, then `stopAgents` (`apps/server/src/project-registry.ts`)
+stops it and waits, in the test briefly. They assert that the drain does not end while the gate is closed, that the
+next server's host starts only after the old one ended, and that a cleanup failing during the drain leaves the run held.
 
 The job's membership and Clean's deadlines (queue WHR, WHR6). Clean's two inputs, the job's membership list and its
 clock, go through the same seam (`Members`, `StartTimer`, `ElapsedMilliseconds` on EndCalls); the default

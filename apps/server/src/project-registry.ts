@@ -152,10 +152,10 @@ export class ProjectRegistry {
     this.capacity?.shutdown(); // so does the coordinator: the successor writes capacity.yaml anew
     this.capacity = undefined;
     // Chat turns still running are cut off first and recorded: the successor goes on with them (src/lifecycle.ts).
-    for (const e of projects.values()) projectPart(e).shutdown();
-    // An agent's exit is written to its runtime file: wait for those last writes.
-    const alive = () => [...projects.values()].some((e) => e.engine.alive() || e.orchestrator.alive() || e.conversations.alive());
-    for (const until = Date.now() + (this.p.exitWaitMs ?? 10_000); alive() && Date.now() < until;) await new Promise((r) => setTimeout(r, 100));
+    await stopAgents([...projects.values()].map((e) => ({
+      shutdown: () => projectPart(e).shutdown(),
+      alive: () => e.engine.alive() || e.orchestrator.alive() || e.conversations.alive(),
+    })), this.p.exitWaitMs);
     this.p.endAgents();
   }
 
@@ -179,4 +179,14 @@ export class ProjectRegistry {
   private watchProject(id: string, dir: string): void {
     this.p.watchers.set(id, watchProjectFiles(id, dir, { model: () => this.p.projects.get(id)?.model, changed: () => this.p.changed(id), log: (path) => this.p.logChanged(id, path) }));
   }
+}
+
+/**
+ * The agents' part of an update's release (ProjectRegistry.release): every part stops, then their exits are waited for,
+ * up to `waitMs` (10 s), since an agent's exit is written to its runtime file. Apart from the registry so that a test
+ * can release an engine of its own with a short wait (survey LC4, recommended addition 1).
+ */
+export async function stopAgents(parts: readonly { shutdown(): void; alive(): boolean }[], waitMs = 10_000): Promise<void> {
+  for (const p of parts) p.shutdown();
+  for (const until = Date.now() + waitMs; parts.some((p) => p.alive()) && Date.now() < until;) await new Promise((r) => setTimeout(r, 100));
 }

@@ -244,7 +244,8 @@ export class Engine implements Member {
   private readonly stopping = new Set<string>();
   /** A boundary is not crossed until the worker's descendants have gone. Reset after every turn. */
   private readonly cleaned = new WeakSet<Live["proc"]>();
-  private readonly cleaning = new WeakMap<Live["proc"], Promise<void>>();
+  /** The cleanup barriers pending, by process, with the session each is for (cleaningSessions; the drain waits for them). */
+  private readonly cleaning = new Map<Live["proc"], { barrier: Promise<void>; session: string }>();
   /** Sessions whose process Nexus ends to start it again with another model or effort (Claude Code). */
   private readonly restarting = new Set<string>();
   /** Sessions whose process ended after reporting their step, including an already accepted review. */
@@ -460,7 +461,7 @@ export class Engine implements Member {
     let run = this.run(queueId);
     if (this.stopping.has(run.session)) throw new ActionError("the worker is still exiting; resume once it has stopped", 409);
     const live = this.host.get(run.session);
-    const cleanup = live && this.cleaning.get(live.proc);
+    const cleanup = live && this.cleaning.get(live.proc)?.barrier;
     if (cleanup) {
       // What refuses a resume whatever the cleanup does (a rejected step, a revision to approve, a stopped or
       // finished queue) refuses it now, not later in a deferred call that halts the run with it. The cleanup takes
@@ -586,10 +587,20 @@ export class Engine implements Member {
     try { this.resumeByItself(queueId); } catch (e) { logError(`queue ${queueId}: going on after ${reason}`, e); this.halt(queueId, `could not go on after ${reason}: ${errorText(e)}`); }
   }
 
-  /** No agent of this project is in the middle of a turn, and none of its checks runs. */
+  /**
+   * No agent of this project is in the middle of a turn, none of its checks runs, and no worker's cleanup barrier is
+   * pending: an update's drain (and a project's removal) waits for the cleanup's outcome, so the barrier's promise (no
+   * new process before the old one's descendants have gone) holds across an update too (the user's decision D1 with
+   * queue LCG, survey LC4 finding 1).
+   */
   idle(): boolean {
     // A worktree setup running (a new worktree's, or after a merge of the base changed its inputs) is waited for too.
-    return this.host.idle() && !this.checks?.running() && !this.setups.size;
+    return this.host.idle() && !this.checks?.running() && !this.setups.size && !this.cleaning.size;
+  }
+
+  /** The sessions whose worker's cleanup barrier is pending now. */
+  cleaningSessions(): string[] {
+    return [...this.cleaning.values()].map((c) => c.session);
   }
 
   /** The update did not happen: the queues it held go on now. */
@@ -1043,7 +1054,8 @@ export class Engine implements Member {
    * Start one cleanup barrier per idle turn; no inbox or next step may enter while it is pending. A first timeout (the
    * job host may only be slow on a busy machine) asks once more within the same barrier, with a fresh limit and no
    * kill; a second one, or any other failure, halts the run and ends the process (the user's decision with queue LCK,
-   * survey LC3 F5).
+   * survey LC3 F5). A run an update's drain holds is not halted by it: it stays held, the failure goes to the activity,
+   * the process is ended, and the next server goes on in a new one (D1 with queue LCG, survey LC4 finding 1).
    */
   private cleanWorker(queueId: string, live: Live): boolean {
     const proc = live.proc;
@@ -1057,7 +1069,7 @@ export class Engine implements Member {
       this.store.appendActivity(live.session, { at: now(), kind: "error", text: "The worker's process cleanup timed out; Nexus asks for it once more", queue: queueId });
       return proc.cleanup!();
     });
-    this.cleaning.set(proc, barrier);
+    this.cleaning.set(proc, { barrier, session: live.session });
     void barrier.then(() => {
       this.cleaning.delete(proc);
       this.cleaned.add(proc);
@@ -1067,7 +1079,10 @@ export class Engine implements Member {
     }, (error: unknown) => {
       this.cleaning.delete(proc);
       if (!current()) return;
-      this.halt(queueId, retried && error instanceof CleanupTimedOut ? "worker process cleanup timed out twice" : `worker process cleanup failed: ${String(error)}`);
+      const reason = retried && error instanceof CleanupTimedOut ? "worker process cleanup timed out twice" : `worker process cleanup failed: ${String(error)}`;
+      if (this.draining && this.store.readRun(queueId)?.resume_after_restart) {
+        this.store.appendActivity(live.session, { at: now(), kind: "error", text: `The ${reason}; the run stays held for the Nexus update: Nexus ends the worker's process, and the next server goes on in a new one`, queue: queueId });
+      } else this.halt(queueId, reason);
       this.ending.add(live.session);
       proc.kill();
       this.changed();

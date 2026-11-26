@@ -64,7 +64,9 @@ worker, without opening the next step. A timeout of the server's fifteen seconds
 barrier, with a fresh limit and no kill: on a busy machine the helper may only be slow, and ending the worker there
 turned a slow cleanup into a halted run (the user's decision with queue LCK, survey LC3 F5). Only a second timeout halts
 ("worker process cleanup timed out twice") and ends the worker. A resume waiting for the barrier waits through the
-second request too. A process that has run no turn yet has nothing to clean and gets no
+second request too. A pending barrier keeps the engine from being idle, so an update's drain waits for its outcome; one
+that fails while the drain holds the run halts nothing: the run stays held, the failure is in the activity and the
+worker is ended (docs/design/updates.md, "Updating Nexus": the drain waits for a pending cleanup too). A process that has run no turn yet has nothing to clean and gets no
 barrier: when a step boundary starts a new process (another model), its first barrier comes after its first turn.
 Before queue CI8 the engine asked the new process at once, while its helper was still starting (PowerShell compiling
 `worker-job.cs`, half a second idle, 3 to 7 s on a busy machine and more), so the fifteen-second acknowledgement limit

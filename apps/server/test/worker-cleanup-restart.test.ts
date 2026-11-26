@@ -3,13 +3,16 @@
 // with the test's gate (worker-gate-fixture.ts): End has opened and checked the handle of the step's helper and waits
 // at AwaitExit's 2000 ms wait; the helper's TerminateProcess returns false/5 (injected), so the wait's success is the
 // helper ending by itself, its failure the helper living on. What meets the held wait: an update's hand-over (the
-// drain, then the old server's shutdown, as main.ts's release does), the server's own shutdown, its sudden death (a
+// drain, waited for until the engine is idle as Lifecycle's tick does, then the release: project-registry.ts's
+// stopAgents, with a short wait for the old processes), the server's own shutdown, its sudden death (a
 // server process of the test's own killed by its handle, crash-server.ts), a runtime crash (the gate host ends its
 // runtime by its own Process object) and a restart for changed process settings. The next server is a new engine on a
 // new store of the same files: it knows only what is on disk.
 //
 // Today's rules these tests hold to (engine.ts, recoverAfterRestart; docs/design/updates.md): a plain restart pauses a
-// running run ("the Nexus server restarted; resume to continue"), a run an update held goes on by itself; a Windows
+// running run ("the Nexus server restarted; resume to continue"), a run an update held goes on by itself; an update's
+// drain waits for a pending cleanup's outcome (the engine is not idle meanwhile), and a cleanup that fails during it
+// leaves the run held (D1 with queue LCG, survey LC4 finding 1); a Windows
 // worker's recorded PID is no ownership evidence and is never ended (its job closes with its host); a cleanup's late
 // outcome is dropped by a server that has stopped, or by one that no longer holds the process (cleanWorker). LCR's
 // tests of the same states without a cleanup are not repeated here: crash-recovery.test.ts (a server dying at start-up
@@ -23,6 +26,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, loadProjectState, type RuntimeFile } from "@nexus/protocol";
 import { crashAt, endCrashServers } from "./crash-server.ts";
+import { stopAgents } from "../src/project-registry.ts";
 import { REAL_PROCESSES, fixtureRun, restart } from "./engine-setup.ts";
 import { fakeStarts } from "./fake-behaviour.ts";
 import { LONGER, holds, until } from "./wait.ts";
@@ -60,10 +64,20 @@ async function shutdownAtGate(a: A): Promise<void> {
   await holds("the old processes live on while the cleanup is held", () => a.engine.alive() && alive(a.helper) && isLocked(a.dir), 300);
 }
 
-/** Opens the gate (after letting the helper end, for a success) and waits for the old server's processes and job to end. */
-async function oldEnds(a: A, outcome: "success" | "failure"): Promise<void> {
+/** Opens the gate, after letting the helper end for a success: the held wait's outcome. */
+function openGate(a: A, outcome: "success" | "failure"): void {
   if (outcome === "success") a.releaseHelper();
   a.gate.open();
+}
+
+/** Opens the gate (openGate) and waits for the old server's processes and job to end (oldEnded). */
+async function oldEnds(a: A, outcome: "success" | "failure"): Promise<void> {
+  openGate(a, outcome);
+  await oldEnded(a, outcome);
+}
+
+/** The old server's processes and job have ended, and the held cleanup's outcome was `outcome`, on the same handle. */
+async function oldEnded(a: A, outcome: "success" | "failure"): Promise<void> {
   await until("the old server's processes end", () => !a.engine.alive(), LONGER.processes);
   await until("the old job's members end", () => !alive(a.helper), LONGER.processes);
   await until("the directory is free before any next server", () => !isLocked(a.dir), LONGER.processes);
@@ -88,18 +102,40 @@ function workDoneOnce(a: A, b: { dir: string; pid: number }, q2 = 1): void {
 
 // ---------------------------------------------------------------- H2: an update's hand-over
 
+/**
+ * An update's hand-over as main.ts runs it: the drain is over once the engine is idle (Lifecycle's tick), then the
+ * release stops the engine and waits briefly for its processes (stopAgents; main.ts's 10 s stands for the test's
+ * `waitMs`). `drained` turns true when the drain ends; `done` settles after the release.
+ */
+function handOver(a: A, waitMs = 300): { drained: () => boolean; done: Promise<void> } {
+  let drained = false;
+  const done = until("the drain's end", () => a.engine.idle(), LONGER.run).then(() => {
+    drained = true;
+    return stopAgents([{ shutdown: () => a.engine.shutdown(), alive: () => a.engine.alive() }], waitMs);
+  });
+  done.catch(() => {});
+  return { drained: () => drained, done };
+}
+
+// The drain waits for a pending cleanup (D1 with queue LCG, survey LC4 finding 1): before, the engine was idle at the
+// held wait, the drain ended at once and the release could start the successor beside the old job.
 for (const [runtime, outcome] of [["claude", "success"], ["codex", "failure"]] as const) {
-  test(`${runtime}: an update's hand-over at the held wait, then its ${outcome}: the drain holds the run without waiting for the cleanup; the old processes end after it and its outcome writes nothing; the next server resumes by itself, Q1 not repeated, Q2 once in a host started after the old one ended`, windows, async () => {
+  test(`${runtime}: an update's hand-over at the held wait, then its ${outcome}: the drain does not end while the cleanup is held, the release follows its outcome; the run stays held${outcome === "failure" ? " (no halt; the failure in the activity, the process ended)" : ""}; the next server resumes by itself, Q1 not repeated, Q2 once in a host started after the old one ended`, windows, async () => {
     await withWorkers({ runtime, behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
       a.finishTurn();
       await atGate(a);
       assert.deepEqual(a.engine.drainForUpdate(false), ["Q"], "the update holds the run");
       const heldRun = a.store.readRun("Q")!;
       assert.deepEqual([heldRun.state, heldRun.resume_after_restart], ["paused", true]);
-      assert.equal(a.engine.idle(), true, "today's rule: a held cleanup is no turn, the drain does not wait for it");
-      await shutdownAtGate(a);
-      await oldEnds(a, outcome);
-      assert.deepEqual(a.store.readRun("Q"), heldRun, "the late outcome of the stopped server's cleanup wrote nothing");
+      assert.deepEqual(a.engine.cleaningSessions(), [a.session()], "the held cleanup is pending");
+      const h = handOver(a);
+      await holds("the drain does not end while the cleanup is held", () => !h.drained() && !a.engine.idle() && alive(a.helper) && isLocked(a.dir), 500);
+      openGate(a, outcome);
+      await h.done;
+      await oldEnded(a, outcome);
+      assert.deepEqual(a.store.readRun("Q"), heldRun, "the cleanup's outcome left the run held for the update");
+      const failures = a.store.readActivity(a.session()).entries.filter((e) => e.kind === "error" && e.text.includes("stays held for the Nexus update"));
+      assert.equal(failures.length, outcome === "failure" ? 1 : 0, "a failure during the drain is in the activity");
       const n = nextServer(a);
       assert.deepEqual([n.run()?.state, n.run()?.resume_after_restart, n.run()?.reason], ["paused", true, "resuming after the Nexus update"]);
       await until("the queue finishes", () => n.run()?.state === "finished", LONGER.run);
