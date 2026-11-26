@@ -110,6 +110,55 @@ user's attention list (kind `review`, with the orchestrator's reason as its text
 shows `waiting` in both cases. An orchestrator's `review.accepted` or `review.asked_user` on a step that waits for the
 user is ignored (with a warning); the user may accept either. Workers may write none of the three events.
 
+## Review decisions
+
+**Status: protocol and server in effect** (queue RVD, RVD2); the commands (`nexus decide`, `nexus review decide`), the
+briefings, the review helper's packet and the dashboard come in RVD3 and RVD4. The design and the user's decisions are
+in DESIGN.md, ["Required review decisions"](../design/review-decisions.md).
+
+A step's review carries a **decision list**: the questions its review must answer before the step can be accepted
+(`packages/protocol/src/review-decisions.ts`).
+
+- **The list's events.** `review.decision` (`decision`: `D1`, `D2`, … stable within the step; `text`; `options`, two or
+  more, each a `label` and `effect: fix` for one that means the work must change; `recommended?` one of the labels, else
+  dropped with a warning; `material?` review keys or paths; `why?`; `for`: `user` or `reviewer`) declares one decision;
+  the same id again is its next **version**; with `withdrawn` (why) it leaves the list, and its id is not used again.
+  `review.decisions_none` (`text`) says there is nothing to decide; refused while a decision is on the list. Only the
+  step's own worker writes them, while the step is at work (its round: the one its step.done will end), and the
+  orchestrator while it holds the review (the current round); any other session's is ignored with a warning. The
+  orchestrator may make a `reviewer` decision `user`, never a `user` one `reviewer`.
+- **What the list is** (`decision_list` on the derived step, with `decisions`: `items`, each with `version`, `round`,
+  `by`, `versions` and every valid answer, and `none`): `declared`, `none`, `missing`, or `legacy`: a project without
+  `review_decisions_since` in `project.yaml`, or a step whose latest step.done came before it. The server writes the
+  mark once, from RVD3 on, when the CLI lets agents declare a list; until then every project reads `legacy` where it has
+  no list, so nothing old is held.
+- **Versions.** A new declaration of the id, or review material added during the review under a key, path or URL the
+  decision names, makes a new version. An answer counts only for the version and the review round it names
+  (`review.decided`'s `version`, `round`); an earlier one stays in the decision's `answers` as history. A send-back opens
+  a new round: every decision is open again, nothing is carried over.
+- **Answers** (`review.decided`: `choice?` one of the options, `text?`, at least one of the two). Valid only while the
+  step is in review, for the current version and round, from someone allowed **at the answer's time**: the user always;
+  the orchestrator while it holds the review (`review_with: orchestrator`), a `user` decision only at level 3, or at level
+  2 while the user was away (`awayAt` of its time; marked `provisional`); a review helper of the current round, a
+  `reviewer` decision only. A worker's answer is refused by its role (`review.decided` is with the orchestrators'
+  events). After the user's level 1 or a hand-over (`review.asked_user`) the orchestrator's answers no longer count;
+  its earlier valid ones stay. An answer is no acceptance: it wakes no worker and does not touch the question barrier.
+- **The rule for every acceptance** (`decisionGate`): every decision on the list has a current answer someone allowed
+  gave, none chose an option marked `fix`; a `user` decision needs the user's own answer, except for a provisional
+  acceptance, which takes the orchestrator's provisional one. A `missing` list holds the orchestrator's, the review
+  helper's and a provisional acceptance (they declare none or the decisions first), not the user's or Nexus's. A
+  `review.accepted` or `review.provisional` that fails it is ignored with a warning naming the open decisions; the
+  server's Accept (`POST …/accept`) is refused (409) before anything is written, and also when the answers the page saw
+  (`decisions`) are not the current ones. Nexus's own acceptance of an integration (MI) waits for open decisions too.
+  Fix it, Reject, a send-back and a hand-over need no answer.
+- **The review helper** answers `reviewer` decisions (`review.decided`), and hands the step to the user
+  (`review.asked_user`) only while some decision is `user` and every `reviewer` one is answered. Its new reasons to
+  pass on are `decision` (a decision it cannot settle, or a list it finds incomplete) and `user_decision` (the user's
+  decisions, at level 3).
+- **The user's answer**: `POST …/steps/:s/decisions/:d/answer` (`version`, `round`, `choice?`, `text?`; 409 when either
+  moved; the same answer twice writes once). **Confirm all**: `POST …/provisional/confirm` (`steps`, each with the
+  provisional acceptance seen), all or nothing. Both in api.md.
+
 ## Sending a step back
 
 One server action (`sendBack` in `packages/protocol/src/actions.ts`) sends a step in review back to its worker, with
@@ -207,7 +256,7 @@ with `doubt`, naming what it could not do), never to work around it. The dashboa
   not): the step keeps waiting for the orchestrator's review, and the orchestrator gets the review notice now. Each
   reason one of `criterion` (a criterion the packet cannot settle), `deviation` (the summary reports a deviation from
   the plan), `question`, `limit`, `doubt`, `level` (level 3: the checkable criteria met, judgement is the
-  orchestrator's) and, from the `nexus` session only, `no_verdict` and `unavailable` (from a helper they are dropped;
+  orchestrator's), `decision` and `user_decision` (see "Review decisions") and, from the `nexus` session only, `no_verdict` and `unavailable` (from a helper they are dropped;
   none left reads as `doubt`). Valid only from the helper of the step's current round while it has the review, or
   from `nexus` for the current round of a step waiting for the orchestrator that was not passed on yet.
 

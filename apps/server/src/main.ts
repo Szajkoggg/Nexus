@@ -11,7 +11,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { Server } from "node:http";
 import {
   ActionError, Effort, ProjectStore, queueView, refuseUnreadable, addNote, closingToSkip, closingToSkipAtApproval, updateSettings, answerAsUser, approveQueue, deleteNote, loadProjectState, nexusHome, withdrawApproval, addAllowRule,
-  readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readCapacity, readUsage, readTurns, readServerSpeed, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, type ProjectState,
+  readGlobalSettings, updateGlobalSettings, MaxRunning, ownKeys, OVERRIDABLE, settingKey, readCapacity, readUsage, readTurns, readServerSpeed, commentOnPicture, markPicture, routeAnswers, routeSendBacks, sendBack, sendMessage, setQueueSettings, setStepLevel, confirmProvisional, confirmProvisionals, answerDecision, type ProjectState,
   readAway, writeAway, awayNow, awayUntil, turnAway, expireAway, acceptPlanProposal, declinePlanProposal, handBackPlan, acceptTagProposal, declineTagProposal,
   STAT_DIMENSIONS, STAT_FILTERS, projectMetrics, sinceTime, statDimension, statsReport, stepStats, reviewStats, type ReviewStats, usageDays, type ProjectMetrics, type StatsReport, type UsageDays,
   SearchError, parseSearch, MIN_SAMPLES, queueEstimate, stepSamples, isOpenQuestion, queueWorkedOn, stepsWorkedOn, FileCache, useHomeReader, type EstimatesResponse, type LeftView, type TemplatesResponse, readTemplates, type ProjectSummary, type RemovalView,
@@ -694,7 +694,12 @@ app.post("/api/projects/:id/queues/:queue/steps/:step/pictures/comment", act((st
 app.post("/api/projects/:id/queues/:queue/steps/:step/reject", act((_st, b, p, e) => ({ message: e.engine.rejectStep(p("queue"), p("step"), b.text) })));
 // The user confirms a step the orchestrator accepted provisionally (review level 3); Fix it on one is the send-back.
 app.post("/api/projects/:id/queues/:queue/steps/:step/confirm", act((st, _b, p) => ({ message: confirmProvisional(st, p("queue"), p("step")) })));
-app.post("/api/projects/:id/queues/:queue/steps/:step/accept", act((_st, b, p, e) => e.engine.acceptReview(p("queue"), p("step"), b.text, b.note_to)));
+// Confirm all: the user confirms several provisional acceptances at once, all or nothing (queue RVD).
+app.post("/api/projects/:id/provisional/confirm", act((st, b) => ({ message: confirmProvisionals(st, b.steps) })));
+// The user's answer to one review decision (queue RVD): saved only, never an acceptance; the step is accepted apart.
+app.post("/api/projects/:id/queues/:queue/steps/:step/decisions/:decision/answer", act((st, b, p) => answerDecision(st, { queue: p("queue"), step: p("step"), decision: p("decision"), version: b.version, round: b.round, choice: b.choice, text: b.text })));
+// `decisions`: the answers the page showed (decision id → answer event); Accept waits for every decision (queue RVD).
+app.post("/api/projects/:id/queues/:queue/steps/:step/accept", act((_st, b, p, e) => e.engine.acceptReview(p("queue"), p("step"), b.text, b.note_to, b.decisions)));
 
 // Removing the project from Nexus (src/removal.ts), the user's only: there is no CLI command for it, and the guard above
 // refuses a request that does not come from the dashboard's own page.

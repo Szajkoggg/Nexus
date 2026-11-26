@@ -36,6 +36,7 @@ export * from "./stats.ts";
 export * from "./flaky.ts";
 export * from "./benchmarks.ts";
 export * from "./review-stats.ts";
+export * from "./review-decisions.ts";
 export * from "./routing.ts";
 export * from "./overview.ts";
 export * from "./templates.ts";

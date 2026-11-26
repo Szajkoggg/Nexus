@@ -24,7 +24,7 @@ function stepSummary(s: StepView): StepView {
   const { summary: _s, reason: _r, progress: _p, ...rest } = s;
   return {
     ...rest, goal: "", acceptance: [], timeline: [], messages: [], checks: [], metrics: [], review_items: [], notes: [],
-    sent_back: [], pictures: {},
+    sent_back: [], pictures: {}, decisions: { items: [] },
   };
 }
 

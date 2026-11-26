@@ -20,8 +20,8 @@ The protocol is split by topic, one file each in `docs/protocol/`. New text goes
   Sections: `queue.yaml`
 - [Worktrees, integration and merging](protocol/git.md): the integration step, merging back, the merge train, cleaning up worktrees, pushing, one queue per checkout.
   Sections: The integration step; Git on the dashboard; Merge back and clean up; Cleaning up a survey's worktree; Pushing what was accepted; One queue per checkout, and a limit
-- [Review](protocol/review.md): review levels, away mode, sending a step back, the review helper, review pictures.
-  Sections: Review; Sending a step back; The review helper; Review pictures
+- [Review](protocol/review.md): review levels, away mode, review decisions, sending a step back, the review helper, review pictures.
+  Sections: Review; Review decisions; Sending a step back; The review helper; Review pictures
 - [Sessions, events and the step turn](protocol/sessions.md): events, the user's session, inboxes, `session.yaml`, the step turn, question links.
   Sections: Events: `sessions/<id>/events.jsonl`; The user's session; Inbox: `sessions/<id>/inbox.jsonl`; `session.yaml`; The step turn; Dashboard question links; The `nexus` command inside agents
 - [The `nexus` CLI](protocol/cli.md): the `nexus` command and its subcommands.

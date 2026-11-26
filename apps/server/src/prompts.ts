@@ -784,6 +784,8 @@ const PASS_ON_TEXT: Record<PassOnReason, string> = {
   limit: "the step was sent back as often as the limit allows: one more send-back hands it to the user",
   doubt: "it doubts its own verdict",
   level: "review level 3: the checkable criteria are met, the judgement is yours",
+  decision: "a review decision it cannot settle, or a decision list it finds incomplete or wrong",
+  user_decision: "review decisions that are the user's: at level 3 you answer them provisionally",
   no_verdict: "the review helper ended without a verdict",
   unavailable: "the review helper could not run (its runtime is beyond the usage threshold, or failed)",
 };

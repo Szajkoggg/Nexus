@@ -66,6 +66,7 @@ id: honeycomb
 name: Project Honeycomb
 root: C:/Code/GameDev/ProjectHoneycomb
 follows_global: true                   # this file is in the form below (absent: from before global settings, migrated once)
+review_decisions_since: 2026-11-27T08:00:00Z   # set once by the server; a step.done before it (or without it) needs no review decision list
 review_levels_since: 2026-11-14T15:00:00Z   # set once by the server; steps done before it keep their old review policy (see "Review")
 defaults:
   stop_conditions:                     # every queue inherits these

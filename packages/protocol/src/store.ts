@@ -511,6 +511,17 @@ export class ProjectStore {
     return true;
   }
 
+  /**
+   * Records when the project's steps began to declare review decisions (`review_decisions_since`, queue RVD), once: a
+   * step.done from before it needs no decision list. Returns whether it wrote.
+   */
+  markReviewDecisions(at = now()): boolean {
+    const stored = this.readStoredProject();
+    if (stored.review_decisions_since) return false;
+    this.writeStoredProject({ ...stored, review_decisions_since: at });
+    return true;
+  }
+
   // queues
   queueDir(id: string): string { return join(this.dir, "queues", id); }
   /** Where `nexus review add` copies a step's review files (its only writer): queues/<queue>/review/<step>/. */

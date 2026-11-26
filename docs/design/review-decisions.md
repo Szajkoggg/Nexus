@@ -1,7 +1,15 @@
 # Required review decisions
 
 Part of [the design](../DESIGN.md). Queue RVD, step RVD1: the contract and the screens. **Status: a proposal for the
-user's review**; nothing here is built yet. The user decided D1–D4 on 2026-11-26, each as recommended (below). RVD2 (protocol and server), RVD3 (CLI, review helper, orchestrator,
+user's review**; nothing here is built yet. The user decided D1–D4 on 2026-11-26, each as recommended (below). **Built so far**: RVD2, the protocol and the server (docs/protocol/review.md,
+"Review decisions").
+
+**Found in RVD2.** The mark `review_decisions_since` is written by the server from RVD3 on, not at RVD2's first start:
+until the CLI lets workers and reviewers declare a list, a mark would make every new step's list `missing` and hold the
+orchestrator's and the helper's acceptances with no way to declare one. A project without the mark reads a step
+without a list as `legacy` (unlike `review_levels_since`, whose absence means the new rule). The send-back does not
+carry the saved answers in its inbox entry yet: the answers stay in the decision's history, and RVD3's prompt reads
+them from there. A user's answer is accepted whoever holds the review (the user may answer before a hand-over). RVD2 (protocol and server), RVD3 (CLI, review helper, orchestrator,
 briefings) and RVD4 (dashboard) build what the user accepts here. The mockups are
 `docs/ux/mockups/27-review-decisions.html`, drawn over the data of `scripts/capture/seed-review-decisions.ts`.
 

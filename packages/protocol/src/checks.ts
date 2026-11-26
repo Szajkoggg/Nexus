@@ -3,6 +3,7 @@
 // step.done whose checks have not passed is no review yet: `checking` while they wait for the machine or run; a fix
 // round (`running`, its `check_fix`) when they failed twice; `waiting` while the orchestrator decides a disputed failure
 // that could not be run on the base. Pure, free of Node: the dashboard reads the same rules.
+import { openDecisions } from "./review-decisions.ts";
 import type { CheckRun, CheckSet, ChecksFile, Event } from "./schemas.ts";
 import type { QueueView, StepView } from "./state.ts";
 import { CHECK_UNIT, checkMetric } from "./metrics.ts";
@@ -120,8 +121,10 @@ export function latestCheckSet(q: Pick<QueueView, "check_runs">, st: Pick<StepVi
  * Nexus accepts it itself, and nobody is asked to review it. Not at level 1 (the user's), not when the review was handed
  * to the user, and not without any check (the merge is untested then).
  */
-export function acceptedByNexus(q: Pick<QueueView, "check_runs">, st: Pick<StepView, "id" | "timeline" | "model_free" | "status" | "level" | "asked_user">): boolean {
+export function acceptedByNexus(q: Pick<QueueView, "check_runs">, st: Pick<StepView, "id" | "timeline" | "model_free" | "status" | "level" | "asked_user" | "decisions">): boolean {
   if (!st.model_free || st.status !== "review" || st.level === 1 || st.asked_user) return false;
+  // Review decisions the step has (queue RVD) hold Nexus as they hold anyone (review-decisions.ts).
+  if (openDecisions(st.decisions, reviewRound(q, st), "nexus").length) return false;
   const set = latestCheckSet(q, st);
   return set?.state === "passed" && set.checks.length > 0;
 }

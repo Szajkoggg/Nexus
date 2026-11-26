@@ -1,8 +1,9 @@
 // Derives the dashboard's view of a project from its files. Pure apart from reading through the store;
 // nothing here is ever written back (state.json, if kept, is only a cache of this).
 import { errorText } from "./errors.ts";
-import { applyCheckSets, enterAcceptedReview, reviewRound, verdictBeforeReview } from "./checks.ts";
-import { CONVERSATION_ONLY, HELPER_VERDICTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
+import { applyCheckSets, enterAcceptedReview, lastDone, reviewRound, verdictBeforeReview } from "./checks.ts";
+import { applyAnswer, applyDecision, applyMaterial, applyNone, decisionGate, emptyDecisions, helperHandOverRefusal, listState, type Acceptor, type DecisionContext, type DecisionsView, type ListState } from "./review-decisions.ts";
+import { CONVERSATION_ONLY, DECISION_LIST, HELPER_VERDICTS, NEXUS_PASS_ON, NEXUS_SESSION, ORCHESTRATOR_ONLY, type PassOnReason, USER_ONLY, WORKER_ONLY, type MetricsFile, type StatusChange, type Event, type InboxEntry, type Note, type GitFile, type ProjectFile, type PushFile, type QueueFile, type QueueStatus, type RecurringFile, type ReviewItem, type ReviewLevel, type LegacyReviewPolicy, type AwayFile, type ChecksFile, type RunFile, type RuntimeFile, type SessionFile, type StartFile, type PlanFile, type StepDef, type StepStatus, type TagProposal, type TagsFile } from "./schemas.ts";
 import { ProjectStore, chainPlan, countRebuild, readAway, revisionHash } from "./store.ts";
 import { awayAt, awayNow, type AwayNow } from "./away.ts";
 import { formatClock, type Segment } from "./times.ts";
@@ -166,6 +167,13 @@ export interface StepView extends StepDef {
    */
   fix_round_of?: string;
   review_items: (ReviewItem & { at: string; round?: number })[];
+  /**
+   * The step's review decisions (queue RVD; review-decisions.ts): the list its worker declared (or none), the
+   * orchestrator's additions, every answer by version and round.
+   */
+  decisions: DecisionsView;
+  /** What the list is (listState): declared, none, legacy (not required) or missing. */
+  decision_list: ListState;
   /**
    * The user's marks and comments on review pictures, by the picture's path: `accepted` with its time while marked;
    * comments oldest first, with where each went.
@@ -386,6 +394,9 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
         if (WORKER_ONLY.has(e.type) && s.role !== "worker") {
           warnings.push(`session ${id}: ${e.type} is for workers; ignored`); continue;
         }
+        if (DECISION_LIST.has(e.type) && s.role !== "worker" && s.role !== "orchestrator") {
+          warnings.push(`session ${id}: ${e.type} is a worker's or the orchestrator's; ignored`); continue;
+        }
         if (CONVERSATION_ONLY.has(e.type) && s.role !== "conversation") {
           warnings.push(`session ${id}: ${e.type} is for thinking partners; ignored`); continue;
         }
@@ -461,6 +472,9 @@ export function deriveProjectState(store: ProjectStore): ProjectState {
 
   // An approval after a proposal to lift answers it (approving a stopped queue lifts the stop anyway).
   for (const q of queues.values()) if (q.lift_proposal && q.approvals.some((a) => a.at > q.lift_proposal!.at)) q.lift_proposal = undefined;
+
+  // What each step's decision list is now (review-decisions.ts).
+  for (const q of queues.values()) for (const st of q.steps) st.decision_list = listState(st.decisions, project.review_decisions_since, lastDone(st)?.at);
 
   // A review for the orchestrator goes to the user when there is none to do it, or its notices are off.
   const orchestrating = !!project.orchestrator && project.orchestrator.notify !== false;
@@ -702,6 +716,7 @@ function initQueue(q: QueueFile, notes: Note[], project: Pick<ProjectFile, "defa
         ...(s.id === integrationStepId(q.id) ? { integration: true as const } : {}),
         status: s.status ?? "pending",
         review_items: [], checks: [], metrics: [], timeline: [], messages: [], segments: [], sent_back: [], pictures: {},
+        decisions: emptyDecisions(), decision_list: "legacy" as ListState,
         // Copies: the model's notes are frozen, and a delivery or note.read sets read_at on the view's own.
         notes: notes.filter((n) => n.step === s.id).map((n) => ({ ...n })),
       };
@@ -822,7 +837,22 @@ function apply(
     }
     case "review.added": {
       const st = stepOf(queueOf(e.queue), e.step);
-      if (st) st.review_items.push(...e.items.map((i) => ({ ...i, at: e.at, round: e.round })));
+      if (!st) return;
+      st.review_items.push(...e.items.map((i) => ({ ...i, at: e.at, round: e.round })));
+      applyMaterial(st, e);
+      return;
+    }
+    case "review.decision":
+    case "review.decisions_none":
+    case "review.decided": {
+      const q = queueOf(e.queue); const st = stepOf(q, e.step);
+      if (!q || !st) return;
+      const c: DecisionContext = {
+        role: s?.role, reviewRound: reviewRound(q, st), away, reviewedByOrchestrator: reviewedByOrchestrator(st),
+        helperRefusal: s?.role === "helper" ? helperRefusal(s, q, st) : undefined,
+      };
+      const why = e.type === "review.decision" ? applyDecision(st, e, c) : e.type === "review.decisions_none" ? applyNone(st, e, c) : applyAnswer(st, e, c);
+      if (why) warnings.push(why.startsWith("event ") ? why : `event ${e.id} (${e.type}): ${why}; ignored`);
       return;
     }
     case "check.result": {
@@ -921,6 +951,12 @@ function apply(
       // gives its review to the user: it keeps the review the user's whatever the level becomes.
       const own = s?.role === "user" && st?.status === "review";
       if (!st || (!own && !reviewedByOrchestrator(st))) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the orchestrator's review; ignored`); return; }
+      // A review helper hands only the user's decisions over, once the reviewer's are answered (queue RVD).
+      if (s?.role === "helper") {
+        const q = queues.get(e.queue)!;
+        const refused = helperRefusal(s, q, st) ?? helperHandOverRefusal(st, reviewRound(q, st));
+        if (refused) { warnings.push(`event ${e.id}: ${refused}; the review helper's hand-over is ignored`); return; }
+      }
       st.review_with = "user"; st.asked_user = { text: e.text, at: e.at, ...(s?.role === "user" ? { by: "user" as const } : {}) };
       return;
     }
@@ -976,6 +1012,8 @@ function apply(
         if (refused) { warnings.push(`event ${e.id}: ${refused}; the review helper's acceptance is ignored`); return; }
       }
       const by = s?.role === "user" || s?.role === "helper" || s?.role === "nexus" ? s.role : "orchestrator";
+      const held = gate(q, st, by, project);
+      if (held) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step}: ${held}; the acceptance is ignored`); return; }
       st.accepted = { by, at: e.at, event: e.id, ...(s && (by === "orchestrator" || by === "helper") ? { session: s.id, runtime: s.runtime, model: s.model, effort: s.effort } : {}) };
       st.review_with = undefined;
       st.status = "done";
@@ -1013,6 +1051,8 @@ function apply(
       if (!reviewedByOrchestrator(st)) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is not waiting for the orchestrator's review; the provisional acceptance is ignored`); return; }
       // Level 3, or level 2 while away mode was on (it runs as level 3 then).
       if (st.level !== 3 && !(st.level === 2 && awayAt(away, e.at))) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step} is at review level ${st.level}${st.level === 2 ? " and away mode was off" : ""}; a provisional acceptance is for level 3, and is ignored`); return; }
+      const held = gate(q, st, "provisional", project);
+      if (held) { warnings.push(`event ${e.id}: step ${e.queue}/${e.step}: ${held}; the provisional acceptance is ignored`); return; }
       st.review_with = undefined;
       st.status = "done";
       st.provisional = { at: e.at, event: e.id, ...(e.text ? { text: e.text } : {}) };
@@ -1108,6 +1148,14 @@ function applyChange(q: QueueView, c: StatusChange): void {
     case "work":
       return; // the user's choice about a stopped step's work: a record; a Keep's lift is its own entry
   }
+}
+
+/**
+ * Why the step's decisions hold `acceptor`'s acceptance now (review-decisions.ts, decisionGate), or undefined: the list
+ * as the events so far made it, in the step's current review round.
+ */
+export function gate(q: Pick<QueueView, "check_runs">, st: StepView, acceptor: Acceptor, project: Pick<ProjectFile, "review_decisions_since">): string | undefined {
+  return decisionGate(st, reviewRound(q, st), acceptor, listState(st.decisions, project.review_decisions_since, lastDone(st)?.at));
 }
 
 /** A review helper's `about` (its step and round), or none for any other session. */

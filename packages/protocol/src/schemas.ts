@@ -75,10 +75,10 @@ export type StepStatus = z.infer<typeof StepStatus>;
  * action it needed was refused); `level` a level-3 step whose checkable criteria are met; and from Nexus only,
  * `no_verdict` (the helper ended without one) and `unavailable` (its runtime is beyond the usage threshold, or failed).
  */
-export const PassOnReason = z.enum(["criterion", "deviation", "question", "limit", "doubt", "level", "no_verdict", "unavailable"]);
+export const PassOnReason = z.enum(["criterion", "deviation", "question", "limit", "doubt", "level", "decision", "user_decision", "no_verdict", "unavailable"]);
 export type PassOnReason = z.infer<typeof PassOnReason>;
 /** The events that are a review helper's verdict: the only events a helper session writes. */
-export const HELPER_VERDICTS: ReadonlySet<string> = new Set(["review.accepted", "review.sent_back", "review.passed_on"]);
+export const HELPER_VERDICTS: ReadonlySet<string> = new Set(["review.accepted", "review.sent_back", "review.passed_on", "review.decided", "review.asked_user"]);
 /** The reasons only Nexus gives (its `nexus` session), never a helper. */
 export const NEXUS_PASS_ON: ReadonlySet<PassOnReason> = new Set(["no_verdict", "unavailable"]);
 
@@ -387,6 +387,12 @@ export const ProjectFile = z.object({
    * Absent: every step.done is derived by level.
    */
   review_levels_since: Time.optional(),
+  /**
+   * When this project's steps began to declare review decisions (set once by the server; docs/protocol/review.md,
+   * "Review decisions"). A step.done from before it, or in a project without it, needs no decision list: a missing list
+   * holds nothing. After it, a missing list holds the reviewers' acceptances (not the user's).
+   */
+  review_decisions_since: Time.optional(),
   orchestrator: OrchestratorSettings.extend({
     session: Id.nullable().default(null),
     /** Always there in effective settings (the global value, else the project's own); optional for a literal's sake. */
@@ -431,6 +437,12 @@ export const StoredProject = z.object({
    * Absent: every step.done is derived by level.
    */
   review_levels_since: Time.optional(),
+  /**
+   * When this project's steps began to declare review decisions (set once by the server; docs/protocol/review.md,
+   * "Review decisions"). A step.done from before it, or in a project without it, needs no decision list: a missing list
+   * holds nothing. After it, a missing list holds the reviewers' acceptances (not the user's).
+   */
+  review_decisions_since: Time.optional(),
 
   defaults: z.preprocess(legacyDefaults, z.object({
     stop_conditions: own(z.array(z.string())),
@@ -786,6 +798,11 @@ export type SessionFile = z.infer<typeof SessionFile>;
 // ---------------------------------------------------------------- events (sessions/<id>/events.jsonl)
 
 const base = { v: z.literal(1), id: Id, at: Time, session: Id };
+/** A review decision's id within its step: D1, D2, … (never reused). */
+export const DecisionId = z.string().regex(/^D[1-9]\d*$/, "a decision id: D1, D2, …");
+/** One option of a review decision; `effect: fix` marks one that means the step's work must change. */
+export const DecisionOption = z.object({ label: z.string().min(1), effect: z.literal("fix").optional() });
+export type DecisionOption = z.infer<typeof DecisionOption>;
 const qs = { queue: Id, step: Id };
 
 export const ReviewItem = z.object({
@@ -970,6 +987,29 @@ export const Event = z.discriminatedUnion("type", [
    */
   z.object({ ...base, type: z.literal("review.fix_asked"), ...qs, text: z.string().min(1) }),
   /**
+   * One decision of a step's review (queue RVD; docs/protocol/review.md, "Review decisions"): the step's worker declares it
+   * while the step is at work, the orchestrator adds or changes one while it holds the review. `decision` its stable id
+   * (D1, D2, …); each declaration of an id is a new version. `withdrawn` (with why) takes it off the list.
+   */
+  z.object({
+    ...base, type: z.literal("review.decision"), ...qs, decision: DecisionId,
+    text: z.string().min(1), options: z.array(DecisionOption).min(2),
+    recommended: z.string().optional(), material: z.array(z.string().min(1)).optional(), why: z.string().optional(),
+    for: z.enum(["user", "reviewer"]), withdrawn: z.string().min(1).optional(),
+  }),
+  /** The step has nothing to decide in its review (`text`: why): its worker's, or the orchestrator's on a missing list. */
+  z.object({ ...base, type: z.literal("review.decisions_none"), ...qs, text: z.string().min(1) }),
+  /**
+   * An answer to one review decision: the user's, the orchestrator's or a review helper's. It names the `version` and
+   * `round` it answers; `choice` one of the decision's options, `text` why or another answer (one of the two at
+   * least). An answer is no acceptance and wakes no worker.
+   */
+  z.object({
+    ...base, type: z.literal("review.decided"), ...qs, decision: DecisionId,
+    version: z.number().int().positive(), round: z.number().int().positive(),
+    choice: z.string().min(1).optional(), text: z.string().optional(),
+  }).refine((e) => e.choice !== undefined || !!e.text?.trim(), { message: "an answer needs a choice or a text" }),
+  /**
    * The worker says a check Nexus ran fails not because of its work (`nexus check <step> <name> --unrelated`), with its
    * evidence; it ends its turn without `nexus step done`. Nexus runs the check on the queue's base commit (docs/protocol/checks.md,
    * "An unrelated failure"). Worker only.
@@ -988,8 +1028,11 @@ export type EventType = Event["type"];
 export const ORCHESTRATOR_ONLY: ReadonlySet<EventType> = new Set([
   "answer.given", "queue.drafted", "session.request", "review.accepted", "review.sent_back", "review.asked_user", "status.set",
   "review.provisional", "plan.proposed", "tags.proposed", "metric.defined", "recurring.set",
-  "static_analysis.declined", "check.decided", "review.audited",
+  "static_analysis.declined", "check.decided", "review.audited", "review.decided",
 ]);
+
+/** Event types that make a step's review decision list: its worker's (while at work) and the orchestrator's. */
+export const DECISION_LIST: ReadonlySet<EventType> = new Set(["review.decision", "review.decisions_none"]);
 
 /** Event types only a worker session may write: a metric's value belongs to a step's work (metrics.ts). */
 export const WORKER_ONLY: ReadonlySet<EventType> = new Set(["metric.recorded", "check.disputed"]);

@@ -7,8 +7,10 @@ import { NEXUS_SESSION, ProjectFile, QueueFile, USER_SESSION, type GlobalSetting
 import { ProjectStore, isUnreadableFile, wrote, newId, now, readGlobalSettings, revisionHash, writeGlobalSettings } from "./store.ts";
 import { OVERRIDABLE, changedGlobal, settingKey } from "./settings.ts";
 import { reviewedByOrchestrator, runActive, runGoing } from "./status-rules.ts";
-import { commentTarget, isApproved, loadProjectState, pendingProvisional, type ProjectState, type QueueView, type StepView } from "./state.ts";
+import { commentTarget, gate, isApproved, loadProjectState, pendingProvisional, type ProjectState, type QueueView, type StepView } from "./state.ts";
 import { validAllowRule } from "./refusals.ts";
+import { activeDecisions, currentAnswer } from "./review-decisions.ts";
+import { reviewRound } from "./checks.ts";
 import { closingStepId, integrationStepId, stepDefs } from "./closing.ts";
 import { stepChecks } from "./steps.ts";
 import { checkCommandIssue } from "./commands.ts";
@@ -435,6 +437,91 @@ export function confirmProvisional(store: ProjectStore, queue: string, step: str
   const user = ensureUserSession(store);
   store.appendEvent({ v: 1, id: newId(), at: now(), session: user.id, type: "review.confirmed", queue, step });
   return `step ${queue}/${step} confirmed`;
+}
+
+/**
+ * The user confirms several provisional acceptances at once (Confirm all, queue RVD, the user's decision D4): `steps`
+ * each with the provisional acceptance the user saw (`event`). All or nothing: if any is no longer waiting, or was
+ * accepted provisionally again since, nothing is written and the refusal (409) names it.
+ */
+export function confirmProvisionals(store: ProjectStore, steps: unknown): string {
+  if (!Array.isArray(steps) || !steps.length) throw new ActionError("steps: the provisional acceptances to confirm, each { queue, step, event }");
+  const want = steps.map((x: unknown) => {
+    const o = (x ?? {}) as Record<string, unknown>;
+    if (typeof o.queue !== "string" || typeof o.step !== "string" || typeof o.event !== "string") throw new ActionError("each step to confirm is { queue, step, event }");
+    return { queue: o.queue, step: o.step, event: o.event };
+  });
+  const seen = new Set<string>();
+  for (const w of want) {
+    const key = `${w.queue}/${w.step}`;
+    if (seen.has(key)) throw new ActionError(`step ${key} is named twice`);
+    seen.add(key);
+    const st = provisionalStep(store, w.queue, w.step);
+    if (st.provisional?.event !== w.event) throw new ActionError(`step ${key} was accepted provisionally again since you looked: nothing was confirmed`, 409);
+  }
+  const user = ensureUserSession(store);
+  for (const w of want) store.appendEvent({ v: 1, id: newId(), at: now(), session: user.id, type: "review.confirmed", queue: w.queue, step: w.step });
+  return `${want.length} step${want.length === 1 ? "" : "s"} confirmed`;
+}
+
+// ---------------------------------------------------------------- review decisions (queue RVD)
+
+/**
+ * The user's answer to one review decision of a step in review (review.decided): `version` and `round` as the page
+ * read them, `choice` one of its options and/or `text`. Saving is no acceptance and wakes no worker. Refused with 409
+ * when the decision or the round moved since (a stale page never answers a newer question); the same answer again
+ * writes nothing.
+ */
+export function answerDecision(store: ProjectStore, req: { queue: string; step: string; decision: string; version: unknown; round: unknown; choice?: unknown; text?: unknown }): { message: string; answer: string } {
+  stepOf(store, req.queue, req.step);
+  if (!Number.isInteger(req.version) || !Number.isInteger(req.round)) throw new ActionError("version and round: the decision's version and the review round you answer");
+  if (req.choice !== undefined && req.choice !== null && (typeof req.choice !== "string" || !req.choice)) throw new ActionError("choice: one of the decision's options");
+  if (req.text !== undefined && req.text !== null && typeof req.text !== "string") throw new ActionError("text: why, or another answer");
+  const choice = typeof req.choice === "string" ? req.choice : undefined;
+  const text = typeof req.text === "string" && req.text.trim() ? req.text : undefined;
+  if (!choice && !text) throw new ActionError("an answer needs a choice or a text");
+  const state = loadProjectState(store);
+  const q = queueView(state, req.queue);
+  const st = stepView(state, req.queue, req.step);
+  if (st.status !== "review") throw new ActionError(`step ${req.queue}/${req.step} is not in its review`, 409);
+  const d = st.decisions.items.find((x) => x.id === req.decision);
+  if (!d) throw new ActionError(`step ${req.queue}/${req.step} has no decision ${req.decision}`, 404);
+  if (d.withdrawn) throw new ActionError(`decision ${d.id} was withdrawn: ${d.withdrawn.text}`, 409);
+  const round = reviewRound(q, st);
+  if (req.version !== d.version || req.round !== round) {
+    throw new ActionError(`decision ${d.id} changed since you read it (it is at version ${d.version}, review round ${round}): read it again`, 409);
+  }
+  if (choice !== undefined && !d.options.some((o) => o.label === choice)) throw new ActionError(`"${choice}" is not an option of decision ${d.id}`);
+  const cur = currentAnswer(d, round);
+  if (cur && cur.by === "user" && cur.choice === choice && cur.text === text) return { message: `decision ${d.id} has this answer already`, answer: cur.event };
+  const user = ensureUserSession(store);
+  const id = newId();
+  store.appendEvent({ v: 1, id, at: now(), session: user.id, type: "review.decided", queue: req.queue, step: req.step, decision: d.id, version: d.version, round, ...(choice ? { choice } : {}), ...(text ? { text } : {}) });
+  const after = loadProjectState(store);
+  const saved = stepView(after, req.queue, req.step).decisions.items.find((x) => x.id === d.id)?.answers.some((a) => a.event === id);
+  if (!saved) {
+    const why = after.warnings.find((w) => w.startsWith(`event ${id} `));
+    throw new ActionError(why ? why.slice(why.indexOf("): ") + 3).replace(/; ignored$/, "") : `the answer to decision ${d.id} does not count`, 409);
+  }
+  return { message: `decision ${d.id} answered`, answer: id };
+}
+
+/**
+ * Why the user may not accept the step now for its decisions, or undefined (review-decisions.ts, decisionGate):
+ * `seen`, when given, the answers the page showed (decision id → answer event); other current answers (an answer saved
+ * meanwhile in another tab) refuse it too, so an acceptance never takes answers the user did not see.
+ */
+export function userAcceptRefusal(state: Pick<ProjectState, "project">, q: QueueView, st: StepView, seen?: unknown): string | undefined {
+  const held = gate(q, st, "user", state.project);
+  if (held) return held;
+  if (seen === undefined || seen === null) return undefined;
+  if (typeof seen !== "object" || Array.isArray(seen)) return "decisions: the answers you saw, by decision";
+  const round = reviewRound(q, st);
+  const shown = seen as Record<string, unknown>;
+  const active = activeDecisions(st.decisions);
+  const changed = active.filter((d) => currentAnswer(d, round)?.event !== shown[d.id]).map((d) => d.id);
+  const gone = Object.keys(shown).filter((id) => !active.some((d) => d.id === id));
+  return changed.length || gone.length ? `the answers changed since you read them (${[...changed, ...gone].join(", ")}): look at them again` : undefined;
 }
 
 /**

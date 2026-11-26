@@ -125,6 +125,10 @@ export function describe(e: Event): string {
     case "review.fix_asked": return e.text;
     case "review.audited": return `${e.verdict}: ${e.text}`;
     case "review.passed_on": return `${e.reasons.join(", ")}: ${e.text}`;
+    // Review decisions (queue RVD): the decision's question, its withdrawal, the list's none, an answer.
+    case "review.decision": return e.withdrawn ? `${e.decision} withdrawn: ${e.withdrawn}` : `${e.decision}: ${e.text}`;
+    case "review.decisions_none": return e.text;
+    case "review.decided": return `${e.decision}: ${[e.choice, e.text].filter(Boolean).join(" · ")}`;
     // The checks Nexus runs (queue EC): a worker's dispute of a failure, and the orchestrator's decision on it.
     case "check.disputed": return `${e.name}: ${e.evidence}`;
     case "check.decided": return `${e.verdict}: ${e.reason}`;

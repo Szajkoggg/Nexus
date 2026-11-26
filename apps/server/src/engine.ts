@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   runCounted, runHoldsCheckout, runEnded, runGoing,
-  ActionError, INTEGRATION_CONDITION, queueView, sessionView, NEXUS_SESSION, ProjectStore, USER_SESSION, acceptedByNexus, ensureNexusSession, fileList, ensureUserSession, lastDone, stepChecks, liftByContinue, loadProjectState, openPlanFile, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
+  ActionError, userAcceptRefusal, INTEGRATION_CONDITION, queueView, sessionView, NEXUS_SESSION, ProjectStore, USER_SESSION, acceptedByNexus, ensureNexusSession, fileList, ensureUserSession, lastDone, stepChecks, liftByContinue, loadProjectState, openPlanFile, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
   RETRY_LIMIT, START_KEYS, chooseRoute, contextBeyond, effortIssue, formatClock, kindDefaults, overThreshold, routeStep, runStart, type Effort, type Routed, type ProjectFile, type StartValues, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView, type PlanBy,
   addNote, errorText,
@@ -686,7 +686,7 @@ export class Engine implements Member {
    * told by the orchestrator, src/orchestrator.ts). Without a next step the note goes to the orchestrator. Returns
    * where it went.
    */
-  acceptReview(queueId: string, step: string, text?: unknown, to?: unknown): { to?: "next" | "orchestrator"; step?: string } {
+  acceptReview(queueId: string, step: string, text?: unknown, to?: unknown, decisions?: unknown): { to?: "next" | "orchestrator"; step?: string } {
     if (to !== undefined && to !== null && to !== "next" && to !== "orchestrator") throw new ActionError("a note goes to next or orchestrator");
     const state = loadProjectState(this.store);
     const q = this.queue(state, queueId);
@@ -694,6 +694,10 @@ export class Engine implements Member {
     const st = q.steps[index];
     if (!st) throw new ActionError(`no step ${step}`, 404);
     if (st.status !== "review") throw new ActionError("the step is not waiting for review", 409);
+    // Every review decision answered first (queue RVD), before anything is written: no note goes ahead of a refusal.
+    // `decisions`: the answers the page showed; another answer saved meanwhile refuses the acceptance too.
+    const held = userAcceptRefusal(state, q, st, decisions);
+    if (held) throw new ActionError(`step ${queueId}/${step} cannot be accepted yet: ${held}`, 409);
     // A halted run holds no checkout: accepting goes on only where no other queue works now.
     const own = q.run;
     if (own && own.state !== "finished" && !runHoldsCheckout(own)) {
