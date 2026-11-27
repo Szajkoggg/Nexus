@@ -18,6 +18,7 @@ const freePort = () => new Promise<number>((resolve) => {
   s.listen(0, "127.0.0.1", () => { const a = s.address(); s.close(() => resolve(typeof a === "object" && a ? a.port : 0)); });
 });
 const SLOW_S = 3;
+const GIT_LIMIT_MS = 10_000;
 
 test("a slow git in one request does not keep the server from answering another", async () => {
   const base = mkdtempSync(join(tmpdir(), "nexus-slow-git-"));
@@ -40,8 +41,11 @@ test("a slow git in one request does not keep the server from answering another"
   writeFileSync(join(root, "left.txt"), "left by the step\n");
   writeRegistry({ protocol: 1, projects: [{ id: "p", root }] });
   // Every `git status` there now first runs this hook, which sleeps (and then fails, so git looks at the files itself).
+  // The hook's protocol version is pinned: unset, git runs a failing hook twice (version 2, then 1), and the status
+  // took 2 × SLOW_S, 6 to over 10 s under load, into the server's 10 s git limit (queue CI13).
   writeFileSync(join(root, "slow.sh"), `#!/bin/sh\nsleep ${SLOW_S}\nexit 1\n`);
   git(root, ["config", "core.fsmonitor", join(root, "slow.sh").replaceAll("\\", "/")]);
+  git(root, ["config", "core.fsmonitorHookVersion", "2"]);
 
   const port = await freePort();
   const child = spawnServer({ NEXUS_PORT: String(port), NEXUS_LOG: "" });
@@ -59,7 +63,9 @@ test("a slow git in one request does not keep the server from answering another"
     const s = await slow;
     assert.ok(s.ms >= SLOW_S * 1000, `the slow request was slow (${s.ms} ms): its git ran the hook`);
     assert.ok(quickMs < SLOW_S * 1000 - 500, `another request was answered in ${quickMs} ms while git ran ${s.ms} ms`);
-    assert.equal(s.body.step, "Q1");
-    assert.deepEqual(s.body.uncommitted?.map((u) => u.path), ["left.txt"]);
+    // Within the server's git limit (LIMITS.timeout in src/gitinfo.ts): past it the git is ended and its answer lost.
+    assert.ok(s.ms < GIT_LIMIT_MS, `the slow request took ${s.ms} ms, at or past the server's ${GIT_LIMIT_MS} ms git limit: its git was ended`);
+    assert.equal(s.body.step, "Q1", `the slow request took ${s.ms} ms`);
+    assert.deepEqual(s.body.uncommitted?.map((u) => u.path), ["left.txt"], `the slow request took ${s.ms} ms`);
   } finally { child.kill(); }
 });
