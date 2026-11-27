@@ -64,6 +64,7 @@
     "effort"
   ],
   "nudged": false,
+  "pause": "pause",
   "protocol": 1,
   "reason": "paused by the user",
   "revision": 1,
@@ -98,6 +99,7 @@
     "effort"
   ],
   "nudged": false,
+  "pause": "pause",
   "protocol": 1,
   "reason": "paused by the user",
   "revision": 1,
