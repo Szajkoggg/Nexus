@@ -717,11 +717,15 @@ the server's log name it; where Nexus goes on without it and writes the file ane
 delete. A damaged `queue.yaml` is not drafted over: repair it or move it away first. An action on a queue or session
 whose file is damaged is refused naming that file, rather than calling the queue unknown. A damaged `run.yaml`,
 `plan.yaml` or `start.yaml` does not keep the server (or an update) from starting: that queue is left as it is, with a
-warning naming the file, and the others go on. A damaged `deploy-plan.json` means the planned deploy is lost: the log
+warning naming the file, and the others go on. Repair a damaged `run.yaml` while Nexus runs and that queue picks up as
+after any restart: a running queue is paused ("resume to continue"), one an update held goes on by itself. A damaged `deploy-plan.json` means the planned deploy is lost: the log
 says so, and the file is kept as `deploy-plan.json.corrupt`.
 
 Between two steps Nexus ends what the worker left running. If that does not answer in time on a busy machine, Nexus
-asks once more; only a second timeout stops the run, with "worker process cleanup timed out twice".
+asks once more; only a second timeout stops the run, with "worker process cleanup timed out twice". A run you paused
+or stopped is not halted by such a failure: it stays paused, the activity shows the failure, and Resume goes on in a new
+process. After a worker's runtime crashes, its run goes on in a new process. An update (or a project's removal) waits
+for a cleanup in progress, at most about 30 s; meanwhile the update panel shows the project as working.
 
 While an update waits, you can go on talking with the orchestrator and the thinking partners. An answer still being
 written when Nexus restarts is cut off; after the restart the chat says "Nexus restarted while answering; it goes on",
