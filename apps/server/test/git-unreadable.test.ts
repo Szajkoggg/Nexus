@@ -14,9 +14,12 @@ import { decideStoppedWork, readStoppedWork } from "../src/stopwork.ts";
 
 const G = ["-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"];
 const git = (cwd: string, args: string[]) => execFileSync("git", [...G, ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-/** The sleep of the slow git's helper, against the reads' limit: the read gives up long before the helper is done. */
-const SLEEP_S = 3;
-const LIMIT = { timeout: 1000 };
+/**
+ * The sleep of the slow git's helper, far past the reads' limit; the limit itself leaves a git that is not slowed room
+ * to answer on a machine busy with the full suite (an unslowed read took over 1 s there).
+ */
+const SLEEP_S = 20;
+const LIMIT = { timeout: 5000 };
 const script = (dir: string, name: string, body: string) => {
   writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`);
   return join(dir, name).replaceAll("\\", "/");
@@ -63,19 +66,20 @@ test("a step's commits that git does not read in time are unreadable, not none: 
   const left = (await readStoppedWork(x.store, "Q", LIMIT))!;
   assert.ok(Date.now() - t0 < SLEEP_S * 1000, `the read gave up at its limit (${Date.now() - t0} ms)`);
   assert.deepEqual(left.commits, [], "nothing was read");
-  assert.match(left.unreadable?.commits ?? "", /^git did not answer within 1 s$/, "and that is said, not an empty list");
+  assert.match(left.unreadable?.commits ?? "", /^git did not answer within 5 s$/, "and that is said, not an empty list");
   assert.equal(left.unreadable?.uncommitted, undefined, "the status answered");
   const view = (await stepCommits(x.store, x.queue(), "Q1", LIMIT))!;
-  assert.match(view.unreadable ?? "", /did not answer within 1 s/, "the step's commits view says so too");
+  assert.match(view.unreadable ?? "", /did not answer within 5 s/, "the step's commits view says so too");
 
   for (const choice of [undefined, "keep", "discard"]) {
     assert.throws(() => decideStoppedWork(x.store, "Q", choice, "user_continue", left),
-      (e: Error & { status?: number }) => /the commits of step Q1 cannot be read \(git did not answer within 1 s\); nothing was recorded: try again/.test(e.message) && e.status === 409);
+      (e: Error & { status?: number }) => /the commits of step Q1 cannot be read \(git did not answer within 5 s\); nothing was recorded: try again/.test(e.message) && e.status === 409);
   }
   assert.equal(x.queue().changes.length, 0, "nothing recorded");
   assert.equal(x.queue().status, "stopped", "the stop stays");
 
-  // With the usual limit the same git answers: the commit is the step's, and the lift asks Keep or Discard.
+  // Once git checks no signature it answers: the commit is the step's, and the lift asks Keep or Discard.
+  git(x.root, ["config", "--unset", "log.showSignature"]);
   const read = (await readStoppedWork(x.store, "Q"))!;
   assert.deepEqual([read.commits.map((c) => c.subject), read.unreadable], [["Q1 work"], undefined]);
   assert.throws(() => decideStoppedWork(x.store, "Q", undefined, "user_continue", read), /step Q1 left 1 commit of its own: choose Keep or Discard/);
@@ -89,7 +93,7 @@ test("a status that git does not answer in time is unreadable; the step's commit
 
   const left = (await readStoppedWork(x.store, "Q", LIMIT))!;
   assert.deepEqual(left.uncommitted, []);
-  assert.match(left.unreadable?.uncommitted ?? "", /did not answer within 1 s/);
+  assert.match(left.unreadable?.uncommitted ?? "", /did not answer within 5 s/);
   assert.equal(left.unreadable?.commits, undefined);
   assert.deepEqual(left.commits.map((c) => c.subject), ["Q1 work"]);
   assert.throws(() => decideStoppedWork(x.store, "Q", undefined, "user_continue", left), /choose Keep or Discard/);
@@ -98,7 +102,7 @@ test("a status that git does not answer in time is unreadable; the step's commit
 
 test("a round whose start commit is gone has no commits, as before: git answered, and that is no unreadable read", async () => {
   const x = setup({ start: "0123456789abcdef0123456789abcdef01234567" });
-  const left = (await readStoppedWork(x.store, "Q", LIMIT))!;
+  const left = (await readStoppedWork(x.store, "Q"))!;
   assert.deepEqual([left.commits, left.unreadable], [[], undefined]);
   assert.deepEqual(decideStoppedWork(x.store, "Q", undefined, "user_continue", left), { proceed: true });
 });
@@ -110,7 +114,7 @@ test("gitRead: an exit code is git's answer; a time limit is no answer, with why
   git(x.root, ["config", "core.fsmonitor", script(x.tools, "slow-hook.sh", `sleep ${SLEEP_S}\nexit 1`)]);
   git(x.root, ["config", "core.fsmonitorHookVersion", "2"]);
   const slow = await gitRead(x.root, ["status", "--porcelain"], LIMIT);
-  assert.ok(noAnswer(slow) && slow.reason === "git did not answer within 1 s", JSON.stringify(slow));
+  assert.ok(noAnswer(slow) && slow.reason === "git did not answer within 5 s", JSON.stringify(slow));
   const gone = await gitRead(join(x.root, "not-there"), ["status"]);
   assert.deepEqual([!gone.ok && gone.code, noAnswer(gone)], [128, false], "a folder that is not there is a no, not a git that did not answer");
 });
