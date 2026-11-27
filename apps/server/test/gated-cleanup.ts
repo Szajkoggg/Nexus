@@ -6,7 +6,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CleanupTimedOut, type AgentProcess } from "../src/agent.ts";
+import { CleanupTimedOut, JobHostExited, type AgentProcess } from "../src/agent.ts";
 import type { Launch } from "../src/agent-host.ts";
 import { ClaudeSession, type ClaudeOptions } from "../src/claude.ts";
 import { CodexSession, type CodexOptions } from "../src/codex.ts";
@@ -27,8 +27,13 @@ export interface GatedCleanup {
   hold(): void;
   /** Opens the gate: the waiting cleanups, and later ones, run the runtime's own. */
   release(): void;
-  /** The waiting cleanups, and later ones until a release, fail with `message`. */
-  fail(message?: string): void;
+  /**
+   * The waiting cleanups, and later ones until a release, fail with `message`. `withExit`: the fake process exits too,
+   * as when its job host ends ("worker job host exited"): "before" the failure (it is delivered in the exit's own tick,
+   * after every exit listener ran) or "after" it (the failure first; the exit follows at once, the process killed by
+   * force in the next microtask). `once`: only the next cleanup fails; the gate is open after it.
+   */
+  fail(message?: string, o?: { withExit?: "before" | "after"; once?: boolean }): void;
 }
 
 /**
@@ -44,14 +49,20 @@ export interface GatedCleanup {
 export function gatedCleanup(o: { make?: (launch: Launch) => AgentProcess; failBeforeTurn?: string; delayMs?: number; timeoutMs?: number; timeouts?: number } = {}): GatedCleanup {
   const make = o.make ?? ((launch: Launch) => (launch.runtime === "claude" ? new ClaudeSession(launch.options) : new CodexSession(launch.options)));
   const calls: CleanupCall[] = [];
-  let gate: { open: boolean; error?: string } = { open: true };
+  let gate: { open: boolean; error?: string; withExit?: "before" | "after"; once?: boolean } = { open: true };
   let waiters: (() => void)[] = [];
   let timedOut = 0;
-  const failure = (message: string) => (message === new CleanupTimedOut().message ? new CleanupTimedOut() : new Error(message));
+  const failure = (message: string) => (message === new CleanupTimedOut().message ? new CleanupTimedOut() : message === new JobHostExited().message ? new JobHostExited() : new Error(message));
   const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); };
-  const pass = async (): Promise<void> => {
+  const pass = async (proc: AgentProcess): Promise<void> => {
     while (!gate.open && gate.error === undefined) await new Promise<void>((r) => waiters.push(r));
-    if (gate.error !== undefined) throw new Error(gate.error);
+    if (gate.error === undefined) return;
+    const error = failure(gate.error);
+    const { withExit } = gate;
+    if (gate.once) gate = { open: true };
+    if (withExit === "before" && proc.state !== "exited") await new Promise<void>((r) => { proc.once("exit", () => r()); proc.kill(true); });
+    else if (withExit === "after") queueMicrotask(() => proc.kill(true));
+    throw error;
   };
   const spawn = (launch: Launch): AgentProcess => {
     const proc = make(launch);
@@ -64,7 +75,7 @@ export function gatedCleanup(o: { make?: (launch: Launch) => AgentProcess; failB
       calls.push(call);
       try {
         if (!turned && o.failBeforeTurn !== undefined) throw failure(o.failBeforeTurn);
-        await pass();
+        await pass(proc);
         if (o.timeoutMs !== undefined && timedOut < (o.timeouts ?? Infinity)) {
           timedOut++;
           await new Promise((r) => setTimeout(r, o.timeoutMs));
@@ -83,7 +94,7 @@ export function gatedCleanup(o: { make?: (launch: Launch) => AgentProcess; failB
     held: () => waiters.length,
     hold() { gate = { open: false }; },
     release() { gate = { open: true }; wake(); },
-    fail(message = "injected cleanup failure") { gate = { open: false, error: message }; wake(); },
+    fail(message = "injected cleanup failure", f = {}) { gate = { open: false, error: message, ...f }; wake(); },
   };
 }
 

@@ -164,6 +164,14 @@ export class CleanupTimedOut extends Error {
   constructor() { super("worker cleanup timed out"); this.name = "CleanupTimedOut"; }
 }
 
+/**
+ * A worker's cleanup failed because its job host ended (worker-process.ts): the job's close has ended its members, and
+ * the engine takes it as the process's exit, whichever of the two it hears first (D2 with queue LCG, survey LC4 F8).
+ */
+export class JobHostExited extends Error {
+  constructor() { super("worker job host exited"); this.name = "JobHostExited"; }
+}
+
 /** A message can reach the process: it has not exited, nor is it exiting (AgentProcess.exiting; queue CXD). */
 export function reachable(proc: AgentProcess): boolean {
   return proc.state !== "exited" && !proc.exiting;

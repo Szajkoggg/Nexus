@@ -59,8 +59,14 @@ own start. Tests: `apps/server/test/worker-job.test.ts`, with the cache in a fol
 
 At a step boundary, the helper enumerates job members except itself and the runtime, opens each as a process handle,
 verifies its membership on that same handle, terminates it and waits for exit. A reused PID outside the job is
-never terminated. Enumeration repeats until only the two roots remain; a failure halts the queue and ends its
-worker, without opening the next step. A timeout of the server's fifteen seconds is asked once more within the same
+never terminated. Enumeration repeats until only the two roots remain; a failure halts a running queue and ends its
+worker, without opening the next step. A paused run (the user's Pause, Stop now or Stop at once) is not halted by it:
+it stays paused with its own reason, the failure is in the session's activity, the worker is ended, and Resume goes on
+in a new process (the user's decision D2 with queue LCG, survey LC4 finding 2: before, a stopped run halted with
+"worker process cleanup failed", and LCK's retry had added two more ways in). A failure because the job host ended
+("worker job host exited", `JobHostExited`) is the process's exit, whichever of the two the engine hears first: the
+barrier lasts until the exit, which is decided as any other (the run goes on in a new process), and it halts nothing
+(D2, finding 8: before, the failure heard first halted the run after a runtime crash). A timeout of the server's fifteen seconds is asked once more within the same
 barrier, with a fresh limit and no kill: on a busy machine the helper may only be slow, and ending the worker there
 turned a slow cleanup into a halted run (the user's decision with queue LCK, survey LC3 F5). Only a second timeout halts
 ("worker process cleanup timed out twice") and ends the worker. A resume waiting for the barrier waits through the

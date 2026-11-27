@@ -306,7 +306,11 @@ helper allows ten seconds for repeated descendant enumeration (each termination 
 allows fifteen seconds for a cleanup acknowledgement. A first timeout sends no `K`: the engine sends a second `C <id>`
 (a new id) with a fresh fifteen seconds, and an acknowledgement of the first id that comes later resolves nothing. Only
 a second timeout halts the run, with the reason "worker process cleanup timed out twice", and requests termination;
-any other cleanup failure (an `F`, the helper's exit) halts and terminates at once (queue LCK, survey LC3 F5). A kill
+any other cleanup failure (an `F`) halts and terminates at once (queue LCK, survey LC3 F5). A run that is paused (the
+user's Pause, Stop now or Stop at once, or held by an update's drain) is not halted by either: the failure is written
+to the session's activity, the worker is terminated, and the run stays paused with its own reason (queue LCG, D1 and
+D2). The helper's exit fails a pending cleanup with "worker job host exited" (`JobHostExited`), which is taken as the
+worker's exit, never as a halt. A kill
 not completed in fifteen seconds ends the helper through Node's child handle, closing the job. Only handles whose
 membership in this private job was verified may be terminated, with no name/command-line matching. The helper
 reports exit only after runtime and descendants have gone; helper death also triggers Windows kill-on-job-close. After

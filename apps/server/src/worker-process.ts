@@ -7,7 +7,7 @@ import { EventEmitter } from "node:events";
 import { constants, setPriority } from "node:os";
 import { PassThrough, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { CleanupTimedOut } from "./agent.ts";
+import { CleanupTimedOut, JobHostExited } from "./agent.ts";
 
 /**
  * `owned`: a worker's or a check's process, below normal priority when the server asks for it (lowerOwnedProcesses).
@@ -167,7 +167,7 @@ export class WorkerProcess extends EventEmitter implements RuntimeChild {
       this.exited = true;
       agentJobs.delete(this);
       clearTimeout(this.closing); clearTimeout(this.killing);
-      this.fail(new Error("worker job host exited"));
+      this.fail(new JobHostExited());
       this.stdout.end(); this.stderr.end();
       this.emit("exit", this.result ?? code);
       this.emit("close", this.result ?? code);

@@ -49,7 +49,7 @@ function watched() {
   const wrap = (proc: AgentProcess) => {
     seen.spawned++;
     const kill = proc.kill.bind(proc);
-    proc.kill = () => { seen.killedAt ??= Date.now(); kill(); };
+    proc.kill = (force?: boolean) => { seen.killedAt ??= Date.now(); kill(force); };
     proc.on("exit", () => { seen.exitedAt ??= Date.now(); });
     return proc;
   };
@@ -184,3 +184,103 @@ test("an update's drain while a cleanup is pending: the engine stays busy until 
     assert.equal(seen.spawned, 2, "Q2 ran in a new process");
   } finally { g.release(); x.engine.shutdown(); next?.shutdown(); }
 });
+
+// ---------------------------------------------------------------- D2: a cleanup failure on a paused run, the host's end
+
+/** The cleanup failures noted in the session's activity (cleanWorker's notes, not halts), containing `text`. */
+const notes = (x: ReturnType<typeof setup>, text: string) => activityOf(x.store, x.queue().run!.session).filter((e) => e.kind === "error" && e.text.startsWith("The worker process cleanup") && e.text.includes(text));
+
+/** D2's outcome for a run the user paused or stopped: paused with its reason, the process ended, Q2 never opened; Resume then runs Q2 once in a new process. */
+async function pausedThroughFailure(x: ReturnType<typeof setup>, seen: { exitedAt?: number; spawned: number }, reason: RegExp, note: string): Promise<void> {
+  await x.until("the worker's process exited", () => seen.exitedAt !== undefined && !x.engine.alive(), LONGER.run);
+  await new Promise((r) => setTimeout(r, 100)); // nothing may follow the exit: no halt, no next step
+  const run = x.queue().run!;
+  assert.equal(run.state, "paused", "no halt: the run stays paused");
+  assert.match(run.reason!, reason, "with its own reason");
+  assert.equal(notes(x, note).length, 1, `the cleanup's failure is in the activity (${note})`);
+  assert.equal(x.queue().steps[1]!.status, "pending", "Q2 never opens");
+  assert.ok(!x.received().some((m) => m.text.includes("step Q2")));
+  x.engine.resume("Q");
+  await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+  const [q1, q2] = x.queue().steps;
+  assert.equal(q1!.timeline.filter((e) => e.type === "step.started").length, 1, "Q1 not repeated");
+  assert.equal(q2!.timeline.filter((e) => e.type === "step.started").length, 1, "Q2 once");
+  assert.equal(seen.spawned, 2, "Q2 ran in a new process");
+}
+
+test("Stop now on a process in its cleanup barrier, the cleanup timing out twice: the run stays paused (stopped by the user), no halt; the failure is in the activity, the process ended, Q2 never opens; Resume runs Q2 once in a new process", async () => {
+  const { seen, wrap } = watched();
+  const g = gatedCleanup({ make: inProcessRuntime({ wrap }), timeoutMs: 50, timeouts: 2 });
+  g.hold();
+  const x = setup(["done", "done"], { ...FAST, spawn: g.spawn });
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the cleanup at the gate", () => g.held() > 0, LONGER.run);
+    x.engine.stopNow("Q");
+    assert.deepEqual([x.queue().run?.state, x.queue().run?.reason], ["paused", "stopped by the user"]);
+    g.release();
+    await pausedThroughFailure(x, seen, /^stopped by the user$/, "timed out twice");
+    assert.deepEqual(g.calls.slice(0, 2).map((c) => c.outcome), ["failed", "failed"], "the timeout and its one retry");
+  } finally { g.release(); x.engine.shutdown(); }
+});
+
+test("Stop at once on a process in its cleanup barrier, one timeout, the retry failing as the job host ends at the kill: the run stays paused (stopped at once), no halt; the failure is in the activity; Resume runs Q2 once in a new process", async () => {
+  // The kill waits behind the cleanup, as a K behind a C in the job host: the unforced kill is held; the host's end
+  // (the retry's failure, then the exit) carries it out.
+  const ends: ProcessEnds = { kill: "unforced", dropped: [] };
+  const { seen, wrap } = watched();
+  const g = gatedCleanup({ make: inProcessRuntime({ ends, wrap }), timeoutMs: 50, timeouts: 1 });
+  g.hold();
+  const x = setup(["done", "done"], { ...FAST, spawn: g.spawn });
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the cleanup at the gate", () => g.held() > 0, LONGER.run);
+    const stop = x.engine.stopAtOnce("Q");
+    assert.match(x.queue().run!.reason!, /^stopped at once by the user/);
+    g.release();
+    // The first cleanup is in its 50 ms limit now; the retry it leads to meets the host's end.
+    await new Promise((r) => setTimeout(r, 20));
+    g.fail("worker job host exited", { withExit: "after", once: true });
+    await stop;
+    await pausedThroughFailure(x, seen, /^stopped at once by the user/, "worker job host exited");
+    assert.deepEqual(g.calls.slice(0, 2).map((c) => c.outcome), ["failed", "failed"], "the timeout, then the retry's failure");
+    assert.equal(retried(x).length, 1, "the retry was asked");
+  } finally { letEnd(ends); g.release(); x.engine.shutdown(); }
+});
+
+test("a Pause, then the cleanup fails: the run stays paused (paused by the user), no halt; the failure is in the activity, the process ended, Q2 never opens; Resume runs Q2 once in a new process", async () => {
+  const { seen, wrap } = watched();
+  const g = gatedCleanup({ make: inProcessRuntime({ wrap }) });
+  g.hold();
+  const x = setup(["done", "done"], { ...FAST, spawn: g.spawn });
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the cleanup at the gate", () => g.held() > 0, LONGER.run);
+    x.engine.pause("Q");
+    g.fail("a member refused to end", { once: true });
+    await pausedThroughFailure(x, seen, /^paused by the user$/, "a member refused to end");
+  } finally { g.release(); x.engine.shutdown(); }
+});
+
+// Survey LC4 finding 8: after a runtime crash the job host's end fails the held cleanup ("worker job host exited") and
+// the process exits, in either order. Either way it is the process's exit (D2): no halt, the run goes on in a new process.
+for (const withExit of ["before", "after"] as const) {
+  test(`a running run's cleanup fails as its job host ends, the process's exit coming ${withExit} the failure: taken as the exit, no halt; Q2 runs once in a new process`, async () => {
+    const { seen, wrap } = watched();
+    const g = gatedCleanup({ make: inProcessRuntime({ wrap }) });
+    g.hold();
+    const x = setup(["done", "done"], { ...FAST, spawn: g.spawn });
+    try {
+      x.engine.start("Q", { runtime: "claude" });
+      await x.until("the cleanup at the gate", () => g.held() > 0, LONGER.run);
+      g.fail("worker job host exited", { withExit, once: true });
+      await x.until("the run finishes or halts", () => x.queue().run?.state === "finished" || x.queue().run?.state === "halted", LONGER.run);
+      assert.equal(x.queue().run?.state, "finished", `no halt (${x.queue().run?.reason ?? ""})`);
+      const [q1, q2] = x.queue().steps;
+      assert.equal(q1!.timeline.filter((e) => e.type === "step.started").length, 1, "Q1 not repeated");
+      assert.equal(q2!.timeline.filter((e) => e.type === "step.started").length, 1, "Q2 once");
+      assert.equal(seen.spawned, 2, "Q2 ran in a new process");
+      assert.equal(notes(x, "takes it as the process's exit").length, 1, "the host's end is in the activity");
+    } finally { g.release(); x.engine.shutdown(); }
+  });
+}

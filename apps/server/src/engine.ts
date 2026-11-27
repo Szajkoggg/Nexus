@@ -14,7 +14,7 @@ import {
   type SessionView, type StepView, type PlanBy,
   addNote, errorText,
 } from "@nexus/protocol";
-import { CleanupTimedOut, reachable, type TurnFailure } from "./agent.ts";
+import { CleanupTimedOut, JobHostExited, reachable, type TurnFailure } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import { nexusDenyRules } from "./claude.ts";
 import {
@@ -477,7 +477,7 @@ export class Engine implements Member {
         if (block) throw new ActionError(refusalText(queueId, "go on", block), 409);
       }
       // Automatic resumes (a cancelled drain, an approval) wait too. A later pause or other run change cancels
-      // this request; cleanup failure already halts the run through cleanWorker.
+      // this request; a cleanup failure leaves the run paused (cleanWorker) and the request with it.
       const before = JSON.stringify(run);
       void cleanup.then(() => {
         if (this.stopped || JSON.stringify(this.store.readRun(queueId)) !== before) return;
@@ -1053,9 +1053,12 @@ export class Engine implements Member {
   /**
    * Start one cleanup barrier per idle turn; no inbox or next step may enter while it is pending. A first timeout (the
    * job host may only be slow on a busy machine) asks once more within the same barrier, with a fresh limit and no
-   * kill; a second one, or any other failure, halts the run and ends the process (the user's decision with queue LCK,
-   * survey LC3 F5). A run an update's drain holds is not halted by it: it stays held, the failure goes to the activity,
-   * the process is ended, and the next server goes on in a new one (D1 with queue LCG, survey LC4 finding 1).
+   * kill; a second one, or any other failure, halts a running run and ends the process (the user's decision with queue
+   * LCK, survey LC3 F5). A paused run (the user's Pause, Stop now or Stop at once, or an update's drain) is not halted
+   * by it: it stays paused with its own reason, the failure goes to the activity, the process is ended, and a Resume (or,
+   * for a run the drain holds, the next server) goes on in a new one (D1 and D2 with queue LCG, survey LC4 findings 1
+   * and 2). A failure because the job host ended is the process's exit, whichever comes first (D2, finding 8): the
+   * barrier lasts until the exit, which the exit handler decides as any other, and it halts nothing.
    */
   private cleanWorker(queueId: string, live: Live): boolean {
     const proc = live.proc;
@@ -1068,6 +1071,10 @@ export class Engine implements Member {
       retried = true;
       this.store.appendActivity(live.session, { at: now(), kind: "error", text: "The worker's process cleanup timed out; Nexus asks for it once more", queue: queueId });
       return proc.cleanup!();
+    }).catch((error: unknown) => {
+      // The host's end and the process's exit come in either order: no step may open in the process meanwhile.
+      if (error instanceof JobHostExited && proc.state !== "exited") return new Promise<never>((_, reject) => proc.once("exit", () => reject(error)));
+      throw error;
     });
     this.cleaning.set(proc, { barrier, session: live.session });
     void barrier.then(() => {
@@ -1078,11 +1085,15 @@ export class Engine implements Member {
       this.changed();
     }, (error: unknown) => {
       this.cleaning.delete(proc);
-      if (!current()) return;
+      if (this.stopped) return;
       const reason = retried && error instanceof CleanupTimedOut ? "worker process cleanup timed out twice" : `worker process cleanup failed: ${String(error)}`;
-      if (this.draining && this.store.readRun(queueId)?.resume_after_restart) {
-        this.store.appendActivity(live.session, { at: now(), kind: "error", text: `The ${reason}; the run stays held for the Nexus update: Nexus ends the worker's process, and the next server goes on in a new one`, queue: queueId });
-      } else this.halt(queueId, reason);
+      const note = (text: string) => this.store.appendActivity(live.session, { at: now(), kind: "error", text: `The ${reason}; ${text}`, queue: queueId });
+      if (error instanceof JobHostExited) { note("Nexus takes it as the process's exit"); this.changed(); return; }
+      if (!current()) return;
+      const run = this.store.readRun(queueId);
+      if (this.draining && run?.resume_after_restart) note("the run stays held for the Nexus update: Nexus ends the worker's process, and the next server goes on in a new one");
+      else if (run?.state === "paused" || run?.state === "pausing") note("the run stays paused: Nexus ends the worker's process, and Resume goes on in a new one");
+      else this.halt(queueId, reason);
       this.ending.add(live.session);
       proc.kill();
       this.changed();

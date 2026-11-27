@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { loadProjectState, sendMessage } from "@nexus/protocol";
 import { LONGER, holds, until } from "./wait.ts";
-import { FAILED, RUNTIMES, alive, atGate, isLocked, locked, sameHandle, windows, withWorkers } from "./worker-gate-fixture.ts";
+import { FAILED, RUNTIMES, alive, atGate, isLocked, locked, sameHandle, windows, withWorkers, type A } from "./worker-gate-fixture.ts";
 
 // The fake runtimes as processes of their own (scripts/real-process-tests.ts).
 process.env.NEXUS_CLAUDE = fileURLToPath(new URL("./fake-claude.ts", import.meta.url));
@@ -59,6 +59,18 @@ for (const runtime of RUNTIMES) {
   });
 }
 
+/**
+ * D2 with queue LCG (survey LC4 finding 2): a cleanup failure on a run the user stopped halts nothing; the run stays
+ * paused with its own reason and the failure is in the session's activity, once.
+ */
+function pausedWithFailureNoted(a: A, reason: RegExp): void {
+  const run = a.queue().run!;
+  assert.equal(run.state, "paused", "a cleanup failure does not halt a stopped run");
+  assert.match(run.reason!, reason);
+  const noted = a.store.readActivity(a.session()).entries.filter((e) => e.kind === "error" && FAILED.test(e.text) && e.text.includes("the run stays paused"));
+  assert.equal(noted.length, 1, "the failure is in the activity");
+}
+
 // H1: the stops, the pipe's end and the host's kill at the held wait, each followed by the wait's success or failure.
 for (const [runtime, outcome] of [["claude", "success"], ["codex", "failure"]] as const) {
   test(`${runtime}: Stop now at the held wait, then its ${outcome}: the run pauses at once, nothing is sent, Q2 never starts`, windows, async () => {
@@ -76,9 +88,9 @@ for (const [runtime, outcome] of [["claude", "success"], ["codex", "failure"]] a
         await holds("the run stays paused, nothing starts", () => a.queue().run?.state === "paused" && a.openings("Q2") === 0, 500);
         assert.equal(a.runtimeState() === "exited", false, "the idle process is kept for Resume");
       } else {
-        await a.until("the failure halts the run", () => a.queue().run?.state === "halted", LONGER.step);
-        assert.match(a.queue().run!.reason!, FAILED, "today's rule: a cleanup failure halts, also a paused run");
         await until("the worker's job ends", () => a.runtimeState() === "exited" && !alive(a.helper), LONGER.processes);
+        assert.equal(a.cleanups.calls[0]!.outcome, "failed");
+        pausedWithFailureNoted(a, /^stopped by the user$/);
       }
       assert.equal(a.received().length, sent, "no message to the idle worker (it is not working: no stop text)");
       assert.equal(isLocked(a.dir), false);
@@ -110,8 +122,7 @@ for (const [runtime, outcome] of [["codex", "success"], ["claude", "failure"]] a
         assert.equal(run.state, "paused", "the pause holds");
       } else {
         assert.equal(a.cleanups.calls[0]!.outcome, "failed");
-        assert.equal(run.state, "halted", "today's rule: a cleanup failure halts, also a paused run");
-        assert.match(run.reason!, FAILED);
+        pausedWithFailureNoted(a, /^stopped at once by the user/);
       }
       assert.equal(isLocked(a.dir), false);
       await holds("Q2 never starts", () => a.openings("Q2") === 0 && a.queue().steps[1]!.status === "pending", 300);
@@ -193,17 +204,17 @@ for (const runtime of RUNTIMES) {
     });
   });
 
-  test(`${runtime}: a resume waiting at the held wait, then the wait fails: the run halts, the waiting resume does nothing; a later Resume runs Q2 once`, windows, async () => {
+  test(`${runtime}: a resume waiting at the held wait, then the wait fails: the run stays paused (no halt, D2), the waiting resume does nothing; a later Resume runs Q2 once`, windows, async () => {
     await withWorkers({ runtime, behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
       a.finishTurn();
       await atGate(a);
       a.engine.stopNow("Q");
       a.engine.resume("Q");
       a.gate.open();
-      await a.until("the run halts", () => a.queue().run?.state === "halted", LONGER.step);
-      assert.match(a.queue().run!.reason!, FAILED);
       await until("the worker's job ends", () => a.runtimeState() === "exited" && !alive(a.helper), LONGER.processes);
-      await holds("the waiting resume does not run Q2", () => a.queue().run?.state === "halted" && a.openings("Q2") === 0, 500);
+      assert.equal(a.cleanups.calls[0]!.outcome, "failed");
+      pausedWithFailureNoted(a, /^stopped by the user$/);
+      await holds("the waiting resume does not run Q2", () => a.queue().run?.state === "paused" && a.openings("Q2") === 0, 500);
       a.engine.resume("Q");
       await a.until("the queue finishes", () => a.queue().run?.state === "finished", LONGER.run);
       assert.equal(a.openings("Q2"), 1);

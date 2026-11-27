@@ -150,7 +150,12 @@ git dozens of times. In the full suite every core is busy, so each file takes ab
   machine's slow job host does. `delayMs` makes each cleanup take time before the process's own, `timeoutMs` fails
   each after that long with the job host's `CleanupTimedOut`, or only the first `timeouts` of them, to reach the
   engine's one retry (queue LCK, survey LC3 F5/F17: the in-process child has no cleanup of its own, so without them the
-  barrier passes in a microtask; cleanup-barrier.test.ts). An ordinary engine test holds the gate to show what waits
+  barrier passes in a microtask; cleanup-barrier.test.ts). `fail(message, { withExit, once })` makes the cleanups fail
+  with a chosen error, and with `withExit` the fake process exits too, as when its job host ends: `"before"` the failure
+  (delivered in the exit's own tick, after every exit listener ran) or `"after"` it (the failure first, the process
+  killed by force in the next microtask); `once` opens the gate after one failure, so the next process cleans as usual
+  (queue LCG, survey LC4 recommended addition 3: the order of the host's end and the process's exit, findings 2 and 8).
+  An ordinary engine test holds the gate to show what waits
   for the barrier: review.test.ts's send-back is delivered only once the step's cleanup ended. The chat agents
   (orchestrator, thinking partners) run no cleanup, so a stop of theirs has no barrier to wait for.
 - **A process that does not end when told** (queue LCK): `inProcessRuntime({ ends })` with a `ProcessEnds` makes the
