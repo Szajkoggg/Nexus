@@ -10,15 +10,23 @@ import { Fold } from "./review.tsx";
 import { usePage } from "../../page.ts";
 import { nav } from "../../nav.ts";
 
+/**
+ * A git read of the queue's (`path` under /queues/:queue), asked again when the queue changes, or at once by `retry`:
+ * a read the server could not answer (git too slow) is not answered by waiting for a change (queue CI13).
+ */
+function useGitRead<T>(project: string, queue: string, path: string) {
+  const [tries, setTries] = useState(0);
+  const read = useQuery<T | null>(projectUrl(project, `/queues/${enc(queue)}${path}`), `${usePage().queueVersion(queue) ?? ""}#${tries}`);
+  return { ...read, retry: () => setTries((n) => n + 1) };
+}
+
 /** The commits of each round of the step (server: src/gitinfo.ts); nothing outside a git repository. */
 export function StepCommits({ project, queue, step, toggle }: {
   project: string; queue: string; step: string;
   /** The review's one line: "Commits · 3", which opens and closes the list. */
   toggle?: { open: boolean; onToggle: () => void };
 }) {
-  // Retry asks again at once: a read the server could not answer (git too slow) is not answered by waiting for a change.
-  const [tries, setTries] = useState(0);
-  const { data, error } = useQuery<StepCommitsView | null>(projectUrl(project, `/queues/${enc(queue)}/steps/${enc(step)}/commits`), `${usePage().queueVersion(queue) ?? ""}#${tries}`);
+  const { data, error, retry } = useGitRead<StepCommitsView>(project, queue, `/steps/${enc(step)}/commits`);
   if (!data && error) {
     return toggle
       ? <span className="text-danger" title={t("common.readFailed", { reason: error })}>{t("details.commits")} ✗</span>
@@ -35,7 +43,7 @@ export function StepCommits({ project, queue, step, toggle }: {
   return (
     <Section title={t("details.commits")} aside={foreign ? <span className="text-xs text-warn/80">◆ {t("details.commits.foreign")}</span> : undefined}>
       <div className="space-y-3">
-        {data.unreadable && <Unreadable text={t("details.commits.unreadable", { reason: data.unreadable })} onRetry={() => setTries((n) => n + 1)} />}
+        {data.unreadable && <Unreadable text={t("details.commits.unreadable", { reason: data.unreadable })} onRetry={retry} />}
         {data.rounds.map((r, i) => (
           <div key={i}>
             {several && <div className="mb-1 text-xs text-fg-3">{t(r.open ? "details.commits.roundAtWork" : "details.commits.round", { round: i + 1 })}</div>}
@@ -213,8 +221,7 @@ export function WorktreeActions({ project, root, queue }: { project: string; roo
 
 /** The queue's branch: ahead and behind of its base and of its remote-tracking ref (as last fetched: never fetched here). */
 export function BranchLine({ project, queue }: { project: string; queue: string }) {
-  const [tries, setTries] = useState(0);
-  const { data: b, error } = useQuery<BranchView | null>(projectUrl(project, `/queues/${enc(queue)}/git`), `${usePage().queueVersion(queue) ?? ""}#${tries}`);
+  const { data: b, error, retry } = useGitRead<BranchView>(project, queue, "/git");
   if (!b && error) return <div className="mt-3 rounded-lg bg-surface-2 p-3"><span className="text-sm text-fg-3">{t("details.branch")} </span><ReadError error={error} className="inline" /></div>;
   if (!b) return null;
   const counts = (x: { ahead: number; behind: number }) => (
@@ -223,7 +230,7 @@ export function BranchLine({ project, queue }: { project: string; queue: string 
   return (
     <div className="mt-3 space-y-0.5 rounded-lg bg-surface-2 p-3 text-sm text-fg">
       {b.branch && <p><span className="text-fg-3">{t("details.branch")} </span><span className="font-mono">{b.branch}</span></p>}
-      {b.unreadable && <Unreadable className="text-xs" text={t("details.branch.unreadable", { reason: b.unreadable })} onRetry={() => setTries((n) => n + 1)} />}
+      {b.unreadable && <Unreadable className="text-xs" text={t("details.branch.unreadable", { reason: b.unreadable })} onRetry={retry} />}
       {b.base && <p className="text-xs">{counts(b.base)} <span className="text-fg-3">{t("details.branch.ofBase")}</span> <span className="font-mono">{b.base.ref}</span></p>}
       {b.upstream
         ? <p className="text-xs">{counts(b.upstream)} <span className="text-fg-3">{t("details.branch.of")}</span> <span className="font-mono">{b.upstream.ref}</span> <span className="text-fg-3">{b.upstream.at ? rich("details.branch.fetched", { time: <TimeAgo key="time" at={b.upstream.at} /> }) : t("details.branch.fetchedUnknown")}</span></p>
