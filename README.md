@@ -226,6 +226,10 @@ not change the primary setting.
 interrupts the turn at once: the chat says "Stopped.", nothing more of that turn appears, and the agent waits. What
 you sent during the turn goes in with your next message.
 
+**A failed turn.** When a turn of the orchestrator or a thinking partner fails, its chat shows one error line at the
+turn's end, saying why. A turn that went fine shows none, whatever its texts say, and a stopped turn shows only
+"Stopped.".
+
 **Pictures.** Paste a screenshot (Ctrl+V), drop a picture on the chat, or use the paperclip beside the box, in the
 orchestrator's chat, in a conversation and on the phone. PNG, JPEG, WebP or GIF up to 10 MB; anything else (an
 iPhone HEIC photo, say) shows "only PNG, JPEG, WebP or GIF up to 10 MB". The picture shows as a thumbnail above the
