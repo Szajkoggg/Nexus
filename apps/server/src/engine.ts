@@ -245,9 +245,9 @@ export class Engine implements Member {
   /** A boundary is not crossed until the worker's descendants have gone. Reset after every turn. */
   private readonly cleaned = new WeakSet<Live["proc"]>();
   /** The cleanup barriers pending, by process, with the session each is for (cleaningSessions; the drain waits for them). */
+  private readonly cleaning = new Map<Live["proc"], { barrier: Promise<void>; session: string }>();
   /** Queues left out of the recovery for an unreadable run.yaml, recovered once it reads again (recoverRepaired). */
   private readonly unrecovered = new Set<string>();
-  private readonly cleaning = new Map<Live["proc"], { barrier: Promise<void>; session: string }>();
   /** Sessions whose process Nexus ends to start it again with another model or effort (Claude Code). */
   private readonly restarting = new Set<string>();
   /** Sessions whose process ended after reporting their step, including an already accepted review. */
@@ -2097,7 +2097,8 @@ export class Engine implements Member {
   private recoverAfterRestart(): void {
     // A queue whose run.yaml cannot be read is left out, as it is (queue LCK, F9; docs/design/state.md, "Missing and
     // unreadable files"): the project's state warns with the file's name, the log says it is not recovered, the file is
-    // not written over, and the other queues are recovered.
+    // not written over, and the other queues are recovered; the file's repair while this server runs recovers it then
+    // (unrecovered, recoverRepaired).
     const unreadable = this.unrecovered;
     const runOf = (q: string): RunFile | undefined => {
       try { return this.store.readRun(q); } catch (e) {
