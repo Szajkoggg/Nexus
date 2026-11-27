@@ -78,7 +78,11 @@ Before queue CI8 the engine asked the new process at once, while its helper was 
 `worker-job.cs`, half a second idle, 3 to 7 s on a busy machine and more), so the fifteen-second acknowledgement limit
 counted the helper's start and halted the run. New inbox delivery waits for the cleanup acknowledgement. Runtime
 resumes, including a cancelled deploy's automatic resume, wait for that acknowledgement too; a later run change
-cancels the deferred request. A runtime exit after a reported step is not retried even if the review was already
+cancels the deferred request. A cleanup that fails does not drop it (queue LCH): a paused run stays paused and its
+process is ended, and a failure because the job host ended is the process's exit, so the request waits for that exit
+and its handler and then goes on once, in a new process, if the run has not changed meanwhile (a second Stop now, a
+halt, a revision). Before LCH the request was dropped and the user had to press Resume again. It lives in the server's
+memory only: a restart in between loses it, and the run stays paused until the next Resume. A runtime exit after a reported step is not retried even if the review was already
 accepted while its exit notice was in flight. The next step starts a fresh runtime in the same session.
 Runtime exit cleans descendants before the adapter emits exit. Closing the runtime's input has a five-second grace period;
 an unresponsive control reader is ended after a further fifteen seconds, closing its job. Windows worker recovery

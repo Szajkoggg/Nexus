@@ -479,12 +479,18 @@ export class Engine implements Member {
         if (block) throw new ActionError(refusalText(queueId, "go on", block), 409);
       }
       // Automatic resumes (a cancelled drain, an approval) wait too. A later pause or other run change cancels
-      // this request; a cleanup failure leaves the run paused (cleanWorker) and the request with it.
+      // this request. A cleanup failure leaves a paused run paused and ends the process (cleanWorker), or is the
+      // process's exit (the job host's end): the request then waits for that exit and its handler, and goes on in a
+      // new process (queue LCH). It lives in memory only: after a restart the run is paused, and Resume is asked again.
       const before = JSON.stringify(run);
-      void cleanup.then(() => {
+      const proc = live.proc;
+      const goOn = () => {
         if (this.stopped || JSON.stringify(this.store.readRun(queueId)) !== before) return;
         try { this.resume(queueId, why, explicit); } catch (error) { logError(`queue ${queueId}: resume`, error); this.halt(queueId, String(error)); }
-      }, () => {});
+      };
+      // After the exit's own handlers (the engine's exit handler clears the session's ending mark).
+      const afterExit = () => setImmediate(goOn);
+      void cleanup.then(goOn, () => { if (proc.state === "exited") afterExit(); else proc.once("exit", afterExit); });
       return;
     }
     if (run.state === "finished") throw new ActionError("the run is finished", 409);

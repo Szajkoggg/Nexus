@@ -204,21 +204,23 @@ for (const runtime of RUNTIMES) {
     });
   });
 
-  test(`${runtime}: a resume waiting at the held wait, then the wait fails: the run stays paused (no halt, D2), the waiting resume does nothing; a later Resume runs Q2 once`, windows, async () => {
+  test(`${runtime}: a resume waiting at the held wait, then the wait fails: no halt (D2), the failure noted once; the waiting resume goes on once the worker's job has ended, Q2 once in a new process`, windows, async () => {
     await withWorkers({ runtime, behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
       a.finishTurn();
       await atGate(a);
       a.engine.stopNow("Q");
       a.engine.resume("Q");
+      const hosts = a.gate.hosts.length;
       a.gate.open();
-      await until("the worker's job ends", () => a.runtimeState() === "exited" && !alive(a.helper), LONGER.processes);
+      await a.until("the queue finishes or halts", () => a.queue().run?.state === "finished" || a.queue().run?.state === "halted", LONGER.run);
+      assert.equal(a.queue().run?.state, "finished", `no halt (${a.queue().run?.reason ?? ""})`);
       assert.equal(a.cleanups.calls[0]!.outcome, "failed");
-      pausedWithFailureNoted(a, /^stopped by the user$/);
-      await holds("the waiting resume does not run Q2", () => a.queue().run?.state === "paused" && a.openings("Q2") === 0, 500);
-      a.engine.resume("Q");
-      await a.until("the queue finishes", () => a.queue().run?.state === "finished", LONGER.run);
-      assert.equal(a.openings("Q2"), 1);
+      const noted = a.store.readActivity(a.session()).entries.filter((e) => e.kind === "error" && FAILED.test(e.text) && e.text.includes("the run stays paused"));
+      assert.equal(noted.length, 1, "the failure is in the activity once");
+      assert.equal(a.openings("Q2"), 1, "the waiting resume ran Q2 once");
       assert.equal(a.openings("Q1"), 1);
+      assert.ok(a.gate.hosts.length > hosts, "Q2 ran in a new process");
+      assert.ok(!alive(a.helper), "the failed worker's job ended");
       a.contentKept();
       locked(b.dir);
     });

@@ -12,7 +12,7 @@ import type { Launch } from "../src/agent-host.ts";
 import { FAST, activityOf, restart, setup } from "./engine-setup.ts";
 import { gatedCleanup } from "./gated-cleanup.ts";
 import { inProcessRuntime, letEnd, type ProcessEnds } from "./in-process-runtime.ts";
-import { LONGER } from "./wait.ts";
+import { LONGER, holds } from "./wait.ts";
 
 test("a cleanup that takes time holds the next step: it opens only after the cleanup ended, and no message of it reaches the runtime before", async () => {
   const cleanedAt: number[] = [];
@@ -263,6 +263,70 @@ test("a Pause, then the cleanup fails: the run stays paused (paused by the user)
     await pausedThroughFailure(x, seen, /^paused by the user$/, "a member refused to end");
   } finally { g.release(); x.engine.shutdown(); }
 });
+
+// ---------------------------------------------------------------- a Resume waiting for a barrier that fails (queue LCH)
+
+test("Stop now, a Resume during the cleanup, then the cleanup fails: the waiting Resume goes on once the old process has exited, in a new one, Q2 once; the failure is in the activity once", async () => {
+  const { seen, wrap } = watched();
+  const g = gatedCleanup({ make: inProcessRuntime({ wrap }) });
+  g.hold();
+  const x = setup(["done", "done"], { ...FAST, spawn: g.spawn });
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the cleanup at the gate", () => g.held() > 0, LONGER.run);
+    x.engine.stopNow("Q");
+    x.engine.resume("Q");
+    assert.equal(x.queue().run?.state, "paused", "the resume waits for the cleanup");
+    g.fail("a member refused to end", { once: true });
+    await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+    q2OnceInNewProcess(x, seen);
+    assert.ok(seen.exitedAt !== undefined, "the old process exited");
+    assert.equal(notes(x, "a member refused to end").length, 1, "the cleanup's failure is in the activity once");
+    assert.deepEqual(g.calls.map((c) => c.outcome), ["failed", "done"], "the new process's cleanup after Q2 ran as usual");
+  } finally { g.release(); x.engine.shutdown(); }
+});
+
+test("Stop now, a Resume during the cleanup, a second Stop now, then the cleanup fails: the run change cancelled the waiting Resume; no halt, Q2 never opens", async () => {
+  const { seen, wrap } = watched();
+  const g = gatedCleanup({ make: inProcessRuntime({ wrap }) });
+  g.hold();
+  const x = setup(["done", "done"], { ...FAST, spawn: g.spawn });
+  try {
+    x.engine.start("Q", { runtime: "claude" });
+    await x.until("the cleanup at the gate", () => g.held() > 0, LONGER.run);
+    x.engine.stopNow("Q");
+    x.engine.resume("Q");
+    const asked = x.store.readRun("Q")!;
+    await new Promise((r) => setTimeout(r, 5)); // the second stop's run gets a later stamp
+    x.engine.stopNow("Q");
+    assert.notDeepEqual(x.store.readRun("Q"), asked, "the second Stop now wrote the run");
+    g.fail("a member refused to end", { once: true });
+    await x.until("the worker's process exited", () => seen.exitedAt !== undefined && !x.engine.alive(), LONGER.run);
+    await holds("the cancelled Resume does nothing", () => x.queue().run?.state === "paused" && x.queue().steps[1]!.status === "pending" && seen.spawned === 1, 300);
+    assert.match(x.queue().run!.reason!, /^stopped by the user$/, "no halt");
+    assert.equal(notes(x, "a member refused to end").length, 1);
+  } finally { g.release(); x.engine.shutdown(); }
+});
+
+for (const withExit of ["before", "after"] as const) {
+  test(`Stop now, a Resume during the cleanup, then the job host ends with the process's exit ${withExit} the failure: the waiting Resume goes on after the exit, once; Q2 once in a new process`, async () => {
+    const { seen, wrap } = watched();
+    const g = gatedCleanup({ make: inProcessRuntime({ wrap }) });
+    g.hold();
+    const x = setup(["done", "done"], { ...FAST, spawn: g.spawn });
+    try {
+      x.engine.start("Q", { runtime: "claude" });
+      await x.until("the cleanup at the gate", () => g.held() > 0, LONGER.run);
+      x.engine.stopNow("Q");
+      x.engine.resume("Q");
+      g.fail("worker job host exited", { withExit, once: true });
+      await x.until("the run finishes or halts", () => x.queue().run?.state === "finished" || x.queue().run?.state === "halted", LONGER.run);
+      assert.equal(x.queue().run?.state, "finished", `no halt (${x.queue().run?.reason ?? ""})`);
+      q2OnceInNewProcess(x, seen);
+      assert.equal(notes(x, "takes it as the process's exit").length, 1, "the host's end is in the activity");
+    } finally { g.release(); x.engine.shutdown(); }
+  });
+}
 
 // Survey LC4 finding 8: after a runtime crash the job host's end fails the held cleanup ("worker job host exited") and
 // the process exits, in either order. Either way it is the process's exit (D2): no halt, the run goes on in a new process.
