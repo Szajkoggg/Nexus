@@ -1111,7 +1111,9 @@ the queue's provisional acceptances. Turn it on where the project's checks are s
 "Worktree setup" (project only) is a command run once in each new worktree before its first step, for example `npm ci`;
 if it fails, the run stops with the reason. Pausing or stopping the queue while it runs does not count as a failure: it
 runs again when you resume. Ending it (its time limit, an update that cannot wait, a server shutdown) ends everything the command started,
-so nothing of it keeps the worktree's folder in use.
+so nothing of it keeps the worktree's folder in use. A command that finishes ends the processes it left behind too (on
+Windows), so a setup cannot start a daemon (a build server, a watcher) and leave it running: start such a thing
+elsewhere.
 
 **Checks for every step** (Settings → Defaults, project only, empty by default): commands Nexus runs after every step of
 every queue of the project, before the queue's own checks, one per line, for example `npm run lint`; a check the queue names

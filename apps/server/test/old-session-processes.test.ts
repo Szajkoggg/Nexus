@@ -2,11 +2,11 @@
 // session still has, and so does the queue's closing (done or cancelled), before its worktree is cleaned up. A Resume
 // goes on in the same session and its process. Against the fake runtimes, in-process. Survey LC3, F1 (queue LCK): a
 // start that continues the earlier session keeps its process, and a process at work in a turn is closed (it ends after
-// its turn), not killed.
+// its turn), not killed. Survey LC4 finding 4 (D4, queue LCG): every caller arms the forced kill at endDeadlineMs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadProjectState, orchestratorStatusChange } from "@nexus/protocol";
-import { activityOf, setup } from "./engine-setup.ts";
+import { FAST, activityOf, setup } from "./engine-setup.ts";
 import { LONGER, holdWork } from "./wait.ts";
 
 for (const runtime of ["claude", "codex"] as const) {
@@ -106,6 +106,60 @@ for (const runtime of ["claude", "codex"] as const) {
       assert.equal(run.session, fresh);
       assert.equal(run.retries, undefined, "no retry recorded");
       assert.equal(run.failure, undefined, "no failure recorded");
+    } finally { hold.done(); x.engine.shutdown(); }
+  });
+}
+
+// Survey LC4 finding 4, the user's decision D4 (queue LCG): every caller of endProcesses arms the forced kill, not only
+// a cleanup that waits for the process. A turn still at work endDeadlineMs after its process was asked to end is stuck:
+// it is killed by force, with the line in the old session's activity, and nothing of it reaches the new run.
+const DEADLINE = { ...FAST, endDeadlineMs: 200 };
+const FORCED = /did not end within 0 s of being asked: Nexus kills it by force/;
+
+for (const runtime of ["claude", "codex"] as const) {
+  test(`${runtime}: a fresh start beside a stopped run's process whose turn outlasts the deadline: killed by force at the deadline, with the activity line; the new run gets no failure or retry (D4)`, async () => {
+    const hold = holdWork();
+    const x = setup(["slow", "done"], DEADLINE);
+    try {
+      x.engine.start("Q", { runtime });
+      await x.until("Q1 at work", () => x.queue().steps[0]!.status === "running" && x.store.readRuntime(x.queue().run!.session)?.state === "working", LONGER.step);
+      const old = x.queue().run!.session;
+      x.engine.stopNow("Q");
+      const asked = Date.now(); // the start asks the old process to end, and arms the deadline
+      x.engine.start("Q", { runtime });
+      const fresh = x.queue().run!.session;
+      assert.notEqual(fresh, old);
+      await x.until("the old process killed at the deadline", () => x.store.readRuntime(old)?.state === "exited", LONGER.step);
+      assert.ok(Date.now() - asked >= 150, `not before the deadline (${Date.now() - asked} ms)`);
+      assert.equal(activityOf(x.store, old).filter((a) => a.kind === "error" && FORCED.test(a.text)).length, 1, "the forced kill is in the old session's activity");
+      hold.release();
+      await x.until("the fresh run to end", () => x.queue().run?.state === "finished", LONGER.run);
+      const run = x.queue().run!;
+      assert.equal(run.session, fresh);
+      assert.equal(run.retries, undefined, "no retry recorded");
+      assert.equal(run.failure, undefined, "no failure recorded");
+      assert.ok(!activityOf(x.store, fresh).some((a) => FORCED.test(a.text)), "nothing of it in the new session");
+    } finally { hold.done(); x.engine.shutdown(); }
+  });
+
+  test(`${runtime}: a queue cancelled while its stopped run's process is in a turn that outlasts the deadline: closed, then killed by force at the deadline, with the activity line; the run is not failed (D4)`, async () => {
+    const hold = holdWork();
+    const x = setup(["slow"], DEADLINE);
+    try {
+      x.engine.start("Q", { runtime });
+      await x.until("Q1 at work", () => x.queue().steps[0]!.status === "running" && x.store.readRuntime(x.queue().run!.session)?.state === "working", LONGER.step);
+      const session = x.queue().run!.session;
+      x.engine.stopNow("Q");
+      orchestratorStatusChange(x.store, { queue: "Q", to: "cancelled", reason: "test" });
+      x.engine.onChange(loadProjectState(x.store));
+      assert.equal(x.store.readRuntime(session)?.state, "working", "closed, not killed: its turn works on");
+      await x.until("killed at the deadline", () => !x.engine.alive() && x.store.readRuntime(session)?.state === "exited", LONGER.step);
+      assert.equal(activityOf(x.store, session).filter((a) => a.kind === "error" && FORCED.test(a.text)).length, 1, "the forced kill is in the session's activity");
+      const run = x.queue().run!;
+      assert.notEqual(run.state, "halted");
+      assert.equal(run.retries, undefined);
+      assert.equal(run.failure, undefined);
+      assert.equal(x.engine.endQueueProcesses("Q"), true, "nothing left for a cleanup to wait for");
     } finally { hold.done(); x.engine.shutdown(); }
   });
 }

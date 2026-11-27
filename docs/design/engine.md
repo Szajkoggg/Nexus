@@ -199,7 +199,12 @@ its process the same way, and a worktree cleanup then met a folder a live proces
 A process in the middle of a turn ends after that turn (its input closes: a done queue's last turn may still write its
 context summary), any other at once; one Nexus is ending already is left to end as it does. A session a going run works
 in is never ended this way. The exit is one Nexus asked for: no failure, nothing retried, and AgentHost marks the
-runtime record `exited`. After a server restart nothing more happens than the recovery's rule (every record not
+runtime record `exited`. The forced kill at `endDeadlineMs` is armed by every one of these callers, not only by a
+cleanup waiting for the process: a fresh start beside an earlier session's process and a closed queue's look as well
+(the user's decision D4 with queue LCG, survey LC4 finding 4). A turn still at work a minute after it was asked to end
+is stuck, and two sessions in one checkout are worse than a cut last turn: it is killed by force, the old session's
+activity says so ("did not end within 60 s of being asked"), and the new run gets no failure or retry from it
+(`test/old-session-processes.test.ts`). After a server restart nothing more happens than the recovery's rule (every record not
 `exited` is marked so; a worker's job closed with the old server).
 
 ## The texts agents receive

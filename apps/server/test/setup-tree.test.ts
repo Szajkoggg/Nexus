@@ -85,3 +85,36 @@ test("a setup that runs into its time limit is ended with its child, and its fol
     rmSync(t.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
+
+// Survey LC4 finding 7 (queue LCG): a setup command that exits but leaves a detached process behind (a daemon it
+// started). Its result is the command's own exit code; what it left is ended at its end, and the folder is free. So a
+// setup cannot keep a daemon running (README.md, the worktree setup). Windows only: there the command's job holds every
+// descendant, detached or not, and its monitor ends them at the root's exit; elsewhere a detached child leaves the
+// command's process group, which is what is ended.
+test("a setup whose parent starts a detached child and exits 0: the setup succeeds, the child is ended with its end, the folder is free", { timeout: 60_000, skip: process.platform !== "win32" }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "nexus-setup-daemon-"));
+  writeFileSync(join(dir, "child.cjs"), `require("fs").writeFileSync(require("path").join(__dirname, "child.pid"), String(process.pid));
+setInterval(() => {}, 1000);
+`);
+  // The parent waits for the child's pid file (so the child surely started), then lets it go and exits 0.
+  writeFileSync(join(dir, "parent.cjs"), `const { spawn } = require("child_process"); const { existsSync } = require("fs"); const { join } = require("path");
+const c = spawn(process.execPath, [join(__dirname, "child.cjs")], { detached: true, stdio: "ignore", cwd: join(__dirname, "work") });
+c.unref();
+const t = setInterval(() => { if (existsSync(join(__dirname, "child.pid"))) { clearInterval(t); process.exit(0); } }, 20);
+`);
+  const cwd = join(dir, "work");
+  mkdirSync(cwd);
+  const childPid = () => (existsSync(join(dir, "child.pid")) ? Number(readFileSync(join(dir, "child.pid"), "utf8")) : undefined);
+  let pid: number | undefined;
+  try {
+    const result = await runSetup(`node "${join(dir, "parent.cjs")}"`, cwd, { limitMs: 30_000 });
+    assert.equal(result, undefined, "the setup succeeded: its command exited 0");
+    pid = childPid();
+    assert.ok(pid !== undefined, "the detached child had started");
+    await until(`the detached child (pid ${pid}) ended with the setup`, () => !alive(pid!), LONGER.run);
+    await until("the setup's folder can be removed", () => removable(cwd), LONGER.run);
+  } finally {
+    if (pid !== undefined && alive(pid)) process.kill(pid);
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});

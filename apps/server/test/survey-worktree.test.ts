@@ -84,7 +84,20 @@ function setup(o: { mergeBack?: boolean; left?: { on: boolean; value?: string; a
     waitUntil(what, () => pred(view(id)), ms, () => `; ${id}: ${view(id).status}, run ${JSON.stringify(view(id).run)}; ${view(id).steps.map((s) => `${s.id}=${s.status}`).join(" ")}; git ${JSON.stringify(store.readGit(id))}`);
   const branchExists = (branch: string) => { try { git(root, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`); return true; } catch { return false; } };
   const stop = () => { clearInterval(timer); merger.shutdown(); engine.shutdown(); };
-  return { base, root, store, git, queue, engine, reviews, view, until, branchExists, stop };
+  /**
+   * After stop: the next server's engine and Merger on the same files (as engine-setup's restart, with the Merger beside
+   * it), the processes asked of the engine itself; `stop` ends them. The engine's recovery runs as at a start.
+   */
+  const next = () => {
+    const m = new Merger(store, {
+      start: (id) => void e.start(id), release: (id, why) => e.releaseHold(id, why), busy: () => false, serverRoot: join(base, "elsewhere"),
+    });
+    const t = () => { routeAnswers(store); if (reviews.accept) acceptReviews(store); const st = loadProjectState(store); e.onChange(st); m.onChange(st); };
+    const e: Engine = new Engine(store, t, { spawn: inProcessRuntime(), ...QUICK_ENGINE, retryBaseMs: 30, startupMs: 20 });
+    const tm = setInterval(t, 150);
+    return { engine: e, merger: m, stop: () => { clearInterval(tm); m.shutdown(); e.shutdown(); } };
+  };
+  return { base, root, store, git, queue, engine, reviews, view, until, branchExists, stop, next };
 }
 
 test("a survey run in a worktree of its own works there, has no integration step, and its worktree and branch go once it is done, merge_back off or on", async () => {
@@ -133,6 +146,31 @@ test("a done survey's cleanup waits while its worker processes live: the reason 
     assert.equal(existsSync(wt), false);
     assert.equal(x.store.readGit("SV")!.cleanup, undefined, "the wait is gone");
   } finally { x.stop(); }
+});
+
+// Survey LC4 finding 5 (queue LCG): the recorded wait for the processes (processes: true) across a restart. The next
+// server's Merger looks again by itself: the processes are gone (the old server's ended with it, their records marked
+// exited by the recovery), so the worktree goes, git.cleaned is set and the wait is gone, without the user's Clean up.
+test("a done survey's cleanup waiting for its worker processes, then a restart: the next engine and Merger clean it up by themselves, the wait gone", async () => {
+  const left = { on: true, value: "queue SV's cleanup waits for its worker process to end (session s)" as string | undefined, asks: 0 };
+  const x = setup({ left });
+  let n: ReturnType<typeof x.next> | undefined;
+  try {
+    x.queue("SV", "done");
+    x.engine.start("SV", { runtime: "claude" });
+    const wt = x.store.readQueue("SV").worktree!;
+    await x.until("the wait recorded", "SV", (q) => q.status === "done" && q.git?.cleanup?.waiting.reason === left.value);
+    assert.equal(x.store.readGit("SV")!.cleanup!.waiting.processes, true, "a wait for the processes");
+    x.stop();
+    assert.ok(existsSync(wt), "the worktree is still there when the server stops");
+    assert.equal(x.store.readGit("SV")!.cleanup!.waiting.processes, true, "and the wait is recorded");
+    n = x.next();
+    await x.until("the worktree cleaned up by the next server", "SV", (q) => !!q.git?.cleaned);
+    assert.equal(existsSync(wt), false, "the worktree is removed");
+    assert.equal(x.store.readGit("SV")!.cleanup, undefined, "the wait is gone");
+    assert.equal(x.branchExists("nexus/SV"), false, "its branch is deleted");
+    assert.deepEqual(loadProjectState(x.store).attention.filter((a) => a.queue === "SV"), [], "nothing waits for the user");
+  } finally { x.stop(); n?.stop(); }
 });
 
 test("untracked files left in a survey's worktree keep it, and the user is told what is left; their Clean up removes it afterwards", async () => {
