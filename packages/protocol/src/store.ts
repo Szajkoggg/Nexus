@@ -217,6 +217,27 @@ function named<T>(file: string, read: () => T): T {
 
 /** Where a reader with a default tells of an unreadable file (console.warn, once per file, when none is given). */
 export type Warn = (message: string) => void;
+/** Where a walk over sessions tells of a session.yaml it cannot read: the session's id, and the error naming the file. */
+export type OnUnreadableSession = (id: string, error: unknown) => void;
+
+/**
+ * A session and those it went on from (`continues`, context care), newest first. The walk ends at a predecessor that
+ * is not there (quietly: a session removed by hand) or that cannot be read (told to `onUnreadable`: what came before
+ * it is unknown). `sessions`: the derived state's sessions, read instead of the files where the caller has them (one
+ * not among them is read from its file).
+ */
+export function sessionLine(store: ProjectStore, s: SessionFile, onUnreadable: OnUnreadableSession, sessions?: readonly SessionFile[]): SessionFile[] {
+  const out = [s];
+  for (let x = s; x.continues && !out.some((y) => y.id === x.continues);) {
+    const id = x.continues;
+    const known = sessions?.find((y) => y.id === id);
+    if (known) { x = known; out.push(x); continue; }
+    if (!store.hasSession(id)) break;
+    try { x = store.readSession(id); } catch (e) { onUnreadable(id, e); break; }
+    out.push(x);
+  }
+  return out;
+}
 /** The unreadable files this process's readers with a default met, by path: their writer sets them aside. */
 const metUnreadable = new Map<string, UnreadableFileError>();
 
@@ -563,6 +584,20 @@ export class ProjectStore {
   readSession(id: string): SessionFile { return this.yaml(join(this.sessionDir(id), "session.yaml"), SessionFile); }
   /** Whether the session has a session.yaml (readable or not: readSession tells). */
   hasSession(id: string): boolean { return this.reader.has(join(this.sessionDir(id), "session.yaml")); }
+  /**
+   * The project's sessions of a role (every role when `role` is undefined), read from their session.yaml. One that
+   * cannot be read is left out and told to `onUnreadable` with its id and the error (whose message names the file):
+   * its role is unknown, so a caller that must not miss one of the role (an inbox to search) looks at it there.
+   */
+  sessionsOf(role: SessionFile["role"] | undefined, onUnreadable: OnUnreadableSession): SessionFile[] {
+    const out: SessionFile[] = [];
+    for (const id of this.sessionIds()) {
+      let s: SessionFile;
+      try { s = this.readSession(id); } catch (e) { onUnreadable(id, e); continue; }
+      if (role === undefined || s.role === role) out.push(s);
+    }
+    return out;
+  }
   writeSession(s: SessionFile): void { writeYaml(join(this.sessionDir(s.id), "session.yaml"), SessionFile.parse(s)); }
 
   // The logs other writers append to and this process reads: what it stamps afterwards comes after their times

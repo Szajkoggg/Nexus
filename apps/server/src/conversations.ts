@@ -97,9 +97,7 @@ export class Conversations {
   }
 
   list() {
-    return this.store.sessionIds()
-      .map((id) => { try { return this.store.readSession(id); } catch (e) { console.warn(`nexus: ${errorText(e)}; left out of the conversations`); return undefined; } })
-      .filter((s): s is SessionFile => s?.role === "conversation")
+    return this.store.sessionsOf("conversation", (_id, e) => console.warn(`nexus: ${errorText(e)}; left out of the conversations`))
       .map((s) => this.itemOf(s))
       .sort(byConversationOrder);
   }

@@ -42,7 +42,7 @@ nexus ask "Canyon joints: vertical only, or also inclined?" [--option ...] [--re
                                                # the text, or - to read it from stdin; --recommend: one of the --option values, by text or number (1 = first)
 nexus context "summary text" --topics rock,support --files Runtime/Core/Rock/a.cs,Runtime/Core/Rock/b.cs [--step W3]   # a comma list, not a glob (a shell expands it and the rest is lost); the text as the argument, or - to read it from stdin (... <<< "text"); its shape: nexus help context (beyond 2000 words it warns)
 nexus report W --file <temp>/nexus-reports/<project>/W.md --summary "..." [--findings 3]   # copied to .nexus/queues/W/report.md; --findings: a maintenance queue's
-nexus withdraw <qid> --reason "..."            # a question no longer needed (question.withdrawn); only an open one of this session's or of the one it took over from: an unknown, answered, withdrawn or another session's is refused
+nexus withdraw <qid> --reason "..."            # a question no longer needed (question.withdrawn); only an open one of this session's or of the one it took over from: an unknown, answered, withdrawn or another session's is refused; past a predecessor whose session.yaml cannot be read the line is unknown, and the refusal names that file
 nexus log "Retrying the probe" [--level info|warn|error]   # a line into the session's own log
 nexus template list | show <id>                # the queue templates in effect (see "Queue templates")
 nexus recurring list                           # the recurring queues and their state (see "Recurring queues")
@@ -78,7 +78,7 @@ nexus plan propose <queue> [--after <queue>]... --reason "..."   # propose to th
 nexus queue draft --template bugfix --set issue="..." --set area=engine [--id BF] [--maintenance survey|fix_small]   # writes .nexus/drafts/BF.yaml to complete and upload
 nexus recurring set weekly --template maintenance [--set scope=...] (--every "mon 03:00" | --after-queues 5) [--maintenance survey|fix_small] [--reason ...]   # through the server; the user approves it
 nexus static-analysis decline --reason "..."  # the user's no to the static-analysis template: no reminder for 90 days
-nexus review audit W W2 agree|disagree --reason "..."   # an audit of the review helper's acceptance a notice gave it
+nexus review audit W W2 agree|disagree --reason "..."   # an audit of the review helper's acceptance a notice gave it (to this or an earlier orchestrator session; an orchestrator session.yaml that cannot be read is warned of on stderr with its path)
 nexus check decide W W3 accept|fix --reason "..."   # a disputed check Nexus could not run on the base (see "Checks run by Nexus")
 nexus answer <qid> "..." [--escalate [--recommend <option>]] [--continue|--wait]
                                                # the text, or - to read it from stdin; --recommend only with --escalate: one of the question's options

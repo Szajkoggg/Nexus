@@ -17,7 +17,7 @@ import {
   TemplateError, fillTemplate, filledTemplateYaml, parseEvery, MaintenanceMode, readTemplates, templateDirs, templateQueueId, unusableTemplate, type MergedTemplates,
   NoteMeta, Role, Runtime, type PictureRole, type ReviewItem, type SessionFile,
   noteRefIssue, parseNoteRef, readNotes, ideaMatches, ideaLinks, ideaStatuses, reportSourceHash,
-  capacityLines, latestCheckSet, stepChecks, readCapacity, reviewStats, reviewStatsText, switchReport, switchReportText, helperAbout, helperText, NEXUS_PASS_ON, PassOnReason, isUnreadableFile,
+  capacityLines, latestCheckSet, stepChecks, readCapacity, reviewStats, reviewStatsText, switchReport, switchReportText, helperAbout, helperText, NEXUS_PASS_ON, PassOnReason, isUnreadableFile, sessionLine,
   decisionRefusal, decisionsCount, gate, helperHandOverRefusal, reviewRound, type DecisionEventInput,
   IdeaLinkProposalItem, PROPOSER_REFUSAL, proposalIssues, proposerOf,
 } from "@nexus/protocol";
@@ -352,14 +352,18 @@ function noMore(n: number, usage: string): void {
   throw new UsageError(`${usage} takes no more arguments, not ${extra.map((x) => `"${x}"`).join(" ")}: quote a text with spaces as one argument, and give a list comma-separated (--files a.ts,b.ts), not as a glob`);
 }
 
-/** The session and those it took over from (context care: `continues`), whose questions are its own too. */
-function ownLine(st: ProjectStore, s: SessionFile): Set<string> {
-  const ids = new Set([s.id]);
-  for (let at: SessionFile | undefined = s; at?.continues && !ids.has(at.continues);) {
-    ids.add(at.continues);
-    try { at = st.readSession(at.continues); } catch { at = undefined; }
-  }
-  return ids;
+/**
+ * The session and those it took over from (context care: `continues`), whose questions are its own too; `sessions`:
+ * the derived state's. The id of a predecessor that is not there, or cannot be read, still counts (the session names
+ * it); what came before an unreadable one is unknown: `unknownBefore` is its error, naming the file.
+ */
+function ownLine(st: ProjectStore, s: SessionFile, sessions?: readonly SessionFile[]): { ids: Set<string>; unknownBefore?: string } {
+  let unknownBefore: string | undefined;
+  const line = sessionLine(st, s, (_id, e) => { unknownBefore = errorText(e); }, sessions);
+  const ids = new Set(line.map((x) => x.id));
+  const last = line[line.length - 1]!.continues;
+  if (last) ids.add(last);
+  return { ids, unknownBefore };
 }
 
 function session(st: ProjectStore): SessionFile {
@@ -675,7 +679,10 @@ function reviewAudit(): void {
   if (a?.by !== "helper") throw new UsageError(`step ${queue}/${step} was not accepted by the review helper`);
   if (view.audit) throw new UsageError(`step ${queue}/${step} was audited already (${view.audit.verdict})`);
   const key = `notify:audit:${a.event}`;
-  const given = st.sessionIds().some((id) => { try { return st.readSession(id).role === "orchestrator" && st.readApplied(id).entries.some((x) => x.event === key); } catch { return false; } });
+  // The notice may have gone to an earlier orchestrator session; an unreadable session.yaml is told, not passed over
+  // in silence (CHC2): the notice could be in it.
+  const orchestrators = st.sessionsOf("orchestrator", (_id, e) => warn(`nexus: warning: ${errorText(e)}; whether the audit was given to that session is not known`));
+  const given = orchestrators.some((x) => st.readApplied(x.id).entries.some((a) => a.event === key));
   if (!given) throw new UsageError(`no audit of step ${queue}/${step} was given to you: Nexus picks the acceptances to audit and names them in a notice`);
   emit(st, s, { type: "review.audited", queue, step, accepted: a.event, verdict, text: reason });
   say(`ok: audit of ${queue}/${step} recorded (${verdict})${verdict === "disagree" ? "; the step stays accepted: if its work needs a fix, draft it as a revision" : ""}`);
@@ -1155,9 +1162,15 @@ const commands: Record<string, () => void | Promise<void>> = {
     const reason = need(o().reason, "--reason");
     // W2: only an open question of this session (or of the one it took over from) is withdrawn; anything else would
     // say ok and change nothing, the question still holding its step.
-    const q = loadProjectState(st).questions.find((x) => x.qid === qid);
+    const state = loadProjectState(st);
+    const q = state.questions.find((x) => x.qid === qid);
     if (!q) throw new UsageError(`no question ${qid} in this project (nexus status shows your open questions and their qids)`);
-    if (!ownLine(st, s).has(q.session)) throw new UsageError(`question ${qid} is another session's (${q.session}); a session withdraws only its own questions`);
+    const own = ownLine(st, s, state.sessions);
+    if (!own.ids.has(q.session)) {
+      // Past an unreadable predecessor the line is unknown: the question may be this session's own (CHC2).
+      if (own.unknownBefore) throw new UsageError(`question ${qid} is not of this session's line as far as it can be read: ${own.unknownBefore}; repair the file, or ask the orchestrator to withdraw it`);
+      throw new UsageError(`question ${qid} is another session's (${q.session}); a session withdraws only its own questions`);
+    }
     if (q.state === "answered" || q.state === "withdrawn") throw new UsageError(`question ${qid} is ${q.state} already: nothing to withdraw`);
     emit(st, s, { type: "question.withdrawn", qid, reason });
     say("ok: question withdrawn");

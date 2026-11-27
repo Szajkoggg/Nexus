@@ -8,10 +8,11 @@ import { deriveIdeas, ideaQueues, noteRef, parseNote, type HandOver, type IdeaMa
 import { deriveIdeaLinks } from "./idea-links.ts";
 import { ideaOutcome } from "./idea-outcomes.ts";
 import { queueView } from "./actions.ts";
-import type { ProjectStore } from "./store.ts";
+import type { ProjectStore, Warn } from "./store.ts";
 import type { ProjectState } from "./state.ts";
 import { deriveIdeaStatuses, queuesDoneUnconfirmed } from "./idea-status.ts";
-import type { IdeaStatusesFile } from "./schemas.ts";
+import type { IdeaStatusesFile, SessionFile } from "./schemas.ts";
+import { errorText } from "./errors.ts";
 
 /** The notes of a project: `notesDir` is relative to its root (conversations.notes_dir); none without a folder. */
 export function readNotes(root: string, notesDir: string | undefined): IdeaNote[] {
@@ -38,18 +39,16 @@ export function readNotes(root: string, notesDir: string | undefined): IdeaNote[
 
 /**
  * The hand-over records (`nexus covers`, the `ideas.covered` events) of the project's thinking partners, oldest first:
- * one per entry covered, with the conversation's title. Only a conversation's own events count.
+ * one per entry covered, with the conversation's title. Only a conversation's own events count. `sessions`: the derived
+ * state's (which told of an unreadable session.yaml in its warnings); without them the files are read, and an unreadable
+ * one is told to `warn` with its path.
  */
-export function readHandOvers(store: ProjectStore): HandOver[] {
+export function readHandOvers(store: ProjectStore, sessions?: readonly SessionFile[], warn: Warn = (m) => console.warn(`nexus: ${m}`)): HandOver[] {
   const out: HandOver[] = store.readIdeaHandoffs().records.flatMap((r) => r.state === "delivered" && r.delivery
     ? r.dates.map((date) => ({ ref: noteRef(r.file, date), at: r.delivery!.at })) : []);
-  for (const id of store.sessionIds()) {
-    let title: string | undefined;
-    try {
-      const s = store.readSession(id);
-      if (s.role !== "conversation") continue;
-      title = s.title;
-    } catch { continue; }
+  const conversations = sessions?.filter((s) => s.role === "conversation")
+    ?? store.sessionsOf("conversation", (_id, e) => warn(`${errorText(e)}; its hand-overs are left out`));
+  for (const { id, title } of conversations) {
     for (const e of store.readEvents(id).entries) {
       if (e.type !== "ideas.covered" || e.session !== id) continue;
       for (const ref of e.refs) out.push({ ref, at: e.at, session: id, ...(title ? { conversation: title } : {}) });
@@ -107,7 +106,7 @@ export function projectIdeas(store: ProjectStore, state: ProjectState): IdeasRes
     refs: [...new Set(links.items.filter((r) => r.queue === q.id && r.effective).map((r) => r.ref))],
     outcome: ideaOutcome(store, queueView(state, q.id)),
   }));
-  const view = deriveIdeas({ notes, queues, handovers: readHandOvers(store) });
+  const view = deriveIdeas({ notes, queues, handovers: readHandOvers(store, state.sessions) });
   const statuses = deriveIdeaStatuses(store.readIdeaStatuses(), state, notes, links,
     new Map(queues.map((q) => [q.id, q.outcome])));
   for (const note of view.notes) {

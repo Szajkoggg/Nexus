@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, Effort, acceptedByNexus, ideaStatuses, contextLimit, acceptedOn, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView, proposalDecisions, type IdeaProposal,
+  ActionError, DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, Effort, acceptedByNexus, ideaStatuses, contextLimit, acceptedOn, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, sessionLine, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView, proposalDecisions, type IdeaProposal,
 } from "@nexus/protocol";
 import { reachable, type AgentProcess } from "./agent.ts";
 import type { CodexPermissions } from "./codex.ts";
@@ -224,10 +224,15 @@ export class Orchestrator {
   /** Durable direct idea delivery. Inbox first, then an idempotent visible chat row; the normal inbox path runs it. */
   enqueueIdea(id: string, text: string): { at: string; session: string; line: number; inbox: string } {
     const key = `idea-${id}`;
-    // Search all historical orchestrator sessions too: a retry after a session switch must not enqueue again.
+    // Search all historical orchestrator sessions too: a retry after a session switch must not enqueue again. Another
+    // session's unreadable session.yaml does not fail the hand-off: its role is unknown, so its inbox is searched too.
+    const unreadable: string[] = [];
+    const orchestrators = this.store.sessionsOf("orchestrator", (id, e) => {
+      console.warn(`nexus: ${errorText(e)}; its inbox is searched for the idea all the same`);
+      unreadable.push(id);
+    });
     let destination: { session: string; at: string } | undefined;
-    for (const session of this.store.sessionIds()) {
-      if (this.store.readSession(session).role !== "orchestrator") continue;
+    for (const session of [...orchestrators.map((s) => s.id), ...unreadable]) {
       const previous = this.store.readInbox(session).entries.find((m) => m.id === key);
       if (!previous) continue;
       if (previous.type !== "message" || previous.text !== text) throw new ActionError("Handoff identity already has another payload", 409);
@@ -677,13 +682,7 @@ ${n.text}` });
 
   /** The session and those it went on from (context care), newest first. */
   private lineage(s: SessionFile): SessionFile[] {
-    const out = [s];
-    for (let x = s; x.continues && !out.some((y) => y.id === x.continues);) {
-      if (!this.store.hasSession(x.continues)) break;
-      try { x = this.store.readSession(x.continues); } catch (e) { console.warn(`nexus: ${errorText(e)}; the lineage ends before it`); break; }
-      out.push(x);
-    }
-    return out;
+    return sessionLine(this.store, s, (_id, e) => console.warn(`nexus: ${errorText(e)}; the lineage ends before it`));
   }
 
   /** The request for the session's summary, if Nexus made it (it then goes on in a fresh session). */
