@@ -1,7 +1,8 @@
-// The run API waits for the immediate stop and returns its asynchronous refusals as HTTP errors.
+// The run API waits for the immediate stop and returns its asynchronous refusals as HTTP errors; an action on a queue
+// whose queue.yaml cannot be read is a 409 naming the file (survey LC4 finding 9, queue LCG: main.ts's act() maps it).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -56,6 +57,16 @@ test("Stop at once API waits for exit, keeps the pause and refuses an absent wor
     const refused = await post("stop_at_once");
     assert.equal(refused.status, 409);
     assert.match((await refused.json() as { error: string }).error, /not running/);
+    // An action on a queue whose queue.yaml cannot be read: 409 with the file's name, the file left as it was.
+    const bad = join(store.dir, "queues", "BAD", "queue.yaml");
+    mkdirSync(dirname(bad), { recursive: true });
+    writeFileSync(bad, "steps: [unclosed\n");
+    const unreadable = await fetch(`${url}/api/projects/p/queues/BAD/run`, {
+      method: "POST", headers: { "content-type": "application/json", origin: url }, body: JSON.stringify({ action: "start" }),
+    });
+    assert.equal(unreadable.status, 409);
+    assert.match((await unreadable.json() as { error: string }).error, /queues\/BAD\/queue\.yaml cannot be read/);
+    assert.equal(readFileSync(bad, "utf8"), "steps: [unclosed\n", "the file is untouched");
   } finally {
     if (child.exitCode === null) {
       const gone = new Promise<void>((resolve) => child.once("exit", () => resolve()));

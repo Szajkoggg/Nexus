@@ -8,6 +8,8 @@
 //   left open is knowingly dropped (the warning says so), and the file is set aside as runtime.json.corrupt.
 // - F15: an unreadable checks.yaml leaves that queue's checks out of the recovery, with a warning; the others' sets
 //   are recovered.
+// - D3 (queue LCG, survey LC4 finding 3): a run.yaml repaired while the next server runs is recovered the first time
+//   it reads, as at the start; a repaired start.yaml takes effect at the next change.
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -16,8 +18,8 @@ import { loadProjectState, now, type ChecksFile } from "@nexus/protocol";
 import { Capacity } from "../src/capacity.ts";
 import type { Engine } from "../src/engine.ts";
 import { tempDir } from "./temp-dirs.ts";
-import { FAST, fixtureRun, restart, setup } from "./engine-setup.ts";
-import { holdWork } from "./wait.ts";
+import { FAST, fixtureRun, repair, restart, setup } from "./engine-setup.ts";
+import { LONGER, holdWork, holds, until } from "./wait.ts";
 
 /**
  * A queue Q at work (or finished: `done`) and a queue R a server left running too; the server gone (shut down) before
@@ -127,5 +129,57 @@ test("F15: an unreadable checks.yaml leaves that queue's checks out of the recov
     assert.equal(set.state, "interrupted", "R's set is recovered");
     assert.equal(set.checks[0]!.runs[0]!.interrupted, true);
     assert.equal(readFileSync(path, "utf8"), "state: [unclosed\n", "Q's file is not written over");
+  } finally { next?.shutdown(); }
+});
+
+// Survey LC4 finding 3 (D3 with queue LCG): a queue left out for an unreadable run.yaml whose file is repaired while
+// the next server runs gets, the first time it reads, the recovery it would have had at the start. Before, the next
+// change advanced the run the file still said was running, found no process and halted it ("the session's process is
+// not running"); a run an update held stayed paused for good.
+for (const held of [false, true]) {
+  test(`D3: ${held ? "a run an update held" : "a running run"} whose run.yaml was unreadable at the restart, repaired while the next server runs: at the next change it ${held ? "goes on by itself" : `is paused ("${RESTARTED}")`}, not halted`, async () => {
+    const { store, queue } = await interrupted();
+    if (held) {
+      const run = store.readRun("Q")!;
+      store.writeRun("Q", { ...run, state: "paused", reason: "the Nexus server is updating; it goes on by itself afterwards", resume_after_restart: true });
+    }
+    const before = store.readRun("Q")!;
+    let next: Engine | undefined;
+    try {
+      warned(() => { next = restart(store, FAST, { corrupt: [{ queue: "Q", file: "run.yaml" }] }); });
+      assert.equal(queue().run, undefined, "unreadable: left out");
+      const [path] = repair(store, [{ queue: "Q", file: "run.yaml" }]);
+      assert.deepEqual(store.readRun("Q"), before, `${path} reads as before`);
+      const { lines } = warned(() => next!.onChange(loadProjectState(store)));
+      const logged = () => assert.ok(lines.some((l) => l.includes("queue Q's run.yaml can be read again")), `the log says so: ${lines.join(" | ")}`);
+      if (held) {
+        assert.deepEqual([queue().run?.state, queue().run?.reason], ["paused", "resuming after the Nexus update"], "held for the update, as at the start");
+        await until("the held run goes on by itself", () => !queue().run?.resume_after_restart && queue().run?.state !== "paused", LONGER.step);
+        assert.notEqual(queue().run?.state, "halted", queue().run?.reason);
+        await until("the run finishes", () => queue().run?.state === "finished", LONGER.run);
+        logged();
+      } else {
+        assert.deepEqual([queue().run?.state, queue().run?.reason], ["paused", RESTARTED]);
+        next!.onChange(loadProjectState(store)); // a later change: nothing more
+        await new Promise((r) => setTimeout(r, 200));
+        assert.deepEqual([queue().run?.state, queue().run?.reason], ["paused", RESTARTED], "not halted");
+        logged();
+      }
+    } finally { next?.shutdown(); }
+  });
+}
+
+test("D3: a start.yaml unreadable at the restart, repaired while the next server runs, takes effect at the next change: the planned start is made", async () => {
+  const x = setup(["done"]);
+  x.engine.shutdown();
+  x.store.writeStart("Q", { protocol: 1, by: "user", revision: 1, created_at: now() });
+  let next: Engine | undefined;
+  try {
+    warned(() => { next = restart(x.store, FAST, { corrupt: [{ queue: "Q", file: "start.yaml" }] }); });
+    await holds("an unreadable plan starts nothing", () => x.queue().run === undefined, 300);
+    repair(x.store, [{ queue: "Q", file: "start.yaml" }]);
+    next!.onChange(loadProjectState(x.store));
+    await x.until("the planned start is made", () => x.queue().run !== undefined);
+    await x.until("the run finishes", () => x.queue().run?.state === "finished", LONGER.run);
   } finally { next?.shutdown(); }
 });

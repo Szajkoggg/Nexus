@@ -245,6 +245,8 @@ export class Engine implements Member {
   /** A boundary is not crossed until the worker's descendants have gone. Reset after every turn. */
   private readonly cleaned = new WeakSet<Live["proc"]>();
   /** The cleanup barriers pending, by process, with the session each is for (cleaningSessions; the drain waits for them). */
+  /** Queues left out of the recovery for an unreadable run.yaml, recovered once it reads again (recoverRepaired). */
+  private readonly unrecovered = new Set<string>();
   private readonly cleaning = new Map<Live["proc"], { barrier: Promise<void>; session: string }>();
   /** Sessions whose process Nexus ends to start it again with another model or effort (Claude Code). */
   private readonly restarting = new Set<string>();
@@ -727,6 +729,7 @@ export class Engine implements Member {
 
   /** Called after every change to the project's files (debounced by the server). */
   onChange(state: ProjectState): void {
+    if (this.unrecovered.size && !this.stopped) state = this.recoverRepaired() ?? state;
     if (!this.stopped) this.pusher.onChange(state);
     // A done or cancelled queue keeps no process (queue PRC): a halted run closed as finished, or cancelled, left its
     // session's process idle; nothing would end it before the server stops.
@@ -2091,7 +2094,7 @@ export class Engine implements Member {
     // A queue whose run.yaml cannot be read is left out, as it is (queue LCK, F9; docs/design/state.md, "Missing and
     // unreadable files"): the project's state warns with the file's name, the log says it is not recovered, the file is
     // not written over, and the other queues are recovered.
-    const unreadable = new Set<string>();
+    const unreadable = this.unrecovered;
     const runOf = (q: string): RunFile | undefined => {
       try { return this.store.readRun(q); } catch (e) {
         if (!unreadable.has(q)) console.warn(`nexus: ${errorText(e)}; queue ${q} is not recovered: it is left as it is until the file can be read`);
@@ -2108,36 +2111,7 @@ export class Engine implements Member {
     }
     for (const q of this.store.queueIds()) {
       if (unreadable.has(q)) continue;
-      const run = runOf(q);
-      const view = state.queues.find((x) => x.id === q);
-      const left = view && (questionsHold(state, q, run?.step) || view.steps.some((s) => !stepClosed(view, s)));
-      if (run && (runActive(run) || run.resume_after_restart) && left === false) {
-        // Its last step was done before the server stopped: the run is over, whatever stopped the process.
-        this.writeRun(q, toFinished(run));
-      } else if (run?.state === "retry_wait" && run.resume_at) {
-        // A retry pending at the restart (held by an update or not) is made when it is due.
-        this.schedule(q, run.resume_at, 0);
-      } else if (run?.resume_after_restart) {
-        // Held for an update: resumed shortly, once this server is up.
-        this.writeRun(q, toHeldForUpdate(run, "resuming after the Nexus update"));
-        this.timers.set(`recover:${q}`, setTimeout(() => {
-          this.timers.delete(`recover:${q}`);
-          const r = this.store.readRun(q);
-          if (!r?.resume_after_restart) return;
-          try { this.resumeByItself(q); } catch (e) { logError(`queue ${q}: resuming after the update`, e); this.halt(q, `could not resume after the update: ${errorText(e)}`); }
-          this.changed();
-        }, this.startupMs));
-      } else if (run && runActive(run)) {
-        this.writeRun(q, toPaused(run, "the Nexus server restarted; resume to continue"));
-      } else if (run?.state === "approval_wait" && view?.approved) {
-        // Approved while no server ran (or while an update drained): it goes on shortly, once this server is up.
-        this.timers.set(`recover:${q}`, setTimeout(() => {
-          this.timers.delete(`recover:${q}`);
-          if (this.store.readRun(q)?.state === "approval_wait") this.continueApproved(q);
-          this.changed();
-        }, this.startupMs));
-      }
-      if (run?.state === "usage_wait" && run.resume_at) this.schedule(q, run.resume_at, this.usageMarginMs);
+      this.recoverQueue(q, state, runOf(q));
     }
     for (const s of this.store.sessionIds()) {
       let broken: string | undefined;
@@ -2159,6 +2133,65 @@ export class Engine implements Member {
       this.host.closeLeftTurn(s);
       this.host.write(s, { state: "exited" });
     }
+  }
+
+  /**
+   * One queue's recovery after a restart (recoverAfterRestart): a run whose last step was done is finished, a pending
+   * retry or usage wait is scheduled, a run an update held goes on shortly, a running one is paused, an approved one
+   * waiting for its approval goes on.
+   */
+  private recoverQueue(q: string, state: ProjectState, run: RunFile | undefined): void {
+    const view = state.queues.find((x) => x.id === q);
+    const left = view && (questionsHold(state, q, run?.step) || view.steps.some((s) => !stepClosed(view, s)));
+    if (run && (runActive(run) || run.resume_after_restart) && left === false) {
+      // Its last step was done before the server stopped: the run is over, whatever stopped the process.
+      this.writeRun(q, toFinished(run));
+    } else if (run?.state === "retry_wait" && run.resume_at) {
+      // A retry pending at the restart (held by an update or not) is made when it is due.
+      this.schedule(q, run.resume_at, 0);
+    } else if (run?.resume_after_restart) {
+      // Held for an update: resumed shortly, once this server is up.
+      this.writeRun(q, toHeldForUpdate(run, "resuming after the Nexus update"));
+      this.timers.set(`recover:${q}`, setTimeout(() => {
+        this.timers.delete(`recover:${q}`);
+        const r = this.store.readRun(q);
+        if (!r?.resume_after_restart) return;
+        try { this.resumeByItself(q); } catch (e) { logError(`queue ${q}: resuming after the update`, e); this.halt(q, `could not resume after the update: ${errorText(e)}`); }
+        this.changed();
+      }, this.startupMs));
+    } else if (run && runActive(run)) {
+      this.writeRun(q, toPaused(run, "the Nexus server restarted; resume to continue"));
+    } else if (run?.state === "approval_wait" && view?.approved) {
+      // Approved while no server ran (or while an update drained): it goes on shortly, once this server is up.
+      this.timers.set(`recover:${q}`, setTimeout(() => {
+        this.timers.delete(`recover:${q}`);
+        if (this.store.readRun(q)?.state === "approval_wait") this.continueApproved(q);
+        this.changed();
+      }, this.startupMs));
+    }
+    if (run?.state === "usage_wait" && run.resume_at) this.schedule(q, run.resume_at, this.usageMarginMs);
+  }
+
+  /**
+   * A queue left out of the recovery for an unreadable run.yaml whose file reads again (repaired while this server
+   * runs) gets the recovery now, the first time it reads, as it would have at the start (D3 with queue LCG, survey LC4
+   * finding 3): before, the next change advanced the run the file still said was running, found no process (its
+   * session marked exited by the same recovery) and halted it with "the session's process is not running". Returns
+   * the state read again after a recovery, else undefined.
+   */
+  private recoverRepaired(): ProjectState | undefined {
+    let recovered = false;
+    for (const q of [...this.unrecovered]) {
+      let run: RunFile | undefined;
+      try { run = this.store.readRun(q); } catch { continue; } // still unreadable: left as it is
+      this.unrecovered.delete(q);
+      if (!this.store.queueIds().includes(q)) continue;
+      console.warn(`nexus: queue ${q}'s run.yaml can be read again; it is recovered as after the restart`);
+      releaseOrphanedSteps(this.store, q, { state: loadProjectState(this.store) });
+      this.recoverQueue(q, loadProjectState(this.store), run);
+      recovered = true;
+    }
+    return recovered ? loadProjectState(this.store) : undefined;
   }
 
   private run(queueId: string): RunFile {

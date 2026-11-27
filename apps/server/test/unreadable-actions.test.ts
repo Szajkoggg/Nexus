@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { errorText } from "@nexus/protocol/errors";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ActionError, now } from "@nexus/protocol";
+import { ActionError, faultRenames, now } from "@nexus/protocol";
 import { DeployPlanner, readPlanFile } from "../src/deploy-plan.ts";
 import { Standby } from "../src/handover.ts";
 import type { UpdateStatus } from "../src/lifecycle.ts";
@@ -92,6 +92,23 @@ for (const v of [
     assert.equal(readFileSync(`${file}.corrupt`, "utf8"), v.text, "the first copy is kept");
   });
 }
+
+// Survey LC4 finding 9 (queue LCG): the setting aside itself fails. The log still names the file and says the next
+// plan written replaces it; the recovery goes on with no plan.
+test("F13: an unreadable deploy-plan.json that cannot be set aside: the warning says so and that the next plan replaces it; no plan, the file left in place", () => {
+  const file = join(tempDir("nexus-plan-"), "deploy-plan.json");
+  writeFileSync(file, "{ \"plan\": ");
+  const p = planner(file);
+  const renames = faultRenames({ file: "deploy-plan.json.corrupt", code: "EIO" }); // not passing: thrown at once
+  let lines: string[];
+  try { lines = warned(() => p.recover()).lines; } finally { renames.clear(); }
+  assert.equal(renames.failed(), 1, "the rename aside was refused");
+  assert.ok(lines.some((l) => l.includes("deploy-plan.json cannot be read") && l.includes("it could not be set aside") && l.includes("the next plan written replaces it")), `told: ${lines.join(" | ")}`);
+  assert.equal(readFileSync(file, "utf8"), "{ \"plan\": ", "left in place as it was");
+  assert.ok(!existsSync(`${file}.corrupt`));
+  assert.equal(p.view(), null, "no plan");
+  p.shutdown();
+});
 
 test("F13: a missing or readable deploy-plan.json is recovered without a warning and stays in place", () => {
   const dir = tempDir("nexus-plan-");

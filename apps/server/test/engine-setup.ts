@@ -1,6 +1,6 @@
 // The shared setup of the engine tests (engine*.test.ts), against the fake runtimes (test/fake-claude.ts,
 // test/fake-codex.ts): no model, no tokens. Split from engine.test.ts so its parts run side by side (queue TS2).
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectStore, approveQueue, loadProjectState, routeAnswers, type StepDef } from "@nexus/protocol";
@@ -50,11 +50,35 @@ const DAMAGED = {
   json: { unparsable: "{ \"state\": ", schema: "{ \"protocol\": 1, \"state\": 42 }\n" },
 } as const;
 
-/** Writes each damaged file (Damage); returns their paths, in order. */
+/** A damaged file's path in the store. */
+const damagedPath = (store: ProjectStore, d: Damage) => ("queue" in d ? join(store.dir, "queues", d.queue, d.file) : join(store.dir, "sessions", d.session, d.file));
+
+/** What each file damage() wrote over held before, by path (undefined: there was none), for repair(). */
+const originals = new Map<string, string | undefined>();
+
+/** Writes each damaged file (Damage), keeping what it held for repair(); returns their paths, in order. */
 function damage(store: ProjectStore, files: Damage[]): string[] {
   return files.map((d) => {
-    const path = "queue" in d ? join(store.dir, "queues", d.queue, d.file) : join(store.dir, "sessions", d.session, d.file);
+    const path = damagedPath(store, d);
+    if (!originals.has(path)) originals.set(path, existsSync(path) ? readFileSync(path, "utf8") : undefined);
     writeFileSync(path, DAMAGED[d.file.endsWith(".json") ? "json" : "yaml"][d.as ?? "unparsable"]);
+    return path;
+  });
+}
+
+/**
+ * Puts back what restart's `corrupt` (damage()) wrote over, as a user repairing the file by hand while the next engine
+ * runs (queue LCG, survey LC4 recommended addition 4): each file gets its original bytes again, or is removed when
+ * there was none. Returns the paths, in order.
+ */
+export function repair(store: ProjectStore, files: Damage[]): string[] {
+  return files.map((d) => {
+    const path = damagedPath(store, d);
+    if (!originals.has(path)) throw new Error(`${path} was not damaged by restart's corrupt`);
+    const original = originals.get(path);
+    originals.delete(path);
+    if (original === undefined) rmSync(path, { force: true });
+    else writeFileSync(path, original);
     return path;
   });
 }

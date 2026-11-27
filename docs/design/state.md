@@ -242,17 +242,28 @@ The rule, kept by `packages/protocol/src/store.ts`:
   record would), so it is set aside as `runtime.json.corrupt`; a turn the old server left open in it is knowingly not
   recorded, and the log's warning says so. An unreadable `checks.yaml` leaves that queue's checks unrecovered (the
   log: "its checks are not recovered").
+- **A file repaired while the server runs** (queue LCG, survey LC4 findings 3 and 9, the user's decision D3). A queue
+  left out for an unreadable `run.yaml` is recovered at the first change after its file reads again, before anything
+  else of that change, exactly as at the start: a running run is paused ("the Nexus server restarted; resume to
+  continue"), a run an update held goes on by itself, a finished one is closed, and the log says so ("queue Q's
+  run.yaml can be read again"). Before, the change advanced the run its file still said was running, found no process
+  (the recovery had marked the session exited) and halted it with "the session's process is not running", and a held
+  run stayed paused for good. A repaired `start.yaml` takes effect at the next change too: the coordinator's pass reads
+  the plans again and makes a start that is due.
 - **Nothing overwrites an unreadable file.** Its writer first moves it aside as `<file>.corrupt` (`writeFileAtomic`
   does this for every file a reader with a default found unreadable in its content, and tells the log), so the damage
   can still be looked at. A second damage does not replace the first one's copy: it goes to `<file>.corrupt.2`, then
   `.3`, … (`setAsideCorrupt`; queue LCK, F14). When the write after the set-aside fails, the unreadable file is put
   back in its place, with a line in the log, so that the next read still warns of it rather than finding nothing, and
-  the next write sets it aside again. A file the system only refused for a moment (another process holding it) is not
+  the next write sets it aside again. When the put-back fails too, the log says the file is missing now and names the
+  copy aside that holds its content ("nor put back"); the next read gives the default, and the copy is never written
+  over (queue LCG, survey LC4 finding 9). A file the system only refused for a moment (another process holding it) is not
   set aside. `auth.json` is set aside at once, before the new token is made: every device signs in again, and the log
   says why.
 - **The server's own files outside a project** (queue LCK, F13): an unreadable `deploy-plan.json` is not a silent
   "no plan" that the next plan replaces: when the server takes the files over (the planner's `recover`) the log names
-  the file and says the plan it held is lost, and the file is set aside. The hand-over files
+  the file and says the plan it held is lost, and the file is set aside; when it cannot be set aside, the log says so
+  and that the next plan written replaces it (survey LC4 finding 9). The hand-over files
   (`<NEXUS_HOME>/handover/<id>/`) are written whole and renamed, so one unreadable read is taken for a moment's state
   and read again at the next poll; the same file unreadable at the next read too is lasting damage, and the log names
   it once. It still reads as not there: the hand-over's waits run into their own limits, as for a file never written.

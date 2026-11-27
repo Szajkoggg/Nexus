@@ -11,6 +11,7 @@ import { join } from "node:path";
 import {
   ActionError, ProjectStore, addNote, applyDraft, approveQueue, ensureUserSession, loadProjectState, newId, now, queueView, readAway, readUsage, refuseUnreadable, sendMessage, sessionView, setAsideCorrupt, writeAway, USER_SESSION,
 } from "../src/index.ts";
+import { faultRenames } from "../src/store.ts";
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "nexus-unreadable-"));
@@ -196,6 +197,27 @@ test("F14: a write that fails after the unreadable file was set aside puts it ba
   warned(() => store.writeRuntime(id, { state: "idle", turns: 0, updated_at: now() }));
   assert.equal(readFileSync(`${file}.corrupt`, "utf8"), "{ half", "set aside at the next write");
   assert.equal(store.readRuntime(id)?.state, "idle");
+});
+
+// Survey LC4 finding 9 (queue LCG): the put-back itself fails. The file is missing then, and the warning says where its
+// unreadable content is; the next read finds no file (the default), and the copy aside is never written over.
+test("F14: a write that fails after the unreadable file was set aside, and whose put-back fails too, says it is missing and where its content is", () => {
+  const { store } = setup();
+  const { id, file } = metUnreadableRuntime(store, "{ half");
+  const writes = ProjectStore.faultWrites({ file: `sessions/${id}/runtime.json` });
+  const renames = faultRenames({ file: `sessions/${id}/runtime.json`, code: "EIO" }); // not passing: thrown at once
+  let lines: string[] = [];
+  try {
+    lines = warned(() => assert.throws(() => store.writeRuntime(id, { state: "idle", turns: 0, updated_at: now() }), /injected write fault/));
+  } finally { writes.clear(); renames.clear(); }
+  assert.equal(renames.failed(), 1, "the put-back's rename was refused");
+  assert.ok(!existsSync(file), "the file is missing now");
+  assert.equal(readFileSync(`${file}.corrupt`, "utf8"), "{ half", "its unreadable content is aside");
+  assert.ok(lines.some((l) => l.includes("runtime.json") && l.includes("nor put back") && l.includes("runtime.json.corrupt")), `told: ${lines.join(" | ")}`);
+  assert.equal(store.readRuntime(id), undefined, "a read finds no file: the default");
+  warned(() => store.writeRuntime(id, { state: "idle", turns: 0, updated_at: now() }));
+  assert.equal(store.readRuntime(id)?.state, "idle", "the next write goes in");
+  assert.equal(readFileSync(`${file}.corrupt`, "utf8"), "{ half", "the copy aside is kept");
 });
 
 test("F14: a second damage is set aside as <file>.corrupt.2, the first one's copy kept", () => {
