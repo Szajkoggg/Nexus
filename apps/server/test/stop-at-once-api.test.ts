@@ -61,9 +61,16 @@ test("Stop at once API waits for exit, keeps the pause and refuses an absent wor
     const bad = join(store.dir, "queues", "BAD", "queue.yaml");
     mkdirSync(dirname(bad), { recursive: true });
     writeFileSync(bad, "steps: [unclosed\n");
-    const unreadable = await fetch(`${url}/api/projects/p/queues/BAD/run`, {
+    // The server learns of the new folder through its watcher: until it has, the queue is unknown (404). The refused
+    // start changes nothing, so it is asked again until the answer is the file's.
+    const startBad = () => fetch(`${url}/api/projects/p/queues/BAD/run`, {
       method: "POST", headers: { "content-type": "application/json", origin: url }, body: JSON.stringify({ action: "start" }),
     });
+    let unreadable = await startBad();
+    for (const until = Date.now() + LONGER.step; unreadable.status === 404 && Date.now() < until;) {
+      await new Promise((r) => setTimeout(r, 100));
+      unreadable = await startBad();
+    }
     assert.equal(unreadable.status, 409);
     assert.match((await unreadable.json() as { error: string }).error, /queues\/BAD\/queue\.yaml cannot be read/);
     assert.equal(readFileSync(bad, "utf8"), "steps: [unclosed\n", "the file is untouched");
