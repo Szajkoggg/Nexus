@@ -19,7 +19,7 @@ params:
     # The same files as AGENTS.md's "Run control and lifecycle code" (scripts/test/run-control-list.test.ts).
     default: "the engine, the scheduler, the runtime adapters and the rest of the run control in apps/server/src:
       engine.ts, scheduler.ts, agent-host.ts, claude.ts, codex.ts, recurring.ts, lifecycle.ts, handover.ts,
-      deploy-plan.ts, check-runs.ts, capacity.ts, integration.ts, stopwork.ts, worker-process.ts, watchers.ts"
+      deploy-plan.ts, check-runs.ts, capacity.ts, integration.ts, stopwork.ts, worker-process.ts, worker-job.cs, worktree.ts, merger.ts, mergeback.ts, watchers.ts"
   - name: tests
     description: where the tests of that code are, and what they run against
     default: "apps/server/test, against the fake runtimes (fake-claude.ts, fake-codex.ts, steered by fake-behaviour.ts) and

@@ -28,10 +28,19 @@ test("a file only one list names is a difference", () => {
   assert.deepEqual(runControlDifferences(a, [...a].reverse()), []);
 });
 
+test("a .cs file only one list names is a difference too", () => {
+  const a = agentsRunControl(agents("`engine.ts`, `worker-job.cs`"));
+  const t = templateRunControl(template("engine.ts"));
+  assert.deepEqual(a, ["engine.ts", "worker-job.cs"]);
+  assert.deepEqual(runControlDifferences(a, t), ["worker-job.cs: in AGENTS.md, not in the nexus-lifecycle default"]);
+  assert.deepEqual(runControlDifferences(a, templateRunControl(template("engine.ts, worker-job.cs"))), []);
+});
+
 test("AGENTS.md and the nexus-lifecycle default name the same run-control files, and each exists", () => {
   const a = agentsRunControl(read("AGENTS.md"));
   const t = templateRunControl(read("nexus-templates/nexus-lifecycle.yaml"));
   assert.deepEqual(runControlDifferences(a, t), []);
   assert.ok(a.length > 0);
+  for (const f of ["worker-job.cs", "worktree.ts", "merger.ts", "mergeback.ts"]) assert.ok(a.includes(f), `${f} is on the list`);
   assert.deepEqual(a.filter((f) => !existsSync(join(ROOT, "apps/server/src", f))), []);
 });

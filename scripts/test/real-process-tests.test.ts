@@ -32,6 +32,9 @@ test("what a test file's code names tells how it starts processes; comments and 
   assert.deepEqual(processStarts(`execFileSync(process.execPath, [join(ROOT, "packages/cli/bin/nexus.js"), "status"]);`), ["the CLI as a process"]);
   assert.deepEqual(processStarts(`spawn(process.execPath, ["--test", file]);`), ["test files in a Node process of their own"]);
   assert.deepEqual(processStarts(`const r = await runSetup(command, cwd, { limitMs: 10 });`), ["a command's process tree (on Windows in a job host)"]);
+  assert.deepEqual(processStarts("updateSettings(store, { defaults: { worktree_setup: `node x.cjs` } });"), ["a command's process tree (on Windows in a job host)"]);
+  assert.deepEqual(processStarts(`updateSettings(store, { defaults: { worktree_setup: "npm ci" } });
+updateSettings(store, { defaults: { worktree_setup: null } });`), [], "a stored setting alone runs nothing");
   assert.deepEqual(processStarts(`// the fake (fake-claude.ts) answers\n/* spawnServer("x") */\nimport { PARTIAL } from "./fake-claude.ts";\nconst m = await import("./fake-codex.ts");`), []);
   assert.ok(usesInProcessRuntime(`new Engine(store, tick, { spawn: inProcessRuntime() });`));
   assert.ok(usesInProcessRuntime(`new CodexSession({ cwd, env: {}, spawnChild: inProcessCodex });`));
