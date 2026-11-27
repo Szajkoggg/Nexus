@@ -21,7 +21,10 @@ function withSetup(store: ProjectStore) {
   writeFileSync(script, `const fs = require("fs"), path = require("path");
 fs.appendFileSync(path.join(__dirname, "setup.log"), process.cwd() + "\\n");
 // A file "hold": this run waits for a file "go" (the test's gate), then takes "hold" away (the next run does not wait).
-if (fs.existsSync(path.join(__dirname, "hold"))) {
+// A number in it: that many runs pass by the gate first (counting it down), and the one after waits.
+const hold = path.join(__dirname, "hold"), skip = fs.existsSync(hold) ? Number(fs.readFileSync(hold, "utf8").trim() || "0") : 0;
+if (skip > 0) fs.writeFileSync(hold, String(skip - 1));
+else if (fs.existsSync(hold)) {
   fs.writeFileSync(path.join(__dirname, "pid"), String(process.pid));
   while (!fs.existsSync(path.join(__dirname, "go"))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
   fs.rmSync(path.join(__dirname, "hold"));
@@ -159,5 +162,35 @@ for (const how of ["pause", "stop", "drain", "drain-now", "shutdown"] as const) 
       assert.deepEqual(s.runs(), [wt, wt], "run again when the run went on, and passed");
       assert.ok(x.store.readGit("Q")!.setup!.done_at);
     } finally { writeFileSync(s.go, ""); engine.shutdown(); x.engine.shutdown(); rmSync(s.dir, { recursive: true, force: true }); }
+  });
+}
+
+// Survey LC4 finding 6, the user's decision D5 with queue LCG: a Pause or Stop while the second try runs records no
+// failure and halts nothing either, as one while the first try runs; the next Resume runs the setup again.
+for (const how of ["pause", "stop"] as const) {
+  test(`${how} while the second try of a failing setup command runs: no failure recorded, no halt; it runs again when the run goes on`, async () => {
+    const x = setup(["done"]);
+    const s = withSetup(x.store);
+    writeFileSync(s.fail, "2"); // both tries fail: the run after the interruption passes
+    writeFileSync(s.hold, "1"); // the first try passes by the gate, the second waits at it
+    x.store.writeQueue({ ...x.store.readQueue("Q"), worktree: "auto" });
+    try {
+      x.engine.start("Q", { runtime: "claude" });
+      await x.until("the second try waits at its gate", () => existsSync(join(s.dir, "pid")), LONGER.run);
+      const wt = lower(x.store.readQueue("Q").worktree!);
+      assert.deepEqual(s.runs(), [wt, wt], "the second try runs");
+      if (how === "pause") x.engine.pause("Q"); else x.engine.stopNow("Q");
+      writeFileSync(s.go, "");
+      await x.until("the second try ended", () => !existsSync(s.hold), LONGER.run);
+      await x.until("the engine let go of it", () => x.engine.idle(), LONGER.run);
+      assert.equal(x.store.readGit("Q")?.setup?.failed, undefined, "no failure recorded");
+      assert.equal(x.store.readGit("Q")?.setup?.done_at, undefined);
+      assert.equal(x.queue().run?.state, "paused", "no halt");
+      assert.equal(x.queue().steps[0]!.status, "pending", "no step opened");
+      x.engine.resume("Q");
+      await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
+      assert.deepEqual(s.runs(), [wt, wt, wt], "run again when the run went on, and passed");
+      assert.ok(x.store.readGit("Q")!.setup!.done_at);
+    } finally { writeFileSync(s.go, ""); x.engine.shutdown(); rmSync(s.dir, { recursive: true, force: true }); }
   });
 }

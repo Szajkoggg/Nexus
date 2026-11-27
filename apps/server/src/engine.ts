@@ -1120,20 +1120,24 @@ export class Engine implements Member {
     // Failing, it is tried once more (a network hiccup, a locked file), then the run halts with its output: the worker
     // cannot fix the machine's install (the user's decision of 2026-11-23, queue CK). A run paused or stopped meanwhile
     // (the user's Pause or Stop, an update's drain) gets no second try and records nothing: the setup runs again when
-    // the run goes on (the user's decision with queue LCK, survey LC3 F4).
+    // the run goes on (the user's decision with queue LCK, survey LC3 F4). The same holds for one paused or stopped
+    // while the second try ran (the user's decision D5 with queue LCG, survey LC4 finding 6).
     let skipped = false;
+    const interrupted = (failure: string) => {
+      if (this.store.readRun(queueId)?.state === "running") return false;
+      skipped = true;
+      this.store.appendActivity(run.session, { at: now(), kind: "error", text: `The worktree setup command failed: ${failure}; the run was paused or stopped meanwhile, so Nexus tries it again when the run goes on`, queue: queueId });
+      return true;
+    };
     void once().then((first) => {
       if (!first || this.setupsEnded.has(queueId) || this.stopped) return first;
-      if (this.store.readRun(queueId)?.state !== "running") {
-        skipped = true;
-        this.store.appendActivity(run.session, { at: now(), kind: "error", text: `The worktree setup command failed: ${first}; the run was paused or stopped meanwhile, so Nexus tries it again when the run goes on`, queue: queueId });
-        return first;
-      }
+      if (interrupted(first)) return first;
       this.store.appendActivity(run.session, { at: now(), kind: "error", text: `The worktree setup command failed: ${first}; Nexus tries it once more`, queue: queueId });
       return once();
     }).then((failure) => {
       this.setups.delete(queueId);
       if (this.setupsEnded.delete(queueId) || this.stopped || skipped) return;
+      if (failure && interrupted(failure)) return;
       recordSetup(this.store, queueId, command, failure, failure ? undefined : gitRead(cwd, ["rev-parse", "HEAD"]));
       const latest = this.store.readRun(queueId);
       this.store.appendActivity(run.session, { at: now(), kind: failure ? "error" : "text", text: failure ? `The worktree setup command failed: ${failure}` : "The worktree setup command succeeded", queue: queueId });
