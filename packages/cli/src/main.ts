@@ -384,6 +384,19 @@ function queueFor(st: ProjectStore, s: SessionFile, step?: string): string {
   throw new UsageError("no queue: add --queue");
 }
 
+/**
+ * The queue a question or a context summary belongs to, if one is found: none when queueFor finds none (a session
+ * without a queue, no step given), but an unreadable queue.yaml met on the way is refused naming it (CHC1), not taken
+ * for "no queue".
+ */
+function queueIfAny(st: ProjectStore, s: SessionFile, step?: string): string | undefined {
+  try { return queueFor(st, s, step); } catch (e) {
+    if (e instanceof UsageError) return undefined;
+    if (isUnreadableFile(e)) throw new UsageError(e.message);
+    throw e;
+  }
+}
+
 function checkStep(st: ProjectStore, queue: string, step: string): void {
   const q = known(() => st.readQueue(queue), `unknown queue ${queue}`);
   const steps = stepDefs(q); // with the closing refactoring step, when the queue has one
@@ -670,13 +683,18 @@ function reviewAudit(): void {
 
 /**
  * A review helper's session runs only what reads and its own review commands (H15): the CLI refuses it every other
- * command, so a helper reports a refusal in its verdict instead of asking or writing anything else.
+ * command, so a helper reports a refusal in its verdict instead of asking or writing anything else. A call outside a
+ * project, or with a session the project does not have (a NEXUS_SESSION inherited into a test project), passes; a
+ * session.yaml that is there but cannot be read is refused naming it (CHC1): it could be a helper's.
  */
 function helperGate(cmd: string): void {
   const sid = sessionId();
   if (!sid) return;
   let role: string | undefined;
-  try { role = store().readSession(sid).role; } catch { return; }
+  try { role = store().readSession(sid).role; } catch (e) {
+    if (isUnreadableFile(e)) throw new UsageError(e.message);
+    return;
+  }
   if (role !== "helper") return;
   if (cmd === "status" || cmd === "help" || cmd === "doc" || (cmd === "review" && ["accept", "send-back", "pass-on", "decide", "ask-user"].includes(args()[1] ?? ""))) return;
   throw new UsageError(`a review helper only reads and decides its review (nexus status, nexus help, nexus doc, nexus review accept|send-back|pass-on|decide|ask-user), not nexus ${[cmd, args()[1]].filter(Boolean).join(" ")}; pass the step on with --why doubt, naming what you could not do`);
@@ -891,8 +909,12 @@ const commands: Record<string, () => void | Promise<void>> = {
       if (sid) {
         let role: string | undefined;
         let project: string | undefined;
-        try { const st = store(); role = st.readSession(sid).role; project = st.readProject().id; } catch { role = undefined; }
         const what = sub === "cancel-plan" ? "cancel a planned update of" : o().after?.length || o().at !== undefined ? "plan an update of" : sub;
+        try { const st = store(); role = st.readSession(sid).role; project = st.readProject().id; } catch (e) {
+          // An unreadable session.yaml or project.yaml is refused as before, but named (CHC1), not "not a session".
+          if (isUnreadableFile(e)) throw new UsageError(`only the user or an orchestrator may ${what} the Nexus server, and ${e.message}`);
+          role = undefined;
+        }
         if (role !== "orchestrator") throw new UsageError(`only the user or an orchestrator may ${what} the Nexus server, not a ${role ?? "session"}`);
         // The orchestrator that asks is told the outcome after the restart (or if the update fails).
         if (project) by = { project, session: sid };
@@ -913,7 +935,10 @@ const commands: Record<string, () => void | Promise<void>> = {
       if (!queue || more !== undefined || step === "") throw new UsageError("--after <queue>[/<step>], e.g. --after PD or --after PD/PD1");
       // The queue is one of this project's: the orchestrator's own, or the one of the directory this runs in.
       let project: string | undefined;
-      try { project = store().readProject().id; } catch { project = undefined; }
+      try { project = store().readProject().id; } catch (e) {
+        if (isUnreadableFile(e)) throw new UsageError(e.message); // there, but unreadable: not "no .nexus/" (CHC1)
+        project = undefined;
+      }
       if (!project) throw new UsageError("run it in a Nexus project (no .nexus/ found here): --after names a queue of that project");
       const r = await server("POST", "/api/server/plan", { after: { project, queue, step }, ref: o().ref, by });
       say(`ok: ${r.text}`);
@@ -1113,8 +1138,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     const st = store(); const s = session(st);
     const text = readText(need(args()[1], "<text>"));
     const step = o().step;
-    let queue: string | undefined;
-    try { queue = queueFor(st, s, step); } catch { queue = undefined; }
+    const queue = queueIfAny(st, s, step);
     if (queue && step) checkStep(st, queue, step);
     const recommend = o().recommend;
     const recommended = recommend === undefined ? undefined : recommendation(o().option, recommend);
@@ -1142,8 +1166,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     noMore(2, "nexus context <text|->");
     const st = store(); const s = session(st);
     const text = readText(need(args()[1], "<text|->"));
-    let queue: string | undefined;
-    try { queue = queueFor(st, s, o().step); } catch { queue = undefined; }
+    const queue = queueIfAny(st, s, o().step);
     emit(st, s, { type: "context.summary", queue, step: o().step, text, topics: list(o().topics), files: list(o().files) });
     // The standard's length (nexus help context): recorded anyway, with a word to shorten the next one.
     const words = text.split(/\s+/).filter(Boolean).length;

@@ -60,7 +60,7 @@ nexus ideas propose add --queue N4 --ref deploy-timing.md#2026-11-14 --reason "N
 nexus ideas propose --file proposals.yaml [--reason "From the notes survey's report"]   # a batch, one event: a list of {op, queue, ref, to?, reason, evidence?}, or {reason, items: [...]}; one bad item refuses the whole batch. Accepting or declining is the user's only: nexus ideas accept|reject are refused for every role
 # thinking partner only
 nexus covers tags.md#2026-11-14 docs/ideas/plan.md#2026-11-15   # in a hand-over: the Decided entries it passes on (ideas.covered); the notes folder may be left out; each checked against the notes, a missing note or date refused with the note's dates
-# review helper only (and nexus status, nexus help, nexus doc; every other command is refused a helper)
+# review helper only (and nexus status, nexus help, nexus doc; every other command is refused a helper; a NEXUS_SESSION whose session.yaml cannot be read is refused every such command too, naming the file: it could be a helper's; one the project has no session for, or a call outside a project, passes)
 nexus review accept W W3 --note "what it checked"   # level 2 only; send-back as the orchestrator's (below); both only for its own step
 nexus review pass-on W W3 --why criterion,doubt --findings "what it checked and what it could not"   # to the orchestrator; reasons: criterion, deviation, question, limit, doubt, level, decision, user_decision
 nexus review decide W W3 D2 --choice keep --reason "..."   # a reviewer's decision only (the user's are refused a helper); no verdict
@@ -107,7 +107,11 @@ nexus server cancel                            # give up waiting for a deploy; t
 A command line the CLI cannot take (an unknown option, an option without its value, a value the protocol does not know,
 positional arguments beyond the command's own, such as an unquoted text or a list given as a glob, a text given as `-`
 with an empty standard input, a file named that is not there, an unknown queue or session (one whose `queue.yaml` or
-`session.yaml` is there but cannot be read is refused naming that file and why, not as unknown), a `--session` other than a set
+`session.yaml` is there but cannot be read is refused naming that file and why, not as unknown; so is one met on the
+way to something else: a `queue.yaml` read while `nexus ask` or `nexus context` look for the queue of `--step`, which
+otherwise records the question or summary without a queue when none is found, and the `session.yaml` or `project.yaml`
+`nexus server update`, `cancel` and `cancel-plan` read to check the role and the project, still refused but named rather
+than "not a session" or "no .nexus/ found here"), a `--session` other than a set
 `NEXUS_SESSION`, a `nexus check` name that is not one of the step's checks, which the message lists)
 ends with `nexus: <what is wrong>` on stderr and exit code 2, as every refusal does, never with a stack trace. A
 negative number reads as an option: a positional one goes after `--` (`nexus metric record delta -- -5`), an option's
