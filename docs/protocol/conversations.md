@@ -8,7 +8,8 @@ See also: [Stopping a chat agent's turn](orchestrator.md#stopping-a-chat-agents-
 
 `project.yaml` holds `conversations: { notes_dir?, runtime, model?, effort?, web }`. A conversation is a session with
 role `conversation`: a thinking partner the user talks with about the project, one session per topic, with its chat
-in `chat.jsonl` (`from: partner` for its replies, whole). It reads the whole project and writes only in `notes_dir`
+in `chat.jsonl` (`from: partner` for its replies, whole; a failed turn's error row as in the orchestrator's chat, see
+[runtime-files.md](runtime-files.md), the orchestrator's `chat.jsonl`). It reads the whole project and writes only in `notes_dir`
 (relative to the root, checked to lie inside it): Claude Code runs it in `dontAsk` mode allowed `Read`, `Grep`,
 `Glob`, `nexus status`, `nexus ideas status`, `nexus help`, `nexus doc`, `nexus tags` and read-only git (`git log`, `git status`, `git diff`, `git show`) on both shell
 tools (`Bash(nexus status:*)` and `PowerShell(nexus status:*)`, and so on), and `Edit(<notes_dir>/**)` and `nexus covers`

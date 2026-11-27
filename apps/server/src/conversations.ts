@@ -20,7 +20,7 @@ import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launc
 import { COMPACTS } from "./agent.ts";
 import type { Orchestrator } from "./orchestrator.ts";
 import { partnerBriefing, restartedNotice } from "./prompts.ts";
-import { RESTARTED, STOPPED, chatView } from "./chats.ts";
+import { RESTARTED, STOPPED, TurnErrorRows, chatView } from "./chats.ts";
 import { guardSettings, webFetchDenyRules } from "./web-guard.ts";
 import { shellRules } from "./shell-rules.ts";
 import { modelEffortIssue } from "./models.ts";
@@ -509,12 +509,14 @@ ${text}`;
     return this.host.start(s, this.launcher(s), {}, (l) => {
       // The partner's last text of the turn, whole: during a hand-over, the summary.
       let reply = "";
+      // A failed turn's one error row (chats.ts, TurnErrorRows: the same rule as the orchestrator's chat).
+      const errors = new TurnErrorRows((text) => this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text }));
       return {
         message: (text) => { reply = text; if (!l.handoff) this.store.appendChat(s.id, { at: now(), from: "partner", text }); },
         activity: (a) => {
           if (a.kind === "tool") this.store.appendChat(s.id, { at: now(), from: "partner", kind: "tool", text: a.text });
-          else if (a.kind === "error") this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: a.text });
           else if (a.kind === "turn_start") reply = "";
+          errors.activity(a, l.proc.state === "working");
         },
         compacted: (c) => {
           if (!l.compacting) return; // the runtime's own compaction in a turn: not the user's
@@ -523,10 +525,18 @@ ${text}`;
           this.store.appendChat(s.id, { at: now(), from: "nexus", text: `${COMPACTED}${tokens}` });
         },
         turnEnd: (end) => {
-          if (l.compacting) {
+          const compaction = l.compacting;
+          if (compaction) {
             l.compacting = false;
-            if (!l.compacted) this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `The conversation was not compacted${end.stopped ? ": stopped" : end.ok ? "" : `: ${end.text}`}.` });
-          } else if (l.handoff) {
+            // A compaction that did not happen has its own row, the turn's one.
+            if (!l.compacted) {
+              errors.drop();
+              this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `The conversation was not compacted${end.stopped ? ": stopped" : end.ok ? "" : `: ${end.text}`}.` });
+            } else errors.turnEnd(end);
+          } else {
+            errors.turnEnd(end);
+          }
+          if (!compaction && l.handoff) {
             l.handoff = false;
             // A stopped hand-over hands nothing over.
             const summary = end.stopped ? "" : reply.trim();

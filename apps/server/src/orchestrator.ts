@@ -14,7 +14,7 @@ import type { CodexPermissions } from "./codex.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
 import type { Engine } from "./engine.ts";
 import { orchestratorAgentsFile } from "./helpers.ts";
-import { RESTARTED, STOPPED, chatView } from "./chats.ts";
+import { RESTARTED, STOPPED, TurnErrorRows, chatView } from "./chats.ts";
 import type { UpdateNotice } from "./lifecycle.ts";
 import { describeDeployChanges, type DeployChanges } from "./deploy.ts";
 import type { CrashRecord } from "./crash.ts";
@@ -665,15 +665,17 @@ ${n.text}` });
     }
     const dropped = o?.effort && effortIssue(s.runtime === "codex" ? "codex" : "claude", o.effort);
     if (dropped) this.store.appendChat(s.id, { at: now(), from: "nexus", text: `The orchestrator's effort ${o.effort} is not one Claude Code takes (${dropped}): it runs at Claude Code's default.` });
-    this.host.start(s, this.launcher(s), {}, () => ({
+    // A failed turn's one error row (chats.ts, TurnErrorRows: the same rule as a thinking partner's chat).
+    const errors = new TurnErrorRows((text) => this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text }));
+    this.host.start(s, this.launcher(s), {}, (l) => ({
       // The chat gets the orchestrator's texts whole; the activity log keeps them clipped.
       message: (text) => this.store.appendChat(s.id, { at: now(), from: "orchestrator", text }),
       activity: (a) => {
         if (a.kind === "tool") this.store.appendChat(s.id, { at: now(), from: "orchestrator", kind: "tool", text: a.text });
-        else if (a.kind === "error" || (a.kind === "turn_end" && a.text.includes("error"))) this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: a.text });
+        errors.activity(a, l.proc.state === "working");
         this.store.appendActivity(s.id, { at: now(), ...a });
       },
-      turnEnd: () => this.changed(),
+      turnEnd: (end) => { errors.turnEnd(end); this.changed(); },
       settled: () => { this.retireStale(); this.changed(); },
       exit: () => this.changed(),
     }));
