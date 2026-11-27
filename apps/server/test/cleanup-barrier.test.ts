@@ -152,6 +152,14 @@ test("a pending cleanup keeps the engine from being idle: cleaningSessions names
   } finally { g.release(); x.engine.shutdown(); }
 });
 
+/** Q1 was not repeated and Q2 ran once, in a second process (the first one ended with its failed cleanup). */
+function q2OnceInNewProcess(x: ReturnType<typeof setup>, seen: { spawned: number }): void {
+  const [q1, q2] = x.queue().steps;
+  assert.equal(q1!.timeline.filter((e) => e.type === "step.started").length, 1, "Q1 not repeated");
+  assert.equal(q2!.timeline.filter((e) => e.type === "step.started").length, 1, "Q2 once");
+  assert.equal(seen.spawned, 2, "Q2 ran in a new process");
+}
+
 test("an update's drain while a cleanup is pending: the engine stays busy until its outcome; a failure leaves the run held (no halt), says so in the activity and ends the process; the next server goes on by itself in a new process, Q2 once", async () => {
   const { seen, wrap } = watched();
   const g = gatedCleanup({ make: inProcessRuntime({ wrap }) });
@@ -178,10 +186,7 @@ test("an update's drain while a cleanup is pending: the engine stays busy until 
     g.release();
     next = restart(x.store, { ...FAST, spawn: g.spawn });
     await x.until("the queue finishes", () => x.queue().run?.state === "finished", LONGER.run);
-    const [q1, q2] = x.queue().steps;
-    assert.equal(q1!.timeline.filter((e) => e.type === "step.started").length, 1, "Q1 not repeated");
-    assert.equal(q2!.timeline.filter((e) => e.type === "step.started").length, 1, "Q2 once");
-    assert.equal(seen.spawned, 2, "Q2 ran in a new process");
+    q2OnceInNewProcess(x, seen);
   } finally { g.release(); x.engine.shutdown(); next?.shutdown(); }
 });
 
@@ -202,10 +207,7 @@ async function pausedThroughFailure(x: ReturnType<typeof setup>, seen: { exitedA
   assert.ok(!x.received().some((m) => m.text.includes("step Q2")));
   x.engine.resume("Q");
   await x.until("the run to finish", () => x.queue().run?.state === "finished", LONGER.run);
-  const [q1, q2] = x.queue().steps;
-  assert.equal(q1!.timeline.filter((e) => e.type === "step.started").length, 1, "Q1 not repeated");
-  assert.equal(q2!.timeline.filter((e) => e.type === "step.started").length, 1, "Q2 once");
-  assert.equal(seen.spawned, 2, "Q2 ran in a new process");
+  q2OnceInNewProcess(x, seen);
 }
 
 test("Stop now on a process in its cleanup barrier, the cleanup timing out twice: the run stays paused (stopped by the user), no halt; the failure is in the activity, the process ended, Q2 never opens; Resume runs Q2 once in a new process", async () => {
@@ -276,10 +278,7 @@ for (const withExit of ["before", "after"] as const) {
       g.fail("worker job host exited", { withExit, once: true });
       await x.until("the run finishes or halts", () => x.queue().run?.state === "finished" || x.queue().run?.state === "halted", LONGER.run);
       assert.equal(x.queue().run?.state, "finished", `no halt (${x.queue().run?.reason ?? ""})`);
-      const [q1, q2] = x.queue().steps;
-      assert.equal(q1!.timeline.filter((e) => e.type === "step.started").length, 1, "Q1 not repeated");
-      assert.equal(q2!.timeline.filter((e) => e.type === "step.started").length, 1, "Q2 once");
-      assert.equal(seen.spawned, 2, "Q2 ran in a new process");
+      q2OnceInNewProcess(x, seen);
       assert.equal(notes(x, "takes it as the process's exit").length, 1, "the host's end is in the activity");
     } finally { g.release(); x.engine.shutdown(); }
   });
