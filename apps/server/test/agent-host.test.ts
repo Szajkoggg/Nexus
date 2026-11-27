@@ -23,7 +23,7 @@ class Stand extends EventEmitter<AgentEvents> implements AgentProcess {
   close(): void { this.calls.push("close"); }
   kill(): void { this.calls.push("kill"); this.exit(null); }
   exit(code: number | null): void { if (this.state === "exited") return; this.state = "exited"; this.emit("exit", code); }
-  turn(): void { this.state = "idle"; this.emit("turnEnd", { ok: true, text: "" }); }
+  turn(): void { this.state = "idle"; this.emit("turnEnd", { ok: true, stopped: false, text: "" }); }
 }
 
 function setup(record: RoleRecord, runtime: "claude" | "codex" = "claude") {

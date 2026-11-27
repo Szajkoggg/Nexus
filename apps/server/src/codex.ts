@@ -267,7 +267,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
       const text = errorText(err);
       this.emit("activity", { kind: "error", text: `thread/compact/start: ${text}` });
       this.state = "idle";
-      this.emit("turnEnd", { ok: false, text, failure: { kind: "lasting", code: "compactRejected", text: clip(text, 300) } });
+      this.emit("turnEnd", { ok: false, stopped: false, text, failure: { kind: "lasting", code: "compactRejected", text: clip(text, 300) } });
     });
   }
 
@@ -386,7 +386,7 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
         if (this.state === "exited") return;
         this.emit("activity", { kind: "error", text: `turn/start: ${errorText(err)}` });
         this.state = "idle";
-        this.emit("turnEnd", { ok: false, text: errorText(err), failure: { kind: "lasting", code: "turnStartRejected", text: clip(errorText(err), 300) } });
+        this.emit("turnEnd", { ok: false, stopped: false, text: errorText(err), failure: { kind: "lasting", code: "turnStartRejected", text: clip(errorText(err), 300) } });
       });
   }
 
@@ -481,14 +481,14 @@ export class CodexSession extends EventEmitter<AgentEvents> implements AgentProc
           this.carry.push(...this.steered, ...this.queue);
           this.steered = [];
           this.queue = [];
-          this.emit("turnEnd", { ok: false, text: "stopped", tokens });
+          this.emit("turnEnd", { ok: false, stopped: true, text: "stopped", tokens });
           const after = this.afterStop;
           this.afterStop = [];
           if (after.length && this.state === "idle") this.startTurn(this.withCarry(after.join("\n\n")));
           return;
         }
         this.steered = [];
-        this.emit("turnEnd", { ok, text: status, failure, tokens });
+        this.emit("turnEnd", { ok, stopped: false, text: status, failure, tokens });
         const next = this.queue.shift();
         if (next !== undefined && this.state === "idle") this.startTurn(next);
         return;

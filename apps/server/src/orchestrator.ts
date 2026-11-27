@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, Effort, acceptedByNexus, ideaStatuses, contextLimit, acceptedOn, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, sessionLine, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type SessionFile, type SessionView, type StepView, proposalDecisions, type IdeaProposal,
+  ActionError, DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, Effort, acceptedByNexus, ideaStatuses, contextLimit, acceptedOn, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, sessionLine, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type RunFile, type SessionFile, type SessionView, type StepView, proposalDecisions, type IdeaProposal,
 } from "@nexus/protocol";
 import { reachable, type AgentProcess } from "./agent.ts";
 import type { CodexPermissions } from "./codex.ts";
@@ -67,6 +67,16 @@ const SUMMARY_ASKED = "context:asked";
 const FIRST_FILL = "context:first";
 /** A context fill (0 to 1) in whole percent. */
 const pct = (fill: number) => Math.round(fill * 100);
+
+/**
+ * Whether a paused run was paused by a Pause someone asked for (RunFile.pause). A run.yaml written before the field
+ * has none: there, and only there, the reason's text tells, as it did then ("paused by the user"; a stop, a rejection,
+ * a restart and an update read otherwise).
+ */
+function pausedByAsking(r: RunFile): boolean {
+  if (r.pause) return r.pause === "pause";
+  return !!r.reason?.startsWith("paused by the user");
+}
 /** How many chat entries the view sends: the current session's newest, and then the earlier sessions' of its line. */
 const VIEW_ENTRIES = 300;
 /** The earlier sessions' entries the view sends at least, however long the current session's chat. */
@@ -1034,9 +1044,9 @@ ${n.text}` });
       const long = state.attention.find((a) => a.kind === "paused" && a.queue === q.id);
       if (long?.paused && long.at && long.at >= since) items.push({ key: `notify:pausedlong:${long.paused.key}`, ...pausedLongNotice(q, long.paused) });
       if (!r) continue;
-      // A pause someone asked for (the user, or you with nexus run pause), reached at a step's end. Not a stop, and
-      // not the pauses of a server restart or an update, whose reasons differ.
-      if (r.state === "paused" && r.reason?.startsWith("paused by the user") && r.ended_at && r.ended_at >= since) {
+      // A pause someone asked for (the user, or you with nexus run pause), reached at a step's end: run.yaml's pause
+      // names it. Not a stop or a rejection, and not the pauses of a server restart or an update (which have none).
+      if (r.state === "paused" && pausedByAsking(r) && r.ended_at && r.ended_at >= since) {
         items.push({ key: `notify:paused:${q.id}:${r.ended_at}`, ...pausedNotice(q, r) });
       }
       if ((r.state !== "halted" && r.state !== "finished") || r.updated_at < since) continue;

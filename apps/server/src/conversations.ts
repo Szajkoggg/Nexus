@@ -525,11 +525,11 @@ ${text}`;
         turnEnd: (end) => {
           if (l.compacting) {
             l.compacting = false;
-            if (!l.compacted) this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `The conversation was not compacted${end.text === "stopped" ? ": stopped" : end.ok ? "" : `: ${end.text}`}.` });
+            if (!l.compacted) this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `The conversation was not compacted${end.stopped ? ": stopped" : end.ok ? "" : `: ${end.text}`}.` });
           } else if (l.handoff) {
             l.handoff = false;
             // A stopped hand-over hands nothing over.
-            const summary = end.text === "stopped" ? "" : reply.trim();
+            const summary = end.stopped ? "" : reply.trim();
             if (summary) {
               this.store.appendChat(s.id, { at: now(), from: "partner", text: summary });
               try {

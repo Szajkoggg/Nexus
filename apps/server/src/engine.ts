@@ -420,7 +420,7 @@ export class Engine implements Member {
     if ((runGoing(run) && run.state !== "pausing") || run.resume_after_restart) {
       const working = this.host.get(run.session)?.proc.state === "working";
       this.clearTimer(queueId);
-      this.writeRun(queueId, toPausedByUser(run, "paused by the user", { pausing: working }));
+      this.writeRun(queueId, toPausedByUser(run, "paused by the user", "pause", { pausing: working }));
     }
   }
 
@@ -630,7 +630,7 @@ export class Engine implements Member {
     const run = this.run(queueId);
     const live = this.host.get(run.session);
     this.clearTimer(queueId);
-    this.writeRun(queueId, toPausedByUser(run, "stopped by the user"));
+    this.writeRun(queueId, toPausedByUser(run, "stopped by the user", "stop"));
     this.checks?.stop(queueId);
     if (live && live.proc.state === "working" && !live.proc.exiting) {
       live.proc.send(
@@ -653,7 +653,7 @@ export class Engine implements Member {
     this.clearTimer(queueId);
     this.endBackgroundWait(queueId);
     // Stamped after the step's last events (writeRun reads the session's log first).
-    this.writeRun(queueId, toPausedByUser(run, "stopped at once by the user; uncommitted changes kept"));
+    this.writeRun(queueId, toPausedByUser(run, "stopped at once by the user; uncommitted changes kept", "stop"));
     this.checks?.stop(queueId);
     if (run.step) {
       const user = ensureUserSession(this.store);
@@ -687,7 +687,7 @@ export class Engine implements Member {
     const run = this.store.readRun(queueId);
     if (run && run.state !== "finished") {
       this.clearTimer(queueId);
-      this.writeRun(queueId, toPausedByUser(run, `step ${step} was rejected by the user${why ? `: ${why}` : ""}`, { rejected: step }));
+      this.writeRun(queueId, toPausedByUser(run, `step ${step} was rejected by the user${why ? `: ${why}` : ""}`, "reject", { rejected: step }));
     }
     this.changed();
     return `step ${queueId}/${step} rejected; the run is paused`;

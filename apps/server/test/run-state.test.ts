@@ -12,7 +12,7 @@ import {
 const FULL: RunFile = {
   protocol: 1, session: "S1", state: "running", after: "P", reason: "an old reason", step: "Q2", nudged: true,
   started_at: "2026-01-01T09:00:00.000Z", updated_at: "2026-01-01T09:30:00.000Z", ended_at: "2026-01-01T09:20:00.000Z",
-  resume_at: "2026-01-01T10:00:00.000Z", retries: 2, failure: "overloaded", rejected: "Q1", resume_after_restart: true,
+  resume_at: "2026-01-01T10:00:00.000Z", retries: 2, failure: "overloaded", rejected: "Q1", pause: "stop", resume_after_restart: true,
   revision: 2, runtime: "claude", model: "sonnet", effort: "high", summary_asked: "Q1",
   switches: [{ at: "2026-01-01T09:10:00.000Z", from: "S0", to: "S1", step: "Q2", why: "context", fill: 0.7, summary: "written" }],
 };
@@ -35,16 +35,16 @@ test("startedRun: a new running record of the revision, with the run's own value
   });
 });
 
-test("toResumed: running, not nudged; reason, wait and hold cleared; a rejected run takes the approved revision", () => {
+test("toResumed: running, not nudged; reason, pause kind, wait and hold cleared; a rejected run takes the approved revision", () => {
   const paused: RunFile = { ...FULL, state: "paused" };
   assert.deepEqual(delta(toResumed(paused, 5), paused), {
     set: { state: "running", nudged: false, revision: 5 },
-    cleared: ["reason", "rejected", "resume_after_restart", "resume_at"],
+    cleared: ["pause", "reason", "rejected", "resume_after_restart", "resume_at"],
   });
   const plain: RunFile = { ...paused, rejected: undefined };
   assert.deepEqual(delta(toResumed(plain, 5), plain), {
     set: { state: "running", nudged: false },
-    cleared: ["reason", "resume_after_restart", "resume_at"],
+    cleared: ["pause", "reason", "resume_after_restart", "resume_at"],
   }, "without a rejection the revision stays");
 });
 
@@ -53,23 +53,23 @@ test("toUnheld: back to running from an update's pausing; nudged and resume_at k
   assert.deepEqual(delta(toUnheld(pausing), pausing), { set: { state: "running" }, cleared: ["reason", "resume_after_restart"] });
 });
 
-test("toPausedByUser: pausing or paused with the reason; wait and hold dropped; a rejection recorded", () => {
-  assert.deepEqual(delta(toPausedByUser(FULL, "paused by the user", { pausing: true })), {
-    set: { state: "pausing", reason: "paused by the user" }, cleared: ["resume_after_restart", "resume_at"],
+test("toPausedByUser: pausing or paused with the reason and the pause's kind; wait and hold dropped; a rejection recorded", () => {
+  assert.deepEqual(delta(toPausedByUser(FULL, "paused by the user", "pause", { pausing: true })), {
+    set: { state: "pausing", reason: "paused by the user", pause: "pause" }, cleared: ["resume_after_restart", "resume_at"],
   });
-  assert.deepEqual(delta(toPausedByUser(FULL, "stopped by the user")), {
+  assert.deepEqual(delta(toPausedByUser(FULL, "stopped by the user", "stop")), {
     set: { state: "paused", reason: "stopped by the user" }, cleared: ["resume_after_restart", "resume_at"],
   });
   const unrejected: RunFile = { ...FULL, rejected: undefined };
-  assert.deepEqual(delta(toPausedByUser(unrejected, "step Q2 was rejected by the user", { rejected: "Q2" }), unrejected), {
-    set: { state: "paused", reason: "step Q2 was rejected by the user", rejected: "Q2" }, cleared: ["resume_after_restart", "resume_at"],
+  assert.deepEqual(delta(toPausedByUser(unrejected, "step Q2 was rejected by the user", "reject", { rejected: "Q2" }), unrejected), {
+    set: { state: "paused", reason: "step Q2 was rejected by the user", pause: "reject", rejected: "Q2" }, cleared: ["resume_after_restart", "resume_at"],
   });
 });
 
-test("toHeldForUpdate: pausing or paused with the reason, held for the restart; nothing cleared", () => {
+test("toHeldForUpdate: pausing or paused with the reason, held for the restart; the kind of a user's pause cleared", () => {
   const free = { ...FULL, resume_after_restart: undefined };
-  assert.deepEqual(delta(toHeldForUpdate(free, "updating", { pausing: true }), free), { set: { state: "pausing", reason: "updating", resume_after_restart: true }, cleared: [] });
-  assert.deepEqual(delta(toHeldForUpdate(free, "updating"), free), { set: { state: "paused", reason: "updating", resume_after_restart: true }, cleared: [] });
+  assert.deepEqual(delta(toHeldForUpdate(free, "updating", { pausing: true }), free), { set: { state: "pausing", reason: "updating", resume_after_restart: true }, cleared: ["pause"] });
+  assert.deepEqual(delta(toHeldForUpdate(free, "updating"), free), { set: { state: "paused", reason: "updating", resume_after_restart: true }, cleared: ["pause"] });
 });
 
 test("toPaused: paused, everything else kept; the reason only when given", () => {
@@ -115,7 +115,7 @@ test("toRetryWait: retry_wait at the time, counting the tries and naming the fai
 
 test("the transitions do not change the run they are given", () => {
   const copy = structuredClone(FULL);
-  for (const f of [() => toResumed(FULL, 9), () => toUnheld(FULL), () => toPausedByUser(FULL, "x", { rejected: "Q9" }), () => toHeldForUpdate(FULL, "x"),
+  for (const f of [() => toResumed(FULL, 9), () => toUnheld(FULL), () => toPausedByUser(FULL, "x", "reject", { rejected: "Q9" }), () => toHeldForUpdate(FULL, "x"),
     () => toPaused(FULL, "x"), () => toHalted(FULL, "x", "y"), () => toFinished(FULL), () => toUsageWait(FULL, "x", "2026-01-02T00:00:00.000Z"),
     () => toRetryWait(FULL, { tries: 1, failure: "x", reason: "x", at: "2026-01-02T00:00:00.000Z" })]) f();
   assert.deepEqual(FULL, copy);
@@ -191,7 +191,7 @@ test("toLimitHeld and toLimitReleased: held with its reason, keeping when it bec
   assert.deepEqual(again.held, { since: "2026-01-01T10:00:00.000Z", kind: "limit", reason: "waits: 1 queue of P runs, its limit is 1" }, "its place in the order kept");
   assert.deepEqual(delta(toLimitReleased(held), held), { set: {}, cleared: ["held", "reason"] });
   // Any other state drops the hold: going on from it asks for a place again.
-  for (const next of [toPausedByUser(held, "p"), toHeldForUpdate(held, "u"), toPaused(held), toHalted(held, "h"), toFinished(held),
+  for (const next of [toPausedByUser(held, "p", "pause"), toHeldForUpdate(held, "u"), toPaused(held), toHalted(held, "h"), toFinished(held),
     toApprovalWait(held, 3), toUsageWait(held, "w", "2026-01-01T11:00:00.000Z"), toRetryWait(held, { tries: 1, failure: "f", reason: "r", at: "2026-01-01T11:00:00.000Z" })]) {
     assert.equal(next.held, undefined, next.state);
   }

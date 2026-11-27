@@ -417,7 +417,7 @@ test("the orchestrator's texts: briefing, helpers and notices match the golden f
   tr.section("a turn an update's hand-over cut off goes on after the restart, quoting the user's message it answered");
   later();
   const cut = tr.stands.at(-1)!;
-  cut.emit("turnEnd", { ok: true, text: "" }); // its earlier turns are over
+  cut.emit("turnEnd", { ok: true, stopped: false, text: "" }); // its earlier turns are over
   cut.state = "working";
   orchestrator.say("Plan the layout.\nTwo columns, please.");
   orchestrator.cutOff();

@@ -1317,6 +1317,12 @@ export const RunFile = z.object({
   failure: z.string().optional(),
   /** Paused because the user rejected this step: a resume after a newer revision's approval goes on at the first pending step. */
   rejected: Id.optional(),
+  /**
+   * What kind of stop by the user (or an orchestrator) paused the run: its Pause ("pause"), a Stop or Stop now ("stop"),
+   * a rejected step ("reject"). Kept while it reaches paused; cleared when it goes on or is held for an update. A
+   * run.yaml from before it has none (its reason's text tells).
+   */
+  pause: z.enum(["pause", "stop", "reject"]).optional(),
   /** Stopped only for a Nexus update: the server resumes it by itself when it starts again. */
   resume_after_restart: z.boolean().optional(),
   /**

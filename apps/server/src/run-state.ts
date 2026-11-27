@@ -28,7 +28,7 @@ export function startedRun(o: {
  */
 export function toResumed(run: RunFile, revision: number): RunFile {
   return {
-    ...run, state: "running", reason: undefined, nudged: false, resume_after_restart: undefined, resume_at: undefined,
+    ...run, state: "running", reason: undefined, pause: undefined, nudged: false, resume_after_restart: undefined, resume_at: undefined,
     ...(run.rejected ? { rejected: undefined, revision } : {}),
   };
 }
@@ -41,22 +41,23 @@ export function toUnheld(run: RunFile): RunFile {
 /**
  * The user stops the run (Pause, Stop now, a rejected step): pausing while a turn is at work, else paused. A pending
  * retry or usage wait is dropped, and so is a hold for an update (the user's pause wins over the restart's resume).
+ * `pause` names the kind (RunFile.pause), which the orchestrator's notice goes by rather than the reason's text.
  */
-export function toPausedByUser(run: RunFile, reason: string, o: { pausing?: boolean; rejected?: string } = {}): RunFile {
+export function toPausedByUser(run: RunFile, reason: string, pause: NonNullable<RunFile["pause"]>, o: { pausing?: boolean; rejected?: string } = {}): RunFile {
   return {
-    ...run, state: o.pausing ? "pausing" : "paused", reason, resume_after_restart: undefined, resume_at: undefined, held: undefined,
+    ...run, state: o.pausing ? "pausing" : "paused", reason, pause, resume_after_restart: undefined, resume_at: undefined, held: undefined,
     ...(o.rejected ? { rejected: o.rejected } : {}),
   };
 }
 
 /** Held for an update of Nexus (pausing while a turn is at work, else paused): the next server resumes it by itself. */
 export function toHeldForUpdate(run: RunFile, reason: string, o: { pausing?: boolean } = {}): RunFile {
-  return { ...run, state: o.pausing ? "pausing" : "paused", reason, resume_after_restart: true, held: undefined };
+  return { ...run, state: o.pausing ? "pausing" : "paused", reason, pause: undefined, resume_after_restart: true, held: undefined };
 }
 
 /**
  * Paused, everything else kept: a pausing run whose step ended (its reason and hold for an update stay), a pausing
- * run whose turn failed, a run a server restart caught (with their own reason).
+ * run whose turn failed, a run a server restart caught (with their own reason). The kind of a user's pause stays.
  */
 export function toPaused(run: RunFile, reason?: string): RunFile {
   return { ...run, state: "paused", held: undefined, ...(reason !== undefined ? { reason } : {}) };

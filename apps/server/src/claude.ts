@@ -535,7 +535,7 @@ export class ClaudeSession extends EventEmitter<AgentEvents> implements AgentPro
         const sub = subagentTokens(modelTotal, this.modelSoFar, tokens);
         if (modelTotal) this.modelSoFar = modelTotal;
         const stopped = this.stopping;
-        this.emit("turnEnd", stopped ? { ok: false, text: "stopped", tokens, subagentTokens: sub, costUsd } : { ok, text, failure, tokens, subagentTokens: sub, costUsd });
+        this.emit("turnEnd", stopped ? { ok: false, stopped: true, text: "stopped", tokens, subagentTokens: sub, costUsd } : { ok, stopped: false, text, failure, tokens, subagentTokens: sub, costUsd });
         if (stopped) this.settleStop(); else this.nextInTurn = 0;
         return;
       }

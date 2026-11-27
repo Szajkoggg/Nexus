@@ -161,7 +161,7 @@ test("a turn's end that comes after the shutdown arms no idle timer: a stopped N
     const before = timeouts();
     conversations.shutdown();
     stands[0]!.state = "idle";
-    stands[0]!.emit("turnEnd", { ok: true, text: "late" });
+    stands[0]!.emit("turnEnd", { ok: true, stopped: false, text: "late" });
     assert.ok(timeouts() <= before, "no timer armed after the shutdown");
   } finally { conversations.shutdown(); orchestrator.shutdown(); engine.shutdown(); }
 });

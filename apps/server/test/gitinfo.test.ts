@@ -104,7 +104,7 @@ test("a step's round of commits begins before its worker hears of the step, and 
     commit(root, "q1");
     event({ type: "step.done", step: "Q1", summary: "done" });
     stand!.state = "idle";
-    stand!.emit("turnEnd", { ok: true, text: "done" });
+    stand!.emit("turnEnd", { ok: true, stopped: false, text: "done" });
     engine.onChange(loadProjectState(store));
     await until("Q2's opening", () => told.some((t) => /step Q2 \(2 of 2\)/.test(t.text)), LONGER.step);
     const q1End = git(root, ["rev-parse", "HEAD"]);
