@@ -151,8 +151,11 @@ test("claude: an update's hand-over at the held wait while Q1 waits for the user
     await atGate(a);
     assert.equal(a.queue().steps[0]!.status, "review");
     a.engine.drainForUpdate(false);
-    await shutdownAtGate(a);
-    await oldEnds(a, "success");
+    const h = handOver(a);
+    await holds("the drain does not end while the cleanup is held", () => !h.drained() && alive(a.helper), 300);
+    openGate(a, "success");
+    await h.done;
+    await oldEnded(a, "success");
     const n = nextServer(a);
     await until("the held run goes on by itself", () => !n.run()?.resume_after_restart, LONGER.step);
     // The resumed run has its session's process again (idle, in a new host); no turn before the acceptance.
@@ -170,14 +173,38 @@ test("codex: every step done, an update's hand-over at the held wait: the next s
     a.finishTurn();
     await atGate(a);
     a.engine.drainForUpdate(false);
-    await shutdownAtGate(a);
-    await oldEnds(a, "success");
+    const h = handOver(a);
+    await holds("the drain does not end while the cleanup is held", () => !h.drained() && alive(a.helper), 300);
+    openGate(a, "success");
+    await h.done;
+    await oldEnded(a, "success");
     const n = nextServer(a);
     assert.equal(n.run()?.state, "finished", "the run is over: its last step was done");
     await holds("no process starts", () => a.gate.hosts.length === 1 && n.run()?.state === "finished", 500);
     assert.equal(a.openings("Q1"), 1);
     a.contentKept();
     locked(b.dir);
+  });
+});
+
+// The server's stop while the held cleanup holds an update's drain (before the drain ended), which the two tests above
+// covered before they took the hand-over's own order (queue LCH, LCH2): the old processes outlive the server while the
+// cleanup is held, the run stays held for the update, and the next server goes on by itself.
+test("codex: the server stops at the held wait while it holds an update's drain: the old processes end after it; the next server goes on by itself, Q1 not repeated, Q2 once in a host started after the old one ended", windows, async () => {
+  await withWorkers({ runtime: "codex", behaviours: ["ownedholdshared", "done"] }, async (a, b) => {
+    a.finishTurn();
+    await atGate(a);
+    assert.deepEqual(a.engine.drainForUpdate(false), ["Q"], "the update holds the run");
+    const heldRun = a.store.readRun("Q")!;
+    assert.equal(a.engine.idle(), false, "the drain has not ended");
+    await shutdownAtGate(a);
+    await oldEnds(a, "success");
+    assert.deepEqual(a.store.readRun("Q"), heldRun, "the late outcome wrote nothing");
+    const n = nextServer(a);
+    assert.deepEqual([n.run()?.state, n.run()?.resume_after_restart, n.run()?.reason], ["paused", true, "resuming after the Nexus update"]);
+    await until("the queue finishes", () => n.run()?.state === "finished", LONGER.run);
+    noOverlap(a, 2);
+    workDoneOnce(a, b);
   });
 });
 
