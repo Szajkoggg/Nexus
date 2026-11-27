@@ -733,11 +733,32 @@ function gitOut(cwd: string, gitArgs: string[]): string | undefined {
 /** The HEAD of the session's checkout (its working directory); undefined outside a git repository. */
 const headCommit = (s: SessionFile) => gitOut(s.cwd || workDir(), ["rev-parse", "HEAD"]) || undefined;
 
-/** A number given on the command line (`what` names it in the refusal); undefined when not given. */
-function numberArg(v: string | undefined, what: string): number | undefined {
+/**
+ * What a number on the command line may be: a whole number (`integer`), within `min` and `max` (inclusive), never
+ * stricter than the event's schema takes; `takes` words the refusal where the bounds alone do not say what it is.
+ */
+interface NumberRule { integer?: boolean; min?: number; max?: number; takes?: string }
+
+/** The refusal's "takes …" part: what the rule accepts, with an example where no bound says it. */
+function numberTakes({ integer, min, max, takes }: NumberRule): string {
+  if (takes) return takes;
+  const kind = integer ? "a whole number" : "a number";
+  if (min !== undefined && max !== undefined) return `${kind} from ${min} to ${max}`;
+  if (min !== undefined) return `${kind} of ${min} or more`;
+  if (max !== undefined) return `${kind} of ${max} or less`;
+  return `${kind} (for example ${integer ? "3 or -2" : "12, 3.5 or -2"})`;
+}
+
+/**
+ * A number given on the command line (`what` names it in the refusal); undefined when not given. Every numeric
+ * option goes through here, so a wrong value is refused alike: `<what> takes <…>, not "<value>"`, exit code 2.
+ */
+function numberArg(v: string | undefined, what: string, rule: NumberRule = {}): number | undefined {
   if (v === undefined) return undefined;
   const n = Number(v);
-  if (v.trim() === "" || !Number.isFinite(n)) throw new UsageError(`${what} takes a number (for example 12, 3.5 or -2), not "${v}"`);
+  const ok = v.trim() !== "" && Number.isFinite(n) && (!rule.integer || Number.isInteger(n))
+    && (rule.min === undefined || n >= rule.min) && (rule.max === undefined || n <= rule.max);
+  if (!ok) throw new UsageError(`${what} takes ${numberTakes(rule)}, not "${v}"`);
   return n;
 }
 
@@ -1063,7 +1084,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     if (sub === "start" || sub === "done" || sub === "failed") noMore(3, `nexus step ${sub} <step>`);
     if (sub === "progress") noMore(4, "nexus step progress <step> <text>");
     if (sub === "start") return stepEvent("step.started", args()[2]);
-    if (sub === "progress") return stepEvent("step.progress", args()[2], () => ({ text: need(args()[3], "<text>"), pct: o().pct ? Number(o().pct) : undefined }));
+    if (sub === "progress") return stepEvent("step.progress", args()[2], () => ({ text: need(args()[3], "<text>"), pct: numberArg(o().pct || undefined, "--pct", { min: 0, max: 100 }) }));
     if (sub === "done") return stepDone(args()[2]);
     if (sub === "failed") return stepEvent("step.failed", args()[2], () => ({ reason: need(o().reason, "--reason") }));
     throw new UsageError("nexus step start|progress|done|failed <step>");
@@ -1097,7 +1118,7 @@ const commands: Record<string, () => void | Promise<void>> = {
       if (!src) return { url: t, label: o().label, kind: (o().kind as ReviewItem["kind"]) ?? "link" };
       return { path: reviewCopy(st, queue, step, src), label: o().label ?? basename(src), kind: (o().kind as ReviewItem["kind"]) ?? guessKind(src), before };
     });
-    emit(st, s, { type: "review.added", queue, step, items, round: o().round ? Number(o().round) : undefined });
+    emit(st, s, { type: "review.added", queue, step, items, round: numberArg(o().round || undefined, "--round", { integer: true }) });
     const copied = items.filter((x) => x.path).length;
     say(`ok: ${items.length} review item(s) for ${queue}/${step}${copied ? ` (${copied === 1 ? "the file is" : "the files are"} copied to ${normPath(st.reviewDir(queue, step))})` : ""}`);
   },
@@ -1129,10 +1150,7 @@ const commands: Record<string, () => void | Promise<void>> = {
         ? `"${name}" is not one of step ${step}'s checks; report each under its name exactly as listed: ${known.map((c) => `"${c}"`).join(", ")}`
         : `step ${step} has no checks to report`);
     }
-    const duration = o().duration === undefined ? undefined : Number(o().duration);
-    if (duration !== undefined && (o().duration!.trim() === "" || !Number.isFinite(duration) || duration < 0)) {
-      throw new UsageError(`--duration takes the check's time in seconds (for example 12 or 3.5), not "${o().duration}"`);
-    }
+    const duration = numberArg(o().duration, "--duration", { min: 0, takes: "the check's time in seconds (for example 12 or 3.5)" });
     stepEvent("check.result", args()[1], (s) => ({ name, ok: !!o().ok, summary: o().summary, duration, commit: headCommit(s) }));
   },
 
@@ -1195,8 +1213,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     const file = pathArg(need(o().file, "--file"));
     if (!existsSync(file)) throw new UsageError(`no such file: ${file}`);
     const summary = need(o().summary, "--summary");
-    const findings = o().findings === undefined ? undefined : Number(o().findings);
-    if (findings !== undefined && (!Number.isInteger(findings) || findings < 0)) throw new UsageError(`--findings takes a whole number of findings (0 or more), not ${o().findings}`);
+    const findings = numberArg(o().findings, "--findings", { integer: true, min: 0, takes: "a whole number of findings (0 or more)" });
     known(() => st.readQueue(queue), `unknown queue ${queue}`);
     // The report lives in the queue's folder, where the dashboard and the run digest read it. Workers may not write
     // under .nexus with their file tools, so they write it anywhere and this command (its only writer) copies it in.
@@ -1343,8 +1360,7 @@ const commands: Record<string, () => void | Promise<void>> = {
     if ((o().every === undefined) === (o()["after-queues"] === undefined)) throw new UsageError("give --every \"daily HH:MM\" | \"<mon..sun> HH:MM\" | \"monthly <day> HH:MM\", or --after-queues <n>: one of them");
     const every = o().every;
     if (every !== undefined) { try { parseEvery(every); } catch (e) { throw new UsageError(errorText(e)); } }
-    const afterQueues = o()["after-queues"] === undefined ? undefined : Number(o()["after-queues"]);
-    if (afterQueues !== undefined && (!Number.isInteger(afterQueues) || afterQueues < 1 || afterQueues > 1000)) throw new UsageError(`--after-queues takes a whole number from 1 to 1000, not ${o()["after-queues"]}`);
+    const afterQueues = numberArg(o()["after-queues"], "--after-queues", { integer: true, min: 1, max: 1000 });
     const e = emit(st, s, {
       type: "recurring.set", recurring: need(args()[2], "<id>"), template: need(o().template, "--template <id>"), params: setValues(),
       every: o().every, after_queues: afterQueues, maintenance: maintenanceMode(), reason: o().reason?.trim() || undefined,
@@ -1608,7 +1624,7 @@ function reviewAddKeyed(st: ProjectStore, s: SessionFile, queue: string, step: s
   const view = loadProjectState(st).queues.find((q) => q.id === queue)?.steps.find((x) => x.id === step);
   const items = view?.review_items ?? [];
   // The step's current round: the one its latest delivered send-back opened, else the first.
-  const round = o().round ? Number(o().round) : view?.sent_back.filter((x) => x.delivered).at(-1)?.round ?? 1;
+  const round = numberArg(o().round || undefined, "--round", { integer: true }) ?? view?.sent_back.filter((x) => x.delivered).at(-1)?.round ?? 1;
   // Checked against the source, copied only when it is accepted: a refused picture leaves nothing behind.
   const check = checkPicture(items, { path: src, key, role, round, size }, `${queue}/${step}`);
   if (!check.ok) throw new UsageError(check.message);

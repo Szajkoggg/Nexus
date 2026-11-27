@@ -117,6 +117,16 @@ ends with `nexus: <what is wrong>` on stderr and exit code 2, as every refusal d
 negative number reads as an option: a positional one goes after `--` (`nexus metric record delta -- -5`), an option's
 with `=` (`--warn-below=-5`); the message says so.
 
+Every number given on the command line is read by one parser: `--target`, `--warn-above`, `--warn-below` and the
+`<value>` of `nexus metric define|record`, `--pct` of `nexus step progress`, `--round` of `nexus review add`,
+`--duration` of `nexus check`, `--findings` of `nexus report` and `--after-queues` of `nexus recurring set`. Each takes
+what its event's schema takes, never less: any number for a metric's values; 0 to 100 for `--pct`; a whole number for
+`--round`; 0 or more seconds for `--duration`; a whole number of 0 or more for `--findings`; a whole number from 1 to
+1000 for `--after-queues`. A value it does not take (not a number, `Infinity`, an empty one, out of the range) is
+refused before anything is written, alike for all of them: `nexus: <option> takes <what it takes>, not "<value>"`,
+exit code 2 (`nexus: --pct takes a number from 0 to 100, not "150"`). An empty `--pct=` or `--round=` is still read as
+not given.
+
 `nexus stats --flaky` lists the checks Nexus ran that failed, then passed when run again (`flaky: true` in a queue's
 `checks.yaml`, docs/protocol/checks.md, "Checks run by Nexus"), grouped by the test that failed on the first run (its
 `failed_tests`); a first run whose failing tests are unknown counts under the check's name, marked "(the check; its
