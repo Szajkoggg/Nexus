@@ -685,18 +685,19 @@ function reviewAudit(): void {
  * A review helper's session runs only what reads and its own review commands (H15): the CLI refuses it every other
  * command, so a helper reports a refusal in its verdict instead of asking or writing anything else. A call outside a
  * project, or with a session the project does not have (a NEXUS_SESSION inherited into a test project), passes; a
- * session.yaml that is there but cannot be read is refused naming it (CHC1): it could be a helper's.
+ * session.yaml that is there but cannot be read is refused naming it (CHC1): it could be a helper's. What a helper may
+ * run passes before the session is read, so an unreadable one still has nexus help and nexus status.
  */
 function helperGate(cmd: string): void {
   const sid = sessionId();
   if (!sid) return;
+  if (cmd === "status" || cmd === "help" || cmd === "doc" || (cmd === "review" && ["accept", "send-back", "pass-on", "decide", "ask-user"].includes(args()[1] ?? ""))) return;
   let role: string | undefined;
   try { role = store().readSession(sid).role; } catch (e) {
     if (isUnreadableFile(e)) throw new UsageError(e.message);
     return;
   }
   if (role !== "helper") return;
-  if (cmd === "status" || cmd === "help" || cmd === "doc" || (cmd === "review" && ["accept", "send-back", "pass-on", "decide", "ask-user"].includes(args()[1] ?? ""))) return;
   throw new UsageError(`a review helper only reads and decides its review (nexus status, nexus help, nexus doc, nexus review accept|send-back|pass-on|decide|ask-user), not nexus ${[cmd, args()[1]].filter(Boolean).join(" ")}; pass the step on with --why doubt, naming what you could not do`);
 }
 

@@ -57,6 +57,9 @@ test("the review helper's gate refuses a session whose session.yaml cannot be re
   assert.equal(refused.status, 2, refused.stderr);
   assert.match(refused.stderr, /session\.yaml cannot be read/);
   assert.ok(refused.stderr.includes(broken.id), "the file is named by its path");
+  // What a helper may run is not refused: nexus help still answers.
+  const help = await cliRun(["help", "review"], { cwd: x.root, env: envOf({ NEXUS_DIR: x.store.dir, NEXUS_SESSION: broken.id }) });
+  assert.equal(help.status, 0, help.stderr);
 
   // A NEXUS_SESSION this project has no session for (inherited into a test project, say): the gate lets it through.
   const missing = await cliRun(["project", "list"], { cwd: x.root, env: envOf({ NEXUS_DIR: x.store.dir, NEXUS_SESSION: "no-such-session" }) });
