@@ -3,6 +3,7 @@
 import { errorText } from "@nexus/protocol/errors";
 import { useState, type ReactNode } from "react";
 import type { GlobalSettings, ProjectFile, TagsFile } from "@nexus/protocol";
+import { workerRuntime } from "@nexus/protocol/runtimes";
 import type { ModelInfo } from "@nexus/protocol/api";
 import { LANGUAGES } from "@nexus/protocol/languages";
 import { TAG_KINDS } from "@nexus/protocol/tags";
@@ -186,7 +187,7 @@ function SettingRows({ form, project }: { form: Form; project?: { values: Record
   const f = form;
   const claudeModel = f.get("runtimes.claude.model"), codexModel = f.get("runtimes.codex.model"), ideasRuntime = f.get("conversations.runtime") as "claude" | "codex";
   // The orchestrator runs on Codex only when its setting says codex; anything else is Claude Code (as the server reads it).
-  const orchRuntime: "claude" | "codex" = f.get("orchestrator.runtime") === "codex" ? "codex" : "claude";
+  const orchRuntime = workerRuntime(f.get("orchestrator.runtime"));
   const claudeAuto = f.get("runtimes.claude.permission_mode") === "auto";
   const approval = f.get("runtimes.codex.approval_policy"), reviewer = f.get("runtimes.codex.approvals_reviewer");
   const codexAuto = approval === "on-request" && reviewer === "auto_review";

@@ -5,7 +5,7 @@
 import { errorText } from "@nexus/protocol/errors";
 import {
   ActionError, queueView, runGoing, changesOfUser, checkPredecessors, doneForPlan, effortIssue, formatClock, loadProjectState, newId, newPlan, now, openPlan,
-  openPlanFile, readUsage, reorderedFollowers,
+  openPlanFile, readUsage, reorderedFollowers, workerRuntime,
   type PlanBy, type PlanFile, type PlanUndo, type ProjectState, type ProjectStore, type QueueView, type RunFile, type StartFile, type StartView,
 } from "@nexus/protocol";
 import type { StartOptions } from "./engine.ts";
@@ -354,7 +354,7 @@ export class Scheduler {
     let usage: "claude" | "codex" | undefined;
     if (o.at === "usage-reset") {
       const s = o.session ? state.sessions.find((x) => x.id === o.session) : undefined;
-      usage = s ? (s.runtime === "codex" ? "codex" : "claude") : o.runtime ?? state.project.runtimes.default;
+      usage = s ? workerRuntime(s.runtime) : o.runtime ?? state.project.runtimes.default;
       const reset = usageReset(usage, state.project.defaults.usage_pause_threshold, this.timers.clock.now());
       if (!reset) throw new ActionError(`no usage window of ${RUNTIME_NAME[usage]} is known yet (Nexus learns them from a run): give a time instead`, 409);
       at = reset + this.deps.usageMarginMs;

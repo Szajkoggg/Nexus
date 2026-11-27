@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, Effort, acceptedByNexus, ideaStatuses, contextLimit, acceptedOn, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, sessionLine, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type RunFile, type SessionFile, type SessionView, type StepView, proposalDecisions, type IdeaProposal,
+  ActionError, DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, Effort, acceptedByNexus, ideaStatuses, contextLimit, acceptedOn, normPath, effortIssue, type ProjectFile, reviewedByOrchestrator, runGoing, ProjectStore, applyDraft, defineMetric, inPlan, loadProjectState, metricDef, openPlan, orchestratorOverview, overThreshold, proposePlan, proposeTags, readAway, readUsage, orchestratorStatusChange, newId, sessionLine, now, sendBack, type Applied, type Event, type EventType, type NotifyKind, type ProjectState, type QueueView, type RunFile, type SessionFile, type SessionView, type StepView, proposalDecisions, type IdeaProposal, workerRuntime, type WorkerRuntime,
 } from "@nexus/protocol";
 import { reachable, type AgentProcess } from "./agent.ts";
 import type { CodexPermissions } from "./codex.ts";
@@ -38,11 +38,10 @@ const DRAFTS = ".nexus/drafts";
 const DRAFT_TOOLS = [`Write(${DRAFTS}/**)`, `Edit(${DRAFTS}/**)`];
 const NEVER = ["NotebookEdit", "MultiEdit"];
 
-/** The runtimes the orchestrator runs on: its setting's `codex`, else Claude Code (`external` has no process). */
-type OrchestratorRuntime = "claude" | "codex";
-type Target = { runtime: OrchestratorRuntime; model?: string; effort?: Effort };
-const RUNTIME_NAMES: Record<OrchestratorRuntime, string> = { claude: "Claude Code", codex: "Codex" };
-const runtimeOf = (p: ProjectFile): OrchestratorRuntime => (p.orchestrator?.runtime === "codex" ? "codex" : "claude");
+/** The orchestrator runs on its setting's `codex`, else Claude Code (`external` has no process): workerRuntime. */
+type Target = { runtime: WorkerRuntime; model?: string; effort?: Effort };
+const RUNTIME_NAMES: Record<WorkerRuntime, string> = { claude: "Claude Code", codex: "Codex" };
+const runtimeOf = (p: ProjectFile): WorkerRuntime => workerRuntime(p.orchestrator?.runtime);
 
 /**
  * The orchestrator's sandbox on Codex (decided by the user 2026-11-16, queue OC1): a permission profile that reads
@@ -498,7 +497,7 @@ ${n.text}` });
     if (s.orchestrator_fallback) return s.orchestrator_fallback.target;
     return s.runtime === runtimeOf(p)
       ? { runtime: runtimeOf(p), model: p.orchestrator?.model, effort: p.orchestrator?.effort }
-      : { runtime: s.runtime === "codex" ? "codex" : "claude", model: s.model, effort: s.effort };
+      : { runtime: workerRuntime(s.runtime), model: s.model, effort: s.effort };
   }
 
   /** Select only between turns. A persisted reset deadline prevents bouncing on stale/lower usage readings. */
@@ -507,7 +506,7 @@ ${n.text}` });
     const fallback = p.orchestrator?.fallback;
     const settings = JSON.stringify([primary, fallback]);
     const windows = readUsage()?.windows ?? {};
-    const full = (runtime: OrchestratorRuntime) => overThreshold(runtime, windows, p.defaults.usage_pause_threshold, this.nowMs());
+    const full = (runtime: WorkerRuntime) => overThreshold(runtime, windows, p.defaults.usage_pause_threshold, this.nowMs());
     const busy = full(primary.runtime);
     const previous = s.orchestrator_fallback;
     let active = previous?.settings === settings ? previous : undefined;
@@ -593,7 +592,7 @@ ${n.text}` });
     const summary = this.lineage(old).map((s) => this.summaryWritten(s)).find((x) => x !== undefined);
     if (summary) this.store.writeOrchestratorSummary(`# Orchestrator summary\n\nCarried from the previous orchestrator at ${summary.at}. The fresh session ${fresh.id} starts from it.\n\n${summary.text}\n${summaryLists(summary).join("\n")}\n`);
     this.store.writeSession(fresh);
-    const from = RUNTIME_NAMES[old.runtime === "codex" ? "codex" : "claude"], to = RUNTIME_NAMES[target.runtime];
+    const from = RUNTIME_NAMES[workerRuntime(old.runtime)], to = RUNTIME_NAMES[target.runtime];
     const status = `project ${state.project.name} (${state.project.id})\n${orchestratorOverview(state)}`;
     const seed = orchestratorRuntimeSeed(from, to, status, carriedMessages(unread.map((m) => formatInbox(m, state))), summary, reason);
     this.store.appendInbox(fresh.id, { v: 1, id: `runtime-seed-${fresh.id}`, at: now(), from: "nexus", type: "message", text: seed });
@@ -615,7 +614,7 @@ ${n.text}` });
   private launcher(s: SessionFile): (resume: boolean) => Launch {
     const project = this.store.readProject();
     const o = project.orchestrator;
-    const runtime: OrchestratorRuntime = s.runtime === "codex" ? "codex" : "claude";
+    const runtime = workerRuntime(s.runtime);
     const { model, effort: wanted } = this.target(s);
     const effort = effortIssue(runtime, wanted) ? undefined : wanted;
     const briefing = orchestratorBriefing(project.name, project.defaults.context_reuse_tokens, project.languages, o?.context_threshold_tokens ?? DEFAULT_ORCHESTRATOR_CONTEXT_TOKENS, runtime);
@@ -663,7 +662,7 @@ ${n.text}` });
       if (!existsSync(events)) writeFileSync(events, "");
       mkdirSync(join(this.store.dir, "drafts"), { recursive: true });
     }
-    const dropped = o?.effort && effortIssue(s.runtime === "codex" ? "codex" : "claude", o.effort);
+    const dropped = o?.effort && effortIssue(workerRuntime(s.runtime), o.effort);
     if (dropped) this.store.appendChat(s.id, { at: now(), from: "nexus", text: `The orchestrator's effort ${o.effort} is not one Claude Code takes (${dropped}): it runs at Claude Code's default.` });
     // A failed turn's one error row (chats.ts, TurnErrorRows: the same rule as a thinking partner's chat).
     const errors = new TurnErrorRows((text) => this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text }));
@@ -879,7 +878,7 @@ ${n.text}` });
    * The orchestrator's active runtime is beyond the project's usage threshold now (routing.ts, overThreshold).
    * While it is, a timer looks again just after the reset, so the held notices go out without waiting for a change.
    */
-  private runtimeFull(state: ProjectState, runtime: OrchestratorRuntime = this.session()?.runtime === "codex" ? "codex" : "claude"): boolean {
+  private runtimeFull(state: ProjectState, runtime: WorkerRuntime = workerRuntime(this.session()?.runtime)): boolean {
     const full = overThreshold(runtime, readUsage()?.windows ?? {}, state.project.defaults.usage_pause_threshold, this.nowMs());
     if (full && !this.heldTimer) this.wakeAt([full.until]);
     return !!full;

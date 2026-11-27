@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ActionError, Effort, ProjectStore, findStep, type ConversationSettings, type ConversationWeb, type SettingSource, effortIssue, ideaContext, ideaHash, languageName, loadProjectState, newId, normPath, now, type SessionFile,
+  ActionError, Effort, ProjectStore, findStep, type ConversationSettings, type ConversationWeb, type SettingSource, effortIssue, ideaContext, ideaHash, languageName, loadProjectState, newId, normPath, now, type SessionFile, workerRuntime, type WorkerRuntime,
 } from "@nexus/protocol";
 import { sinceThen, stepSeed } from "./step-seed.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
@@ -81,7 +81,7 @@ export class Conversations {
   private readonly orchestrator: Orchestrator;
   private readonly changed: () => void;
   private readonly host: AgentHost<Extra>;
-  private readonly compacts: (runtime: "claude" | "codex") => boolean;
+  private readonly compacts: (runtime: WorkerRuntime) => boolean;
   /** Set by shutdown: no idle timer is armed after it. */
   private stopped = false;
   /** By session: the input waiting for its old process to end (Waiting); the new process gets it in order. */
@@ -457,7 +457,7 @@ ${text}`;
     const notes = p.conversations.notes_dir;
     const env = this.host.env(s.id);
     const web = p.conversations.web;
-    const instructions = partnerBriefing(p, notes, s.runtime === "codex" ? "codex" : "claude");
+    const instructions = partnerBriefing(p, notes, workerRuntime(s.runtime));
     const { model, effort } = this.values(s);
     return (resume) => {
       if (s.runtime === "codex") {
@@ -570,7 +570,7 @@ ${text}`;
  * Why the runtime cannot run this model at this effort: the runtime's own effort levels (effortIssue), then the
  * model's, where the runtime named them (modelEffortIssue). Undefined when nothing tells against the pair.
  */
-function pairIssue(runtime: "claude" | "codex", model: string | undefined, effort: Effort | undefined): string | undefined {
+function pairIssue(runtime: WorkerRuntime, model: string | undefined, effort: Effort | undefined): string | undefined {
   return effortIssue(runtime, effort) ?? modelEffortIssue(runtime, model, effort);
 }
 

@@ -5,8 +5,7 @@
 // estimates and the dashboard use it alike.
 import { effortIssue, type Effort, type FallbackEntry, type KindDefaults, type ProjectFile, type RunFile } from "./schemas.ts";
 import { TAG_KINDS } from "./tags.ts";
-
-type WorkerRuntime = "claude" | "codex";
+import type { WorkerRuntime } from "./runtimes.ts";
 
 /** A level of the precedence: what it names. */
 interface Level { runtime?: WorkerRuntime; model?: string; effort?: Effort; fallback?: FallbackEntry[] }

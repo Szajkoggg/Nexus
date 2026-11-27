@@ -3,6 +3,7 @@ import { activityApplier } from "../liveViews.ts";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { retryLine } from "@nexus/protocol/times";
 import { tokenCount } from "@nexus/protocol/tokens";
+import { workerRuntime } from "@nexus/protocol/runtimes";
 import { questionBarrier, runGoing } from "@nexus/protocol/status-rules";
 import { QuestionWait } from "./QuestionWait.tsx";
 import { act, enc, projectUrl, useAction, useQuery, useLiveRead, type ActivityEntry, type ProjectState, type QueueView, type SessionView, type Usage } from "../api.ts";
@@ -113,7 +114,7 @@ function PlannedStart({ queue, busy, onCancel }: { queue: QueueView; busy: boole
             : (p.failed
               ? <span className="text-stop">{t("run.plan.atFailed", { time: formatClock(p.at!, new Date()), reason: p.failed.reason })}</span>
               : <span className="text-fg">{rich(p.usage ? "run.plan.atUsage" : "run.plan.at", {
-                time: <span key="time" className="font-medium">{formatClock(p.at!, new Date())}</span>, runtime: runtimeName(p.usage === "codex" ? "codex" : "claude"),
+                time: <span key="time" className="font-medium">{formatClock(p.at!, new Date())}</span>, runtime: runtimeName(workerRuntime(p.usage)),
               })}</span>)}
           <span className="mt-1 block text-xs text-fg-2">
             {p.failed ? <>{t("run.plan.startYourself")} · <TimeAgo at={p.failed.at} /></>

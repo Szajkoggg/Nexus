@@ -12,7 +12,7 @@ import {
   ActionError, userAcceptRefusal, INTEGRATION_CONDITION, queueView, sessionView, NEXUS_SESSION, ProjectStore, USER_SESSION, acceptedByNexus, ensureNexusSession, fileList, ensureUserSession, lastDone, stepChecks, liftByContinue, loadProjectState, openPlanFile, releaseOrphanedSteps, stepClosed, reportFile, ensureReportFolder, newId, normPath, now, readUsage,
   RETRY_LIMIT, START_KEYS, chooseRoute, contextBeyond, effortIssue, formatClock, kindDefaults, overThreshold, routeStep, runStart, type Effort, type Routed, type ProjectFile, type StartValues, type ProjectState, type QueueView, type RunFile, type SessionFile,
   type SessionView, type StepView, type PlanBy,
-  addNote, errorText,
+  addNote, errorText, workerRuntime,
 } from "@nexus/protocol";
 import { CleanupTimedOut, JobHostExited, reachable, type TurnFailure } from "./agent.ts";
 import { AgentHost, ROLE_RECORDS, type AgentHostOptions, type Hosted, type Launch } from "./agent-host.ts";
@@ -1406,7 +1406,7 @@ export class Engine implements Member {
     const recorded = runStart(run);
     if (recorded) return recorded;
     const s = this.sessionFile(state, run.session);
-    return { runtime: s.runtime === "codex" ? "codex" : "claude", model: s.model, effort: s.effort, explicit: START_KEYS };
+    return { runtime: workerRuntime(s.runtime), model: s.model, effort: s.effort, explicit: START_KEYS };
   }
 
   private openStep(queueId: string, step: StepView, q: QueueView, mode: "start" | "continue", why?: string, around: { before?: string; after?: string } = {}): boolean {
@@ -1942,7 +1942,7 @@ export class Engine implements Member {
       refusal: (r) => {
         // One record per refusal, also across processes of the session (a resumed runtime may repeat its list).
         if (r.ref && this.store.readRefusals(session.id).entries.some((x) => x.ref === r.ref)) return;
-        this.store.appendRefusal({ at: now(), session: session.id, runtime: session.runtime === "codex" ? "codex" : "claude", ...r, ...tag() });
+        this.store.appendRefusal({ at: now(), session: session.id, runtime: workerRuntime(session.runtime), ...r, ...tag() });
         this.changed();
       },
       background: (work) => {

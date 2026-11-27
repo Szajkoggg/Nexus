@@ -2021,6 +2021,6 @@ export const InboxEntry = z.discriminatedUnion("type", [
 export type InboxEntry = z.infer<typeof InboxEntry>;
 
 /** Why a runtime cannot run at this effort, or undefined. Codex checks a model's own levels itself. */
-export function effortIssue(runtime: "claude" | "codex", effort: Effort | undefined): string | undefined {
+export function effortIssue(runtime: z.infer<typeof WorkerRuntime>, effort: Effort | undefined): string | undefined {
   return runtime === "claude" && effort && !CLAUDE_EFFORTS.includes(effort) ? `Claude Code takes effort ${CLAUDE_EFFORTS.join(", ")}` : undefined;
 }
