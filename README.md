@@ -380,7 +380,9 @@ cancels a pending retry.
 In the run controls, **Stop now** asks the worker to leave its work consistent and end its turn. **Stop at once**
 interrupts the turn and ends that worker's process immediately, pausing the run. It records the interruption on
 the step's timeline and leaves all uncommitted changes in the checkout or worktree. **Resume** reopens the step in
-the same session after the process has exited. Stop at once is also available while a worker is still working after
+the same session after the process has exited. Pressed while the stopped worker is still being cleaned up, Resume
+waits for the cleanup and then takes effect, in a new process, even if the cleanup fails; only a server restart in
+between drops it, and Resume is pressed again. Stop at once is also available while a worker is still working after
 Stop now.
 
 **A queue paused for long.** A queue you paused (Pause, Stop now, Stop at once, or the pause a server restart left)
