@@ -14,7 +14,7 @@ import { nav } from "../nav.ts";
 import { queueStatus } from "../queueStatus.ts";
 import { needsWorkChoice, stopDecision, type LeftState, type WorkChoice } from "../stopDecision.ts";
 import { ActionBar, Button, CloseButton, Markdown, TEXTAREA, TimeAgo, useDraftText, type MenuEntry } from "./ui.tsx";
-import { retryLeft, StopBox, stopVersion, useLeft } from "./Stop.tsx";
+import { StopBox, stopVersion, useLeft } from "./Stop.tsx";
 import { KeptTag, SkipClosingBox, closingNotRun, stepMark } from "./Closing.tsx";
 import { rich, t } from "../i18n.ts";
 import { LevelPicker } from "./Levels.tsx";
@@ -384,7 +384,7 @@ export function ApprovalView({ project, queue, chat, sidebar, onClose, onPanel }
           <div className="max-w-[900px] space-y-5 pb-10">
             {stopped && (
               <div data-part="stop" className="[&>div]:mt-0">
-                <StopBox queue={queue} left={left ?? undefined} work={work} setWork={setWork} needsChoice={needsWorkChoice(left)} pushAccepted={project.project.defaults.push_accepted} onRetry={() => retryLeft(project.project.id, queue.id)} />
+                <StopBox project={project.project.id} queue={queue} left={left ?? undefined} work={work} setWork={setWork} needsChoice={needsWorkChoice(left)} pushAccepted={project.project.defaults.push_accepted} />
               </div>
             )}
             {queue.description && (
