@@ -117,6 +117,18 @@ function handOver(a: A, waitMs = 300): { drained: () => boolean; done: Promise<v
   return { drained: () => drained, done };
 }
 
+/**
+ * The hand-over (handOver) at the held wait, after the update's drain began: the drain does not end while the cleanup
+ * is held; then the gate opens with `outcome`, the release follows it, and the old server's processes and job end.
+ */
+async function handOverAtGate(a: A, outcome: "success" | "failure", holdMs = 300): Promise<void> {
+  const h = handOver(a);
+  await holds("the drain does not end while the cleanup is held", () => !h.drained() && !a.engine.idle() && alive(a.helper) && isLocked(a.dir), holdMs);
+  openGate(a, outcome);
+  await h.done;
+  await oldEnded(a, outcome);
+}
+
 // The drain waits for a pending cleanup (D1 with queue LCG, survey LC4 finding 1): before, the engine was idle at the
 // held wait, the drain ended at once and the release could start the successor beside the old job.
 for (const [runtime, outcome] of [["claude", "success"], ["codex", "failure"]] as const) {
@@ -128,11 +140,7 @@ for (const [runtime, outcome] of [["claude", "success"], ["codex", "failure"]] a
       const heldRun = a.store.readRun("Q")!;
       assert.deepEqual([heldRun.state, heldRun.resume_after_restart], ["paused", true]);
       assert.deepEqual(a.engine.cleaningSessions(), [a.session()], "the held cleanup is pending");
-      const h = handOver(a);
-      await holds("the drain does not end while the cleanup is held", () => !h.drained() && !a.engine.idle() && alive(a.helper) && isLocked(a.dir), 500);
-      openGate(a, outcome);
-      await h.done;
-      await oldEnded(a, outcome);
+      await handOverAtGate(a, outcome, 500);
       assert.deepEqual(a.store.readRun("Q"), heldRun, "the cleanup's outcome left the run held for the update");
       const failures = a.store.readActivity(a.session()).entries.filter((e) => e.kind === "error" && e.text.includes("stays held for the Nexus update"));
       assert.equal(failures.length, outcome === "failure" ? 1 : 0, "a failure during the drain is in the activity");
@@ -151,11 +159,7 @@ test("claude: an update's hand-over at the held wait while Q1 waits for the user
     await atGate(a);
     assert.equal(a.queue().steps[0]!.status, "review");
     a.engine.drainForUpdate(false);
-    const h = handOver(a);
-    await holds("the drain does not end while the cleanup is held", () => !h.drained() && alive(a.helper), 300);
-    openGate(a, "success");
-    await h.done;
-    await oldEnded(a, "success");
+    await handOverAtGate(a, "success");
     const n = nextServer(a);
     await until("the held run goes on by itself", () => !n.run()?.resume_after_restart, LONGER.step);
     // The resumed run has its session's process again (idle, in a new host); no turn before the acceptance.
@@ -173,11 +177,7 @@ test("codex: every step done, an update's hand-over at the held wait: the next s
     a.finishTurn();
     await atGate(a);
     a.engine.drainForUpdate(false);
-    const h = handOver(a);
-    await holds("the drain does not end while the cleanup is held", () => !h.drained() && alive(a.helper), 300);
-    openGate(a, "success");
-    await h.done;
-    await oldEnded(a, "success");
+    await handOverAtGate(a, "success");
     const n = nextServer(a);
     assert.equal(n.run()?.state, "finished", "the run is over: its last step was done");
     await holds("no process starts", () => a.gate.hosts.length === 1 && n.run()?.state === "finished", 500);
