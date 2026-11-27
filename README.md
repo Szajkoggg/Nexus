@@ -313,7 +313,9 @@ start of the composer, the full view still beside it. On the phone, and in the q
 compact list: one row per step with its goal's first lines and "N criteria ▾" to open the whole goal and its
 acceptance in place, and the description, stop conditions, checks and the orchestrator's message as folds. "Full
 view ⤢" and "Show as a panel" (under ⋯) switch between the two. A stopped queue's new revision shows its stop box with
-Keep or Discard first: Approve waits for the choice.
+Keep or Discard first: Approve waits for the choice. When the stopped step's commits cannot be read (git too slow or
+failing), the stop box says so, with the reason and **Retry**, instead of "left no commits": Continue and Approve wait
+until they are read.
 
 **The closing refactoring step.** A queue that contains coding (the orchestrator marks it) ends with a step Nexus adds
 and keeps: **Closing refactoring**, tagged "⟲ by Nexus" (hover the tag for what it is). It shows after the queue's
@@ -1055,7 +1057,8 @@ and nothing of the queue is pushed in between.
 
 **Commits and the branch.** A step lists the commits made while it was at work (subject, files and lines changed),
 per round; in the project's own checkout, a commit not made during its worker's turns is marked ◆. A queue shows its
-branch: how far ahead and behind of its base and of its remote-tracking branch, as last fetched (Nexus never fetches).
+branch: how far ahead and behind of its base and of its remote-tracking branch, as last fetched (Nexus never fetches). When git cannot read them (too slow or failing), both say
+"cannot be read" with the reason and **Retry**, never an empty list or "no remote-tracking branch".
 
 **The integration step.** A queue with a worktree of its own ends with a step Nexus keeps (⇄ "Integration", by
 Nexus), after the closing refactoring step: Nexus merges the current main into the queue's branch in the worktree and runs

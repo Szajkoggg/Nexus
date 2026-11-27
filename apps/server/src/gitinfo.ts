@@ -76,7 +76,7 @@ export function gitSync(cwd: string, args: string[]): GitResult {
     const err = e as { code?: string; status?: number | null; signal?: string | null; stderr?: string; message: string };
     // execFileSync names the exit code `status` (null when killed); `code` is a spawn error's name, or ETIMEDOUT.
     const killed = err.code === "ETIMEDOUT" || !!err.signal;
-    return failure(cwd, { code: typeof err.status === "number" && !killed ? err.status : killed ? undefined : err.code, killed, signal: err.signal, message: err.message }, String(err.stderr ?? ""), LIMITS.timeout);
+    return failure(cwd, { code: killed ? undefined : typeof err.status === "number" ? err.status : err.code, killed, signal: err.signal, message: err.message }, String(err.stderr ?? ""), LIMITS.timeout);
   }
 }
 
