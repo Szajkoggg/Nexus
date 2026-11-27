@@ -185,6 +185,14 @@ the user decides about what the stopped step (`stop_step`) left (`apps/server/sr
   answers `{ step, commits, uncommitted: [{ status, path }], uncommitted_note, stopped_at, discarded }` (`stopped_at`:
   when the stop it was read for came, its `queue.stop`; `discarded`: the Discard recorded for this stop, or null), or
   null when the queue is not stopped at a step.
+- A git read that did not answer (its 10 s limit, git not starting) or failed is never an empty list (queue CI13): the
+  answer adds `unreadable: { commits?, uncommitted? }`, each with why (`git did not answer within 10 s`, `git exited
+  with 128: …`), and the list beside it holds only what was read. git's own "no" stays an answer: outside a repository
+  nothing is listed, and a round whose recorded commit is gone (history rewritten) has no commits, as before. The
+  dashboard shows the part that could not be read with Retry, never "left no commits".
+- While the step's commits are unreadable, a lift is refused (409, "the commits of step X cannot be read (…); nothing
+  was recorded: try again"), Keep and Discard included: whether there is anything to decide is not known. The
+  dashboard keeps Continue and the approval disabled until a read answers. An unreadable status holds nothing.
 - When the step left commits of its own, the lift takes a choice, `work: keep | discard` in the body of `continue` and
   `approve`; without it they are refused (409, naming the step and the number of commits). With none nothing is asked.
   What the lift itself would refuse (a run still going; Continue on an unapproved revision; approving an approved

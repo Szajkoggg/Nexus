@@ -124,6 +124,16 @@ Continue and the approval of a stopped queue decide by what the stopped step lef
 at another step by then is refused with "try again" (it was read for another stop), so a choice is never recorded
 against work that was not shown. The dashboard still waits for the action's answer, as before.
 
+A git read that runs into its limit used to give the same `undefined` as git's "no", and every caller made an empty
+list of it (queue CI13): a stopped step's commits read too slowly let Continue lift the stop without Keep or Discard.
+`gitRead` (and `gitSync`) now say why: an exit code is git's answer, judged by the caller; no exit code (the limit, a
+spawn failure) is no answer (`noAnswer`), which the reads pass on as `unreadable`, and the lift refuses. A folder that
+is not there is a "no" (exit 128), not a git that did not answer. The limit stays 10 s; a read's own `timeout`
+(`GitOptions`) exists for the tests, which make git slow on purpose (a sleeping `gpg.program` under
+`log.showSignature` for `git log`, a sleeping fsmonitor hook for `git status`) and read with a 1 s limit. One finding
+from it: git runs a failing fsmonitor hook twice (protocol version 2, then 1) unless `core.fsmonitorHookVersion` is
+set, which doubled the slow-git test's wait into the limit under load.
+
 `perf` counts such work apart, as `async git <subcommand>`: its whole time, never part of a block.
 `apps/server/test/slow-git.test.ts` slows `git status` with an fsmonitor hook that sleeps 3 s: the stopped step's
 `/left` takes that long, and `/api/projects` asked meanwhile answers at once (with the synchronous git it waited the

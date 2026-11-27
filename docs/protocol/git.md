@@ -206,6 +206,12 @@ judged in this order:
    once more and starts the count anew (`merge.reintegrations` back to 0);
 5. the fast-forward; then the runs held for it go on (`releaseHold`).
 
+A git read that does not answer is never taken as "no" here (queue CI13): whether the integrated commit is in the base,
+or the base in it (`git merge-base --is-ancestor`, whose exit code 1 is the "no"), the list of worktrees, and the
+base's status after a failed merge. Nexus then waits and tells why ("… cannot be read (git did not answer within
+10 s)"); the user's Merge back and Clean up are refused (409) with nothing changed; a failed merge whose status cannot
+be read says the worktree is not as it was.
+
 A hold lasts at most one run of the integration step (its checks and its review included). Whenever the merge back
 cannot go once a run is held (a dirty checkout, failed checks, the limit, a run again that halts, waits, or cannot
 start), the held runs go on at once, and the wait is recorded with them (`merge.waiting.released`), so the user and the

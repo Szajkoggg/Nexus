@@ -174,6 +174,19 @@ export function ReadError({ error, what, className = "" }: { error: string; what
   return <p role="alert" className={`text-sm text-danger ${className}`}>{what ? t("common.readFailedOf", { what, reason: error }) : t("common.readFailed", { reason: error })}</p>;
 }
 
+/**
+ * A part the server could not read (git did not answer in time, or failed: queue CI13), with why and Retry: never
+ * shown as "none". `text` is the whole sentence, the reason in it.
+ */
+export function Unreadable({ text, onRetry, className = "" }: { text: string; onRetry?: () => void; className?: string }) {
+  return (
+    <p role="alert" className={`text-sm text-danger ${className}`}>
+      {text}
+      {onRetry && <> <button onClick={(e) => { e.stopPropagation(); onRetry(); }} className="whitespace-nowrap text-xs text-accent hover:underline max-lg:min-h-8">{t("common.retry")}</button></>}
+    </p>
+  );
+}
+
 export function Section({ title, children, aside }: { title: string; children: ReactNode; aside?: ReactNode }) {
   return (
     <section className="mt-6 first:mt-0">

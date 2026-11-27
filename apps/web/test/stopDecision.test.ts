@@ -81,3 +81,21 @@ test("a revision not approved: Approve revision N… opens the queue; the approv
   // Not yet read: the queue opens all the same.
   assert.equal(stopDecision({ approved: false, revision: 2, left: undefined }).opener?.disabled, false);
 });
+
+test("the step's commits could not be read: nothing lifts the stop until a read answers, and the hint says why (queue CI13)", () => {
+  const unread = left(0, { unreadable: { commits: "git did not answer within 10 s" } });
+  const WAIT = "Step W4c's commits cannot be read, so whether to keep or discard them is not known: the stop is lifted once they are read. Retry reads them again.";
+  assert.equal(needsWorkChoice(unread), false, "no choice is offered on a list not read");
+  const d = stopDecision({ approved: true, revision: 1, left: unread });
+  assert.deepEqual(d.opener && [d.opener.action, d.opener.disabled, d.opener.title], ["continue", true, WAIT]);
+  assert.deepEqual(d.confirm, { label: "Continue", disabled: true });
+  assert.equal(d.hint, WAIT);
+  const a = stopDecision({ approved: false, revision: 2, left: unread });
+  assert.deepEqual(a.approve && [a.approve.disabled, a.approve.hint], [true, WAIT], "approving a revision waits too");
+  // Only the commits hold it: an unreadable status is shown, and Continue lifts as before.
+  const status = stopDecision({ approved: true, revision: 1, left: left(0, { unreadable: { uncommitted: "git did not answer within 10 s" } }) });
+  assert.deepEqual(status.opener && [status.opener.action, status.opener.disabled], ["continue", false]);
+  // A Discard recorded before stays as it was: approving the revert lifts the stop.
+  const discarded = stopDecision({ approved: true, revision: 1, left: { ...unread, discarded: { at: "2026-11-13T11:00:00Z" } } });
+  assert.equal(discarded.opener, undefined);
+});

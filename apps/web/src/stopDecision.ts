@@ -44,24 +44,36 @@ export function stopDecision({ approved, revision, left, work }: {
   const known = left === "error" ? undefined : left;
   const needsChoice = needsWorkChoice(known);
   const discarded = !!known?.discarded;
+  // The step's commits could not be read (queue CI13): whether Keep or Discard is needed is not known, so nothing
+  // lifts the stop until a read answers (the server refuses it too); Retry beside the line reads them again.
+  const unreadable = !discarded && !!known?.unreadable?.commits;
+  const waitRead = unreadable ? t("stop.hint.unreadable", { step: known!.step }) : undefined;
   if (!approved) {
     return {
       needsChoice, discarded,
       opener: { action: "open", label: t("stop.approveOpen", { revision }), title: t("stop.approveOpenTitle", { revision }), disabled: false },
       approve: {
         label: needsChoice && work === "discard" ? t("stop.discardWork") : t("stop.approve", { revision }),
-        disabled: needsChoice && !work,
-        hint: needsChoice
+        disabled: unreadable || (needsChoice && !work),
+        hint: waitRead ?? (needsChoice
           ? !work ? t("stop.hint.chooseFirstApprove", { step: known!.step })
             : work === "discard" ? t("stop.hint.discardApprove", { step: known!.step })
             : t("stop.hint.keepApprove", { step: known!.step, revision })
           : discarded ? t("stop.hint.discardedApprove", { step: known!.step, revision })
-          : undefined,
+          : undefined),
       },
     };
   }
   if (discarded) {
     return { needsChoice, discarded, hint: t("stop.hint.discarded", { step: known!.step }) };
+  }
+  if (waitRead) {
+    return {
+      needsChoice, discarded,
+      opener: { action: "continue", label: t("stop.continue"), title: waitRead, disabled: true },
+      confirm: { label: t("stop.continue"), disabled: true },
+      hint: waitRead,
+    };
   }
   return {
     needsChoice, discarded,

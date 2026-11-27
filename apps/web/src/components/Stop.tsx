@@ -8,7 +8,7 @@ import { actResult, enc, projectUrl, request, useAction } from "../api.ts";
 import { stopDecision, type LeftState, type LeftView, type WorkChoice } from "../stopDecision.ts";
 import { stopPlace } from "@nexus/protocol/attention";
 import type { QueueView } from "../api.ts";
-import { Expandable, TimeAgo } from "./ui.tsx";
+import { Expandable, TimeAgo, Unreadable } from "./ui.tsx";
 import { rich, t } from "../i18n.ts";
 
 /**
@@ -16,11 +16,14 @@ import { rich, t } from "../i18n.ts";
  * changes, which are not necessarily the step's and are never cleaned. `pushAccepted` unknown (a waiting card of
  * another project): Keep says only that the commits stay.
  */
-function StoppedWork({ left, work, setWork, needsChoice, pushAccepted, branch }: {
+function StoppedWork({ left, work, setWork, needsChoice, pushAccepted, branch, onRetry }: {
   left: LeftView; work?: WorkChoice; setWork: (w: WorkChoice) => void; needsChoice: boolean; pushAccepted?: boolean; branch?: string;
+  /** Reads what the step left again: offered beside a part that could not be read. */
+  onRetry?: () => void;
 }) {
   const name = useId();
-  if (!left.commits.length && !left.uncommitted.length) return <p className="mt-3 text-xs text-fg-2">{t("stop.leftNothing", { step: left.step })}</p>;
+  const unread = left.unreadable;
+  if (!left.commits.length && !left.uncommitted.length && !unread) return <p className="mt-3 text-xs text-fg-2">{t("stop.leftNothing", { step: left.step })}</p>;
   const n = left.commits.length;
   const option = (value: WorkChoice, title: string, text: string) => (
     <label className={`flex cursor-pointer gap-2 rounded-md p-2 ring-1 ${work === value ? "bg-surface ring-accent/60" : "ring-line-strong hover:bg-surface/60"}`}>
@@ -30,6 +33,8 @@ function StoppedWork({ left, work, setWork, needsChoice, pushAccepted, branch }:
   );
   return (
     <div className="mt-3 space-y-3 rounded-md bg-surface/70 p-2.5">
+      {unread?.commits && <Unreadable text={t("stop.unreadableCommits", { step: left.step, reason: unread.commits })} onRetry={onRetry} />}
+      {unread?.uncommitted && <Unreadable text={t("stop.unreadableUncommitted", { reason: unread.uncommitted })} onRetry={unread.commits ? undefined : onRetry} />}
       {n > 0 && (
         <div>
           <p className="text-xs text-fg-2">{t("stop.leftCommits", { step: left.step, count: n })}</p>
@@ -99,8 +104,10 @@ export function QueueStopReason({ queue, className, clamp }: { queue: QueueView;
   return queue.status_reason ? <StopReason reason={queue.status_reason} className={className} clamp={clamp} /> : null;
 }
 
-export function StopBox({ queue, left, work, setWork, needsChoice, pushAccepted }: {
+export function StopBox({ queue, left, work, setWork, needsChoice, pushAccepted, onRetry }: {
   queue: QueueView; left?: LeftView; work?: WorkChoice; setWork: (w: WorkChoice) => void; needsChoice: boolean; pushAccepted: boolean;
+  /** Reads what the step left again (retryLeft). */
+  onRetry?: () => void;
 }) {
   const p = queue.lift_proposal;
   return (
@@ -113,7 +120,7 @@ export function StopBox({ queue, left, work, setWork, needsChoice, pushAccepted 
           <p className="mt-0.5 text-fg">{p.reason}</p>
         </div>
       )}
-      {left && <StoppedWork left={left} work={work} setWork={setWork} needsChoice={needsChoice} pushAccepted={pushAccepted} branch={queue.branch} />}
+      {left && <StoppedWork left={left} work={work} setWork={setWork} needsChoice={needsChoice} pushAccepted={pushAccepted} branch={queue.branch} onRetry={onRetry} />}
       {!queue.approved && (
         <p className="mt-3 text-xs text-fg-2">{t(needsChoice ? "stop.notApprovedChoice" : "stop.notApproved", { revision: queue.revision })}</p>
       )}
@@ -152,6 +159,11 @@ function readLeft(project: string, queue: string, version: string, force = false
     });
   e.reading = reading;
   return e;
+}
+
+/** Reads what the stopped step left again, now (Retry beside a part that could not be read); every place is told. */
+export function retryLeft(project: string, queue: string): void {
+  readLeft(project, queue, lefts.get(`${project}/${queue}`)?.version ?? "", true);
 }
 
 /** What the stopped step left, read when `enabled`: undefined while first read, null outside git, "error" when unreadable. */
@@ -229,12 +241,17 @@ export function useStopActions({ project, queue, approved, revision, version, on
       {cont.busy && !choosing ? t("stop.continuing") : d.opener.label}
     </button>
   );
-  const panel = (choosing && known && d.confirm) || message || shownHint ? (
+  // The step's commits could not be read: said where Continue waits for them, with Retry (queue CI13).
+  const unread = !d.discarded && known?.unreadable?.commits
+    ? <Unreadable className="mt-1.5 text-xs" text={t("stop.unreadableCommits", { step: known.step, reason: known.unreadable.commits })} onRetry={() => retryLeft(project, queue)} />
+    : undefined;
+  const panel = (choosing && known && d.confirm) || message || shownHint || unread ? (
     <div {...stay} className="cursor-auto">
       {shownHint && <p className="mt-1.5 text-xs text-fg-2">{shownHint}</p>}
+      {unread}
       {choosing && known && d.confirm && (
         <div className="rounded-md border border-line bg-surface-2 p-2.5 [&>div:first-child]:mt-0">
-          <StoppedWork left={known} work={work} setWork={setWork} needsChoice={d.needsChoice} pushAccepted={pushAccepted} branch={branch} />
+          <StoppedWork left={known} work={work} setWork={setWork} needsChoice={d.needsChoice} pushAccepted={pushAccepted} branch={branch} onRetry={() => retryLeft(project, queue)} />
           <div className="mt-2.5 flex flex-wrap items-center justify-end gap-2">
             <span className="mr-auto min-w-[8rem] flex-1 text-xs text-fg-3">{d.hint}</span>
             <button onClick={() => { setChoosing(false); setWork(undefined); }} className={OPEN_BUTTON}>{t("common.cancel")}</button>

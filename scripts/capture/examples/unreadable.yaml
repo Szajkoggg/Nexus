@@ -1,0 +1,20 @@
+# A stopped step whose commits git cannot read within the server's limit (queue CI13), on the project of
+# scripts/capture/seed-unreadable.ts: the stop box in the queue's panel, after the read has given up (10 s).
+#   node scripts/capture.ts scripts/capture/examples/unreadable.yaml --step <queue>/<step>
+seed: scripts/capture/seed-unreadable.ts
+views:
+  - key: stop-unreadable@1440
+    route: "#/demo/SW"
+    label: "The stopped step's commits could not be read: the stop box and Continue"
+    actions:
+      - wait: 22000
+  - key: stop-unreadable@492
+    route: "#/demo/SW"
+    label: "The same, in the narrowest window"
+    actions:
+      - wait: 22000
+  - key: step-commits-unreadable@1440
+    route: "#/demo/SW/SW2"
+    label: "The stopped step's panel: its commits could not be read"
+    actions:
+      - wait: 22000

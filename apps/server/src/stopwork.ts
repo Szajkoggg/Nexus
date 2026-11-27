@@ -5,16 +5,16 @@
 // commits; approving a revision then lifts the stop without asking again. With no commits of the step's own nothing
 // is asked. Uncommitted changes in the checkout are shown, labelled as not necessarily the step's, and never cleaned.
 import { ActionError, loadProjectState, now, runActive, type LeftBehind, type ProjectStore, type QueueView, type StatusChange } from "@nexus/protocol";
-import { leftBehind, stopAt } from "./gitinfo.ts";
+import { leftBehind, stopAt, type GitOptions } from "./gitinfo.ts";
 
 /**
  * What the stopped queue's stopped step left, read before a lift (queue SV2): its git runs without holding the loop,
  * so the action reads it first and then checks, decides and writes in one synchronous go (decideStoppedWork). The
  * step it is for goes with it: a lift that finds the queue stopped at another step by then is refused.
  */
-export async function readStoppedWork(store: ProjectStore, queueId: string): Promise<LeftBehind | undefined> {
+export async function readStoppedWork(store: ProjectStore, queueId: string, o: GitOptions = {}): Promise<LeftBehind | undefined> {
   const q = loadProjectState(store).queues.find((x) => x.id === queueId);
-  return q ? leftBehind(store, q) : undefined;
+  return q ? leftBehind(store, q, o) : undefined;
 }
 
 /** A Discard recorded for the queue's present stop. */
@@ -42,6 +42,10 @@ export function decideStoppedWork(store: ProjectStore, queueId: string, choice: 
   if (read?.step !== q.stop_step) throw new ActionError(`queue ${queueId} is now stopped at another step; try again`, 409);
   if (read?.stopped_at !== stopAt(q)) throw new ActionError(`queue ${queueId} was stopped again since its work was read; try again`, 409);
   const left = read;
+  // Commits that could not be read are not "none": the lift waits for a read that answers (queue CI13), recording nothing.
+  if (left?.unreadable?.commits) {
+    throw new ActionError(`the commits of step ${left.step} cannot be read (${left.unreadable.commits}); nothing was recorded: try again`, 409);
+  }
   if (!left || !left.commits.length) return { proceed: true }; // nothing of the step's own: nothing to decide
   if (!choice) {
     throw new ActionError(`step ${left.step} left ${left.commits.length} commit${left.commits.length === 1 ? "" : "s"} of its own: choose Keep or Discard (work: keep | discard)`, 409);

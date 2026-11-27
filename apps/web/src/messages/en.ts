@@ -24,6 +24,7 @@ export const en = {
   "common.save": "Save",
   "common.loading": "Loading…",
   "common.readFailed": "Could not be read: {reason}",
+  "common.retry": "Retry",
   "common.readFailedOf": "{what} could not be read: {reason}",
 
   // ---------------------------------------------------------------- times and durations (i18n.ts)
@@ -482,6 +483,7 @@ export const en = {
   "stop.hint.chooseFirst": "Choose Keep or Discard first.",
   "stop.hint.staysUntilRevert": "The stop stays until you approve the orchestrator's revert.",
   "stop.hint.lifts": "Lifts the stop; the stopped step runs again in its session, unless it was skipped.",
+  "stop.hint.unreadable": "Step {step}'s commits cannot be read, so whether to keep or discard them is not known: the stop is lifted once they are read. Retry reads them again.",
 
   // ---------------------------------------------------------------- approving a queue (approval.ts)
   "approval.level.1": "I review",
@@ -602,6 +604,8 @@ export const en = {
   /** {place} is the server's words for where the stop is (" at step W4b"), English for now. */
   "stop.stopped": "Stopped{place}",
   "stop.leftNothing": "Step {step} left no commits and no uncommitted changes.",
+  "stop.unreadableCommits": "Step {step}'s commits cannot be read ({reason}): whether it left any is not known.",
+  "stop.unreadableUncommitted": "The checkout's uncommitted changes cannot be read ({reason}).",
   "stop.leftCommits": { one: "Step {step} left {count} commit of its own:", other: "Step {step} left {count} commits of its own:" },
   "stop.files": { one: "{count} file", other: "{count} files" },
   /** {note} is the server's note on whose the changes are. */
@@ -989,6 +993,8 @@ export const en = {
   "details.commits": "Commits",
   "details.commitsCount": "Commits · {count}",
   "details.commits.foreign": "not by this step's worker",
+  "details.commits.unreadable": "The step's commits cannot be read ({reason}): the list may be incomplete.",
+  "details.branch.unreadable": "The branch's state cannot be read ({reason}): what is missing here is not known to be missing.",
   "details.commits.foreignTitle": "Not made in a turn of this step's worker",
   "details.commits.round": "Round {round}",
   "details.commits.roundAtWork": "Round {round} (at work)",

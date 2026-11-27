@@ -10,6 +10,7 @@
 // commit's time: git, the CLI and the server may disagree about the time after a clock step (docs/design/state.md, "Clock
 // steps"). Rounds recorded before keep the time windows.
 import { execFile, execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { normPath, now, type BranchView, type CommitView, type GitFile, type LeftBehind, type ProjectStore, type QueueView, type RoundView, type StepCommitsView } from "@nexus/protocol";
 import { refFromFiles } from "./gitfiles.ts";
 import { gitLabel, perf } from "./perf.ts";
@@ -17,22 +18,66 @@ import { gitLabel, perf } from "./perf.ts";
 /** The limits of every local git read here, waited for (git) or not (gitAsync). */
 const LIMITS = { encoding: "utf8", windowsHide: true, timeout: 10_000, maxBuffer: 8 * 1024 * 1024 } as const;
 
+/** A read's own limit: `timeout` in ms instead of LIMITS.timeout (tests: a short limit and a git slower than it). */
+export interface GitOptions { timeout?: number }
+
 /**
- * Runs a local git command without holding the event loop (queue SV2): the same LIMITS as git(), undefined when it
- * fails. `trim: false` keeps the output as git wrote it (a status's leading space is part of its first code).
+ * A git command's answer, or why there is none (queue CI13): `code` is git's exit code when it ran to its end (1 or
+ * 128 often mean "no": not a repository, no such ref), absent when it never answered (its time limit, a spawn
+ * failure); `reason` says which, for the user.
  */
-export function gitAsync(cwd: string, args: string[], o: { trim?: boolean } = {}): Promise<string | undefined> {
+export type GitResult = { ok: true; out: string } | { ok: false; code?: number; reason: string; stderr: string };
+
+type GitError = { code?: string | number | null; killed?: boolean; signal?: string | null; message: string };
+const failure = (cwd: string, err: GitError, stderr: string, timeout: number): GitResult & { ok: false } => {
+  const first = stderr.trim().split(/\r?\n/)[0] ?? "";
+  // A folder that is not there (a worktree cleaned up) is git's "not a repository", not a git that did not answer.
+  if (err.code === "ENOENT" && !existsSync(cwd)) return { ok: false, code: 128, reason: `${cwd} does not exist`, stderr: "" };
+  if (typeof err.code === "number") return { ok: false, code: err.code, reason: `git exited with ${err.code}${first ? `: ${first}` : ""}`, stderr };
+  if (err.killed || err.signal) return { ok: false, reason: `git did not answer within ${Math.round(timeout / 100) / 10} s`, stderr };
+  return { ok: false, reason: `git could not run: ${err.message.split("\n")[0]}`, stderr };
+};
+
+/**
+ * A git read that did not answer: its time limit, or git not starting. A read that ran and said no (an exit code) is
+ * an answer the caller judges itself.
+ */
+export const noAnswer = (r: GitResult): r is GitResult & { ok: false } => !r.ok && r.code === undefined;
+
+/**
+ * Runs a local git command without holding the event loop (queue SV2), with the same LIMITS as git(), and says why
+ * when it fails. `trim: false` keeps the output as git wrote it (a status's leading space is part of its first code).
+ */
+export function gitRead(cwd: string, args: string[], o: { trim?: boolean } & GitOptions = {}): Promise<GitResult> {
+  const timeout = o.timeout ?? LIMITS.timeout;
   return perf.timed(gitLabel(args), new Promise((resolve) => {
-    execFile("git", args, { cwd, ...LIMITS }, (err, stdout) => {
-      resolve(err ? undefined : o.trim === false ? stdout : stdout.trim());
+    execFile("git", args, { cwd, ...LIMITS, timeout }, (err, stdout, stderr) => {
+      resolve(err ? failure(cwd, err, String(stderr ?? ""), timeout) : { ok: true, out: o.trim === false ? stdout : stdout.trim() });
     });
   }));
 }
 
+/** gitRead without the reason: undefined when it fails, where any failure means the same (a commit's details). */
+export async function gitAsync(cwd: string, args: string[], o: { trim?: boolean } & GitOptions = {}): Promise<string | undefined> {
+  const r = await gitRead(cwd, args, o);
+  return r.ok ? r.out : undefined;
+}
+
 /** Runs a local git command; undefined when it fails (not a repository, an unknown ref). */
 export function git(cwd: string, args: string[]): string | undefined {
-  try { return perf.measure(gitLabel(args), () => execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "ignore"], ...LIMITS })).trim(); }
-  catch { return undefined; }
+  const r = gitSync(cwd, args);
+  return r.ok ? r.out : undefined;
+}
+
+/** git() with the reason when it fails: for a caller that must tell "no" (an exit code) from "no answer". */
+export function gitSync(cwd: string, args: string[]): GitResult {
+  try { return { ok: true, out: perf.measure(gitLabel(args), () => execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"], ...LIMITS })).trim() }; }
+  catch (e) {
+    const err = e as { code?: string; status?: number | null; signal?: string | null; stderr?: string; message: string };
+    // execFileSync names the exit code `status` (null when killed); `code` is a spawn error's name, or ETIMEDOUT.
+    const killed = err.code === "ETIMEDOUT" || !!err.signal;
+    return failure(cwd, { code: typeof err.status === "number" && !killed ? err.status : killed ? undefined : err.code, killed, signal: err.signal, message: err.message }, String(err.stderr ?? ""), LIMITS.timeout);
+  }
 }
 
 /** Where the queue's work is: its worktree once created, else the project's checkout; undefined for one not made yet. */
@@ -158,19 +203,28 @@ export function recordBase(store: ProjectStore, q: Pick<QueueView, "id" | "base"
 /**
  * The commits of each round of a step; undefined when the checkout is not a git repository or nothing was recorded.
  * Only reads (git.yaml, the activity, git), so its git runs without holding the loop: the dashboard's reads.
+ * A git read that failed is never an empty list (queue CI13): `unreadable` says why, and the rounds hold what was read.
  */
-export async function stepCommits(store: ProjectStore, q: QueueView, step: string): Promise<StepCommitsView | undefined> {
+export async function stepCommits(store: ProjectStore, q: QueueView, step: string, o: GitOptions = {}): Promise<StepCommitsView | undefined> {
   const dir = checkoutOf(store, q);
   const rounds = store.readGit(q.id)?.steps[step];
-  if (!dir || !rounds?.length || await gitAsync(dir, ["rev-parse", "--git-dir"]) === undefined) return undefined;
+  if (!dir || !rounds?.length) return undefined;
+  const repo = await gitRead(dir, ["rev-parse", "--git-dir"], o);
+  if (noAnswer(repo)) return { rounds: [], unreadable: repo.reason };
+  if (!repo.ok) return undefined; // git answered: not a repository
+  const failed: string[] = [];
   const main = inMainCheckout(store, q);
-  const headNow = rounds.some((r) => r.end === undefined) ? (await gitAsync(dir, ["rev-parse", "HEAD"])) ?? null : null;
-  return {
+  let headNow: string | null = null;
+  if (rounds.some((r) => r.end === undefined)) {
+    const h = await gitRead(dir, ["rev-parse", "HEAD"], o);
+    if (h.ok) headNow = h.out; else if (noAnswer(h)) failed.push(h.reason);
+  }
+  const view: StepCommitsView = {
     rounds: await Promise.all(rounds.map(async (r) => {
       const end = r.end === undefined ? headNow : r.end;
       const [commits, own] = await Promise.all([
-        r.start && end ? commitsBetween(dir, r.start, end) : [],
-        main && r.turns ? inTurns(dir, r.turns, end) : undefined,
+        r.start && end ? commitsBetween(dir, r.start, end, failed, o) : [],
+        main && r.turns ? inTurns(dir, r.turns, end, failed, o) : undefined,
       ]);
       const windows = main && !r.turns ? turnWindows(store, r.session, q.id, step) : [];
       const foreign = (c: { sha: string; time: number }) => main
@@ -181,12 +235,26 @@ export async function stepCommits(store: ProjectStore, q: QueueView, step: strin
       };
     })),
   };
+  if (failed.length) view.unreadable = failed[0]!;
+  return view;
+}
+
+/**
+ * The output of a read of a range of commits, or undefined with the reason added to `failed`. A range whose commit is
+ * gone (git says so: history rewritten since) has no commits, as before; any other failure is no answer.
+ */
+async function rangeRead(dir: string, args: string[], failed: string[], o: GitOptions): Promise<string | undefined> {
+  const r = await gitRead(dir, args, o);
+  if (r.ok) return r.out;
+  if (r.code !== undefined && /bad revision|unknown revision|invalid revision range|bad object/i.test(r.stderr)) return "";
+  failed.push(r.reason);
+  return undefined;
 }
 
 const SEP = "\x1f";
-/** start..end, newest first, with the files and lines each changed. */
-async function commitsBetween(dir: string, start: string, end: string): Promise<(Omit<CommitView, "foreign"> & { time: number })[]> {
-  const out = await gitAsync(dir, ["log", "--no-color", "--numstat", `--format=@@${SEP}%H${SEP}%ct${SEP}%an${SEP}%s`, `${start}..${end}`]);
+/** start..end, newest first, with the files and lines each changed; a failed read adds its reason to `failed`. */
+async function commitsBetween(dir: string, start: string, end: string, failed: string[], o: GitOptions): Promise<(Omit<CommitView, "foreign"> & { time: number })[]> {
+  const out = await rangeRead(dir, ["log", "--no-color", "--numstat", `--format=@@${SEP}%H${SEP}%ct${SEP}%an${SEP}%s`, `${start}..${end}`], failed, o);
   if (!out) return [];
   const list: (Omit<CommitView, "foreign"> & { time: number })[] = [];
   for (const line of out.split(/\r?\n/)) {
@@ -207,7 +275,7 @@ async function commitsBetween(dir: string, start: string, end: string): Promise<
  * The commits made in the round's turns: each turn's start..end (an open turn's end is the round's end, or the HEAD of
  * now). Turns that follow on without a commit between them are one range, one git call.
  */
-async function inTurns(dir: string, turns: readonly { start: string | null; end?: string | null }[], roundEnd: string | null | undefined): Promise<Set<string>> {
+async function inTurns(dir: string, turns: readonly { start: string | null; end?: string | null }[], roundEnd: string | null | undefined, failed: string[], o: GitOptions): Promise<Set<string>> {
   const ranges: [string, string][] = [];
   for (const t of turns) {
     const end = t.end === undefined ? roundEnd : t.end;
@@ -216,7 +284,8 @@ async function inTurns(dir: string, turns: readonly { start: string | null; end?
     if (prev && prev[1] === t.start) prev[1] = end; else ranges.push([t.start, end]);
   }
   const out = new Set<string>();
-  const lists = await Promise.all(ranges.map(([a, b]) => gitAsync(dir, ["rev-list", `${a}..${b}`])));
+  // A failed read is no answer, not "none of these commits are the step's" (they would be marked foreign).
+  const lists = await Promise.all(ranges.map(([a, b]) => rangeRead(dir, ["rev-list", `${a}..${b}`], failed, o)));
   for (const list of lists) for (const sha of list?.match(/[0-9a-f]{40,64}/g) ?? []) out.add(sha);
   return out;
 }
@@ -238,15 +307,25 @@ function turnWindows(store: ProjectStore, session: string, queue: string, step: 
 
 /**
  * The queue's branch against its base and its remote-tracking ref; undefined outside a git repository or detached.
- * Only reads: its git runs without holding the loop, the base's side and the upstream's side by side.
+ * Only reads: its git runs without holding the loop, the base's side and the upstream's side by side. A git that did
+ * not answer is never "no base" or "no upstream" (queue CI13): `unreadable` says why, the rest is what was read.
  */
-export async function branchState(store: ProjectStore, q: QueueView): Promise<BranchView | undefined> {
+export async function branchState(store: ProjectStore, q: QueueView, o: GitOptions = {}): Promise<BranchView | undefined> {
   const dir = checkoutOf(store, q);
-  if (!dir || await gitAsync(dir, ["rev-parse", "--git-dir"]) === undefined) return undefined;
-  const branch = q.branch ?? await gitAsync(dir, ["branch", "--show-current"]);
-  if (!branch || await gitAsync(dir, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]) === undefined) return undefined;
+  if (!dir) return undefined;
+  const failed: string[] = [];
+  // The output, or undefined: git said no (an exit code), or did not answer (its reason kept).
+  const read = async (args: string[]) => {
+    const r = await gitRead(dir, args, o);
+    if (noAnswer(r)) failed.push(r.reason);
+    return r.ok ? r.out : undefined;
+  };
+  const unread = (): BranchView | undefined => (failed.length ? { branch: q.branch ?? "", unreadable: failed[0]! } : undefined);
+  if (await read(["rev-parse", "--git-dir"]) === undefined) return unread();
+  const branch = q.branch ?? await read(["branch", "--show-current"]);
+  if (!branch || await read(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]) === undefined) return unread();
   const counts = async (other: string) => {
-    const r = await gitAsync(dir, ["rev-list", "--left-right", "--count", `refs/heads/${branch}...${other}`]);
+    const r = await read(["rev-list", "--left-right", "--count", `refs/heads/${branch}...${other}`]);
     const m = r ? /^(\d+)\s+(\d+)$/.exec(r) : null;
     return m ? { ahead: Number(m[1]), behind: Number(m[2]) } : undefined;
   };
@@ -258,13 +337,13 @@ export async function branchState(store: ProjectStore, q: QueueView): Promise<Br
   };
   const upstreamOf = async (): Promise<BranchView["upstream"]> => {
     // The branch's upstream, else origin's branch of the same name.
-    const upstream = await gitAsync(dir, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${branch}@{upstream}`])
-      ?? (await gitAsync(dir, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`]) !== undefined ? `origin/${branch}` : undefined);
+    const upstream = await read(["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${branch}@{upstream}`])
+      ?? (await read(["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`]) !== undefined ? `origin/${branch}` : undefined);
     if (!upstream) return undefined;
     // When the ref last changed (a fetch, a push): its newest reflog entry, kept for remote-tracking refs by default.
     const [c, entry] = await Promise.all([
       counts(`refs/remotes/${upstream}`),
-      gitAsync(dir, ["reflog", "show", "-1", "--date=unix", "--format=%gd", `refs/remotes/${upstream}`]),
+      read(["reflog", "show", "-1", "--date=unix", "--format=%gd", `refs/remotes/${upstream}`]),
     ]);
     const t = entry ? /@\{(\d+)\}$/.exec(entry)?.[1] : undefined;
     return c ? { ref: upstream, ...c, at: t ? new Date(Number(t) * 1000).toISOString() : undefined } : undefined;
@@ -273,6 +352,7 @@ export async function branchState(store: ProjectStore, q: QueueView): Promise<Br
   const view: BranchView = { branch };
   if (b) view.base = b;
   if (u) view.upstream = u;
+  if (failed.length) view.unreadable = failed[0]!;
   return view;
 }
 
@@ -289,9 +369,10 @@ export function stopAt(q: QueueView): string | undefined {
 /**
  * What a stopped queue's stopped step left behind; undefined when the queue is not stopped at a step. Only reads, its
  * git without holding the loop: an action that decides by it reads it first, then decides and writes in one go
- * (src/stopwork.ts).
+ * (src/stopwork.ts). A git read that failed is never an empty list (queue CI13): `unreadable` names the part and why,
+ * and a lift is refused while the step's commits are unreadable.
  */
-export async function leftBehind(store: ProjectStore, q: QueueView): Promise<LeftBehind | undefined> {
+export async function leftBehind(store: ProjectStore, q: QueueView, o: GitOptions = {}): Promise<LeftBehind | undefined> {
   if (q.status !== "stopped" || !q.stop_step) return undefined;
   // The stop this read is for, taken before the git reads are awaited: a lift decides only on it (queue LH).
   const stoppedAt = stopAt(q);
@@ -299,10 +380,17 @@ export async function leftBehind(store: ProjectStore, q: QueueView): Promise<Lef
   // --no-optional-locks: status does not refresh the index, so it writes nothing. Untrimmed: a trim would eat the
   // leading space of the first line's status code.
   const [view, status] = await Promise.all([
-    stepCommits(store, q, q.stop_step),
-    dir ? gitAsync(dir, ["--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all"], { trim: false }) : undefined,
+    stepCommits(store, q, q.stop_step, o),
+    dir ? gitRead(dir, ["--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all"], { trim: false, ...o }) : undefined,
   ]);
   const commits = (view?.rounds ?? []).flatMap((r) => r.commits).filter((c) => !c.foreign);
-  const uncommitted = (status ?? "").split(/\r?\n/).filter(Boolean).map((l) => ({ status: l.slice(0, 2).trim(), path: l.slice(3) }));
-  return { step: q.stop_step, commits, uncommitted, uncommitted_note: UNCOMMITTED_NOTE, ...(stoppedAt ? { stopped_at: stoppedAt } : {}) };
+  // git answering no (not a repository) has nothing uncommitted, as before; one that did not answer is unreadable.
+  const uncommitted = (status?.ok ? status.out : "").split(/\r?\n/).filter(Boolean).map((l) => ({ status: l.slice(0, 2).trim(), path: l.slice(3) }));
+  const unreadable: NonNullable<LeftBehind["unreadable"]> = {};
+  if (view?.unreadable) unreadable.commits = view.unreadable;
+  if (status && noAnswer(status)) unreadable.uncommitted = status.reason;
+  return {
+    step: q.stop_step, commits, uncommitted, uncommitted_note: UNCOMMITTED_NOTE, ...(stoppedAt ? { stopped_at: stoppedAt } : {}),
+    ...(unreadable.commits || unreadable.uncommitted ? { unreadable } : {}),
+  };
 }

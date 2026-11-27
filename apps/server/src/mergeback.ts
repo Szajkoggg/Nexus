@@ -23,7 +23,7 @@ import {
   ActionError, runGoing, stepAtWork, loadProjectState, normPath, now, pendingProvisional, type GitFile, type ProjectState, type ProjectStore, type QueueView,
   queueView,
 } from "@nexus/protocol";
-import { checkoutOf, git, patchGit } from "./gitinfo.ts";
+import { checkoutOf, git, gitSync, patchGit } from "./gitinfo.ts";
 import { ROOT } from "./lifecycle.ts";
 import { samePath } from "./worktree.ts";
 import { cleanupIdentity, cleanupPath, cleanupRefusal, cleanupSnapshot, removeVerifiedTree, type RemovalIO } from "./cleanup-proof.ts";
@@ -50,12 +50,27 @@ function run(cwd: string, args: string[]): string {
   }
 }
 
-const isAncestor = (cwd: string, a: string, b: string) => git(cwd, ["merge-base", "--is-ancestor", a, b]) !== undefined;
+/**
+ * Whether commit `a` is in `b`'s history: git's exit code 1 is "no"; any other failure (its time limit, an unknown
+ * commit) is no answer, with why (queue CI13), never "no": a "no" runs the integration step again or merges.
+ */
+function ancestry(cwd: string, a: string, b: string): { is: boolean } | { why: string } {
+  const r = gitSync(cwd, ["merge-base", "--is-ancestor", a, b]);
+  return r.ok ? { is: true } : r.code === 1 ? { is: false } : { why: r.reason };
+}
+/** ancestry() where no answer refuses the action (409), with nothing done. */
+function isAncestor(cwd: string, a: string, b: string): boolean {
+  const r = ancestry(cwd, a, b);
+  if ("why" in r) throw new ActionError(`whether ${a} is in ${b} cannot be read (${r.why}); nothing was changed`, 409);
+  return r.is;
+}
 
 interface Worktree { path: string; branch: string | undefined; detached: boolean }
+/** The repository's worktrees; refused (409) when git cannot list them: an empty list would read as "not there". */
 function worktrees(root: string): Worktree[] {
-  const out = git(root, ["worktree", "list", "--porcelain"]) ?? "";
-  return out.split(/\r?\n\r?\n/).map((block) => {
+  const r = gitSync(root, ["worktree", "list", "--porcelain"]);
+  if (!r.ok) throw new ActionError(`the worktrees of ${root} cannot be read (${r.reason})`, 409);
+  return r.out.split(/\r?\n\r?\n/).map((block) => {
     const lines = block.split(/\r?\n/);
     const path = lines.find((l) => l.startsWith("worktree "))?.slice(9);
     const branch = lines.find((l) => l.startsWith("branch refs/heads/"))?.slice(18);
@@ -82,7 +97,9 @@ export function withMergeLock<T>(store: ProjectStore, queueId: string, f: () => 
  * overwrite them, and nothing is lost), judged by the caller after the runs at work there.
  */
 function baseCheckout(root: string, base: string, serverRoot = ROOT): { path: string; dirty?: string } | { blocked: string } {
-  const target = worktrees(root).find((w) => w.branch === base);
+  let listed: Worktree[];
+  try { listed = worktrees(root); } catch (e) { if (e instanceof ActionError) return { blocked: e.message }; throw e; }
+  const target = listed.find((w) => w.branch === base);
   if (!target) return { blocked: `branch ${base} is not checked out in any worktree (or only detached): check it out, then merge` };
   // This server's own checkout when it runs as the live instance: never touched by a merge.
   if (samePath(target.path, serverRoot) && git(serverRoot, ["branch", "--show-current"]) === "") return { blocked: "the base is checked out in the live worktree: Nexus does not merge there" };
@@ -185,9 +202,13 @@ export function judgeMerge(store: ProjectStore, state: ProjectState, q: QueueVie
   if (tip !== sha) return { kind: "wait", reason: `queue ${q.id}'s branch ${branch} moved on after its integration step (it ended at ${sha.slice(0, 7)}, the branch is at ${tip.slice(0, 7)}): its work is not merged back` };
   const baseSha = git(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${base.ref}`]);
   if (!baseSha) return { kind: "wait", reason: `queue ${q.id}'s base branch ${base.ref} does not exist` };
-  if (isAncestor(root, sha, baseSha)) return { kind: "merged", sha };
+  const merged = ancestry(root, sha, baseSha);
+  if ("why" in merged) return { kind: "wait", reason: `whether queue ${q.id}'s work is in ${base.ref} cannot be read (${merged.why})` };
+  if (merged.is) return { kind: "merged", sha };
   // What keeps it whatever the base's checkout is like comes first: nothing is held for a merge back that cannot go.
-  const behind = !isAncestor(root, baseSha, sha);
+  const ahead = ancestry(root, baseSha, sha);
+  if ("why" in ahead) return { kind: "wait", reason: `whether ${base.ref} moved on since queue ${q.id}'s integration step cannot be read (${ahead.why})` };
+  const behind = !ahead.is;
   const count = q.git?.merge?.reintegrations ?? 0;
   if (by === "nexus") {
     if (!state.project.defaults.merge_back) return { kind: "none", why: "merging back by itself is off (merge_back): the user merges back" };
@@ -295,7 +316,9 @@ export function mergeBack(store: ProjectStore, queueId: string, serverRoot = ROO
     const conflicts = git(target.path, ["diff", "--name-only", "--diff-filter=U"]) ?? "";
     if (git(target.path, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]) !== undefined) run(target.path, ["merge", "--abort"]);
     const after = git(target.path, ["rev-parse", "HEAD"]);
-    const clean = after === before && !git(target.path, ["status", "--porcelain", "--untracked-files=no"]);
+    // A status that cannot be read is not clean (queue CI13): the message then asks the user to look.
+    const status = gitSync(target.path, ["status", "--porcelain", "--untracked-files=no"]);
+    const clean = after === before && status.ok && !status.out;
     throw new ActionError(`the merge of ${branch} into ${base.ref} ${conflicts ? `conflicts in ${conflicts.split(/\r?\n/).join(", ")}` : `failed: ${errorText(e).split("\n")[0]}`}; ${clean ? "it was aborted, nothing changed" : "it was aborted, but the worktree is not as it was: look at it"}`, 409);
   }
   const sha = run(target.path, ["rev-parse", "HEAD"]);

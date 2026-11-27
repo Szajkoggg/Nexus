@@ -24,8 +24,12 @@ export interface CommitView {
 /** One round of a step: from its start (or a send-back) to its outcome; `open` while it is at work. */
 export interface RoundView { session: string; start: string | null; end: string | null; open: boolean; commits: CommitView[] }
 
-/** GET …/queues/:queue/steps/:step/commits: the step's commits per round; null outside git or with nothing recorded. */
-export interface StepCommitsView { rounds: RoundView[] }
+/**
+ * GET …/queues/:queue/steps/:step/commits: the step's commits per round; null outside git or with nothing recorded.
+ * `unreadable`: a git read did not answer (its time limit, git not starting) or failed, with why; the rounds then hold
+ * only what was read, and an empty one is not "no commits" (queue CI13).
+ */
+export interface StepCommitsView { rounds: RoundView[]; unreadable?: string }
 
 /** GET …/queues/:queue/git: the queue's branch; null outside git or detached. */
 export interface BranchView {
@@ -34,6 +38,8 @@ export interface BranchView {
   base?: { ref: string; ahead: number; behind: number };
   /** Ahead of and behind the local remote-tracking ref (no fetch): `at` is when that ref last changed, if known. */
   upstream?: { ref: string; ahead: number; behind: number; at?: string };
+  /** A git read did not answer, with why: a missing base or upstream is then not known to be missing (queue CI13). */
+  unreadable?: string;
 }
 
 /** What a stopped queue's stopped step left behind. */
@@ -46,6 +52,12 @@ export interface LeftBehind {
   uncommitted_note: string;
   /** When the stop this was read for came (its queue.stop); a lift decides only on a read of the present stop. */
   stopped_at?: string;
+  /**
+   * What could not be read, with why (git did not answer, or failed): `commits`, the step's own commits (a lift is
+   * refused until they are read: 409, nothing recorded); `uncommitted`, the checkout's status. The list beside a part
+   * named here is not "none" (queue CI13).
+   */
+  unreadable?: { commits?: string; uncommitted?: string };
 }
 
 /** GET …/queues/:queue/left: what the stopped step left, and whether a Discard is recorded for this stop; null when not stopped at a step. */

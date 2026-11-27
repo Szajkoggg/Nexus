@@ -17,7 +17,7 @@ import { LevelPicker, levelChangeable } from "../Levels.tsx";
 import { nav } from "../../nav.ts";
 import { StepRow } from "../QueueRow.tsx";
 import { RunControls } from "../Run.tsx";
-import { StopBox, stopVersion, useContinue, useLeft } from "../Stop.tsx";
+import { retryLeft, StopBox, stopVersion, useContinue, useLeft } from "../Stop.tsx";
 import { ActionBar, Button, Composer, Expandable, Markdown, PanelBody, PanelHeader, Section, StatusBadge, TimeAgo, statusWord, type MenuEntry } from "../ui.tsx";
 import { BranchLine, WorktreeActions } from "./git.tsx";
 import type { PanelProps } from "./props.ts";
@@ -69,7 +69,7 @@ export function QueueDetail({ project, queue, onClose, of, chat = [], onFull }: 
       <WorktreeActions project={id} root={project.project.root} queue={queue} />
 
       {queue.status === "stopped"
-        ? <StopBox queue={queue} left={left ?? undefined} work={work} setWork={setWork} needsChoice={needsChoice} pushAccepted={project.project.defaults.push_accepted} />
+        ? <StopBox queue={queue} left={left ?? undefined} work={work} setWork={setWork} needsChoice={needsChoice} pushAccepted={project.project.defaults.push_accepted} onRetry={() => retryLeft(id, queue.id)} />
         : queue.status_reason && <Section title={t("details.state")}><Expandable text={queue.status_reason} /></Section>}
       {approving && <CompactSteps project={project} queue={queue} chat={chat} onFull={onFull} onChanged={onChanged} />}
       {queue.report && (

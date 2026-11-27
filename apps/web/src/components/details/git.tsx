@@ -5,7 +5,7 @@ import type { BranchView, StepCommitsView } from "@nexus/protocol/api";
 import { act, actResult, enc, HttpError, projectUrl, useAction, useQuery, type ProjectState, type QueueView, type StepView } from "../../api.ts";
 import { integrationState, mergeBackInto, mergeBackPath, showsWorktreeActions } from "../../details.ts";
 import { rich, t } from "../../i18n.ts";
-import { Button, ReadError, Section, TimeAgo } from "../ui.tsx";
+import { Button, ReadError, Section, TimeAgo, Unreadable } from "../ui.tsx";
 import { Fold } from "./review.tsx";
 import { usePage } from "../../page.ts";
 import { nav } from "../../nav.ts";
@@ -16,7 +16,9 @@ export function StepCommits({ project, queue, step, toggle }: {
   /** The review's one line: "Commits · 3", which opens and closes the list. */
   toggle?: { open: boolean; onToggle: () => void };
 }) {
-  const { data, error } = useQuery<StepCommitsView | null>(projectUrl(project, `/queues/${enc(queue)}/steps/${enc(step)}/commits`), usePage().queueVersion(queue));
+  // Retry asks again at once: a read the server could not answer (git too slow) is not answered by waiting for a change.
+  const [tries, setTries] = useState(0);
+  const { data, error } = useQuery<StepCommitsView | null>(projectUrl(project, `/queues/${enc(queue)}/steps/${enc(step)}/commits`), `${usePage().queueVersion(queue) ?? ""}#${tries}`);
   if (!data && error) {
     return toggle
       ? <span className="text-danger" title={t("common.readFailed", { reason: error })}>{t("details.commits")} ✗</span>
@@ -25,6 +27,7 @@ export function StepCommits({ project, queue, step, toggle }: {
   if (!data) return null;
   if (toggle) {
     const n = data.rounds.reduce((k, r) => k + r.commits.length, 0);
+    if (data.unreadable) return <span className="text-danger" title={t("details.commits.unreadable", { reason: data.unreadable })}>{t("details.commits")} ✗</span>;
     return <Fold label={t("details.commitsCount", { count: n })} open={toggle.open} onToggle={toggle.onToggle} />;
   }
   const several = data.rounds.length > 1;
@@ -32,11 +35,12 @@ export function StepCommits({ project, queue, step, toggle }: {
   return (
     <Section title={t("details.commits")} aside={foreign ? <span className="text-xs text-warn/80">◆ {t("details.commits.foreign")}</span> : undefined}>
       <div className="space-y-3">
+        {data.unreadable && <Unreadable text={t("details.commits.unreadable", { reason: data.unreadable })} onRetry={() => setTries((n) => n + 1)} />}
         {data.rounds.map((r, i) => (
           <div key={i}>
             {several && <div className="mb-1 text-xs text-fg-3">{t(r.open ? "details.commits.roundAtWork" : "details.commits.round", { round: i + 1 })}</div>}
             {r.commits.length === 0
-              ? <p className="text-sm text-fg-3">{t(r.open ? "details.commits.noneYet" : "details.commits.none")}</p>
+              ? !data.unreadable && <p className="text-sm text-fg-3">{t(r.open ? "details.commits.noneYet" : "details.commits.none")}</p>
               : (
                 <ul className="space-y-1.5">
                   {r.commits.map((c) => (
@@ -209,7 +213,8 @@ export function WorktreeActions({ project, root, queue }: { project: string; roo
 
 /** The queue's branch: ahead and behind of its base and of its remote-tracking ref (as last fetched: never fetched here). */
 export function BranchLine({ project, queue }: { project: string; queue: string }) {
-  const { data: b, error } = useQuery<BranchView | null>(projectUrl(project, `/queues/${enc(queue)}/git`), usePage().queueVersion(queue));
+  const [tries, setTries] = useState(0);
+  const { data: b, error } = useQuery<BranchView | null>(projectUrl(project, `/queues/${enc(queue)}/git`), `${usePage().queueVersion(queue) ?? ""}#${tries}`);
   if (!b && error) return <div className="mt-3 rounded-lg bg-surface-2 p-3"><span className="text-sm text-fg-3">{t("details.branch")} </span><ReadError error={error} className="inline" /></div>;
   if (!b) return null;
   const counts = (x: { ahead: number; behind: number }) => (
@@ -217,11 +222,12 @@ export function BranchLine({ project, queue }: { project: string; queue: string 
   );
   return (
     <div className="mt-3 space-y-0.5 rounded-lg bg-surface-2 p-3 text-sm text-fg">
-      <p><span className="text-fg-3">{t("details.branch")} </span><span className="font-mono">{b.branch}</span></p>
+      {b.branch && <p><span className="text-fg-3">{t("details.branch")} </span><span className="font-mono">{b.branch}</span></p>}
+      {b.unreadable && <Unreadable className="text-xs" text={t("details.branch.unreadable", { reason: b.unreadable })} onRetry={() => setTries((n) => n + 1)} />}
       {b.base && <p className="text-xs">{counts(b.base)} <span className="text-fg-3">{t("details.branch.ofBase")}</span> <span className="font-mono">{b.base.ref}</span></p>}
       {b.upstream
         ? <p className="text-xs">{counts(b.upstream)} <span className="text-fg-3">{t("details.branch.of")}</span> <span className="font-mono">{b.upstream.ref}</span> <span className="text-fg-3">{b.upstream.at ? rich("details.branch.fetched", { time: <TimeAgo key="time" at={b.upstream.at} /> }) : t("details.branch.fetchedUnknown")}</span></p>
-        : <p className="text-xs text-fg-3">{t("details.branch.noUpstream")}</p>}
+        : !b.unreadable && <p className="text-xs text-fg-3">{t("details.branch.noUpstream")}</p>}
     </div>
   );
 }
