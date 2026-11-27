@@ -525,18 +525,13 @@ ${text}`;
           this.store.appendChat(s.id, { at: now(), from: "nexus", text: `${COMPACTED}${tokens}` });
         },
         turnEnd: (end) => {
-          const compaction = l.compacting;
-          if (compaction) {
-            l.compacting = false;
-            // A compaction that did not happen has its own row, the turn's one.
-            if (!l.compacted) {
-              errors.drop();
-              this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `The conversation was not compacted${end.stopped ? ": stopped" : end.ok ? "" : `: ${end.text}`}.` });
-            } else errors.turnEnd(end);
-          } else {
-            errors.turnEnd(end);
-          }
-          if (!compaction && l.handoff) {
+          // A compaction that did not happen has its own row, the turn's one.
+          if (l.compacting && !l.compacted) {
+            errors.drop();
+            this.store.appendChat(s.id, { at: now(), from: "nexus", kind: "error", text: `The conversation was not compacted${end.stopped ? ": stopped" : end.ok ? "" : `: ${end.text}`}.` });
+          } else errors.turnEnd(end);
+          if (l.compacting) l.compacting = false;
+          else if (l.handoff) {
             l.handoff = false;
             // A stopped hand-over hands nothing over.
             const summary = end.stopped ? "" : reply.trim();
